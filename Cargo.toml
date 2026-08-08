@@ -1,0 +1,10 @@
+[package]
+name = "sage"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+clap = { version = "4.6.6", features = ["derive"] }
+iocraft = "0.8.4"
+lockgate = { git = "https://github.com/luizribeiro/lockgate.git", rev = "49df9e7ec03c1843e73b2338087f9359c540bd3d" }
