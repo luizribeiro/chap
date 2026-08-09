@@ -1,5 +1,5 @@
 use crate::config::{Config, Plugin as PluginConfig};
-use host::{AppState, SETTINGS_INTERFACE};
+use host::{AppState, HTTP_CLIENT_INTERFACE, SETTINGS_INTERFACE};
 use lockgate::Component;
 use std::{collections::BTreeMap, fs, path::Path};
 
@@ -12,26 +12,42 @@ type InnerApplication = lockgate::Application<AppState>;
 type LoadedPlugin = Component<bindings::ProviderPlugin>;
 
 pub(crate) struct Application {
-    _lockgate: InnerApplication,
+    lockgate: InnerApplication,
     plugins: BTreeMap<String, LoadedPlugin>,
 }
 
 impl Application {
     pub(crate) fn load(config: &Config) -> Result<Self, String> {
-        let mut lockgate = lockgate::Application::new(AppState::from_config(config))
+        let mut lockgate = lockgate::Application::new(AppState::from_config(config)?)
             .map_err(|error| format!("failed to create Lockgate application: {error}"))?
             .fuel_per_call(PLUGIN_FUEL_PER_CALL);
         let plugins = Self::load_plugins(&mut lockgate, config)?;
         let lockgate = Self::apply_policy(lockgate, &plugins)?;
 
-        Ok(Self {
-            _lockgate: lockgate,
-            plugins,
-        })
+        Ok(Self { lockgate, plugins })
     }
 
     pub(crate) fn plugin_count(&self) -> usize {
         self.plugins.len()
+    }
+
+    pub(crate) async fn complete(self, provider: &str, prompt: String) -> Result<String, String> {
+        let plugin = self
+            .plugins
+            .get(provider)
+            .copied()
+            .ok_or_else(|| format!("provider plugin `{provider}` is not configured"))?;
+        let runtime = self
+            .lockgate
+            .run()
+            .await
+            .map_err(|error| format!("failed to start plugin runtime: {error}"))?;
+        runtime
+            .component(plugin)
+            .complete(prompt)
+            .await
+            .map_err(|error| format!("provider plugin `{provider}` failed: {error}"))?
+            .map_err(|error| format!("provider plugin `{provider}`: {error}"))
     }
 
     fn load_plugins(
@@ -97,10 +113,13 @@ impl Application {
         mut lockgate: InnerApplication,
         plugins: &BTreeMap<String, LoadedPlugin>,
     ) -> Result<InnerApplication, String> {
-        // TODO: Load per-plugin capability grants from `sage.toml` or a separate policy document
-        // instead of granting every plugin access to settings.
+        // TODO: Move capability policy into Lockgate configuration instead of granting every
+        // plugin the same host imports. HTTP should use `wasi:http`, with Lockgate granting and
+        // enforcing per-plugin URL restrictions.
         for (id, plugin) in plugins {
             lockgate = lockgate
+                .allow_host_import(*plugin, HTTP_CLIENT_INTERFACE)
+                .map_err(|error| format!("failed to configure plugin `{id}`: {error}"))?
                 .allow_host_import(*plugin, SETTINGS_INTERFACE)
                 .map_err(|error| format!("failed to configure plugin `{id}`: {error}"))?;
         }

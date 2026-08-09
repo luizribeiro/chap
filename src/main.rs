@@ -17,8 +17,22 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    // TODO: Remove this provider smoke-test command once completions are driven by the agent's
+    // runtime or user interface.
+    /// Send one prompt through a configured provider.
+    Complete(Complete),
     /// Inspect configured plugins.
     Plugins(Plugins),
+}
+
+#[derive(Debug, Args)]
+struct Complete {
+    /// Configured provider plugin id.
+    #[arg(long, default_value = "openai")]
+    provider: String,
+
+    /// Prompt to send.
+    prompt: String,
 }
 
 #[derive(Debug, Args)]
@@ -35,8 +49,9 @@ enum PluginsCommand {
     List,
 }
 
-fn main() -> ExitCode {
-    match run(Cli::parse()) {
+#[tokio::main]
+async fn main() -> ExitCode {
+    match run(Cli::parse()).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("Error: {error}");
@@ -45,9 +60,16 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: Cli) -> Result<(), String> {
+async fn run(cli: Cli) -> Result<(), String> {
     let config = config::Config::load(&cli.config)?;
     match cli.command {
+        Command::Complete(command) => {
+            let application = application::Application::load(&config)?;
+            let completion = application
+                .complete(&command.provider, command.prompt)
+                .await?;
+            println!("{completion}");
+        }
         Command::Plugins(Plugins {
             command: PluginsCommand::Check,
         }) => {

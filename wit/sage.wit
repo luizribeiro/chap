@@ -4,11 +4,26 @@ interface settings {
   get: async func(key: string) -> option<string>;
 }
 
+interface http-client {
+  record header {
+    name: string,
+    value: string,
+  }
+
+  record response {
+    status: u16,
+    body: string,
+  }
+
+  post: async func(url: string, headers: list<header>, body: string) -> result<response, string>;
+}
+
 interface provider {
   complete: async func(prompt: string) -> result<string, string>;
 }
 
 world provider-plugin {
+  import http-client;
   import settings;
   export provider;
 }

@@ -22,9 +22,9 @@ metadata, and implements SAGE's provider interface with:
 cargo run -- plugins check
 ```
 
-The repository includes a placeholder OpenAI-compatible provider. From the Nix
-development shell, build it from its source directory before checking configured
-plugins:
+The repository includes an OpenAI-compatible Chat Completions provider that uses
+a host-provided HTTP client. From the Nix development shell, build it from its
+source directory before checking configured plugins:
 
 ```console
 cd plugins/openai-compatible
@@ -41,7 +41,11 @@ settings. The key must match the stable plugin id embedded in the component:
 component = "./target/wasm32-wasip3/release/sage_openai_compatible.wasm"
 
 [plugins.openai.settings]
+base-url = "http://127.0.0.1:8080/v1"
 model = "example-model"
+# Optional: the host reads this environment variable without storing its value
+# in sage.toml.
+api-key-env = "OPENAI_API_KEY"
 ```
 
 ## Development
