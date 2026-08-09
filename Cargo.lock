@@ -1579,6 +1579,8 @@ dependencies = [
  "clap",
  "iocraft",
  "lockgate",
+ "serde",
+ "toml",
 ]
 
 [[package]]
