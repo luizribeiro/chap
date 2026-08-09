@@ -15,12 +15,30 @@ cargo run -- plugins list
 
 Use `--config /path/to/sage.toml` to read a different file.
 
+Check that every configured component exists, has matching embedded plugin
+metadata, and implements SAGE's provider interface with:
+
+```console
+cargo run -- plugins check
+```
+
+The repository includes a placeholder OpenAI-compatible provider. From the Nix
+development shell, build it from its source directory before checking configured
+plugins:
+
+```console
+cd plugins/openai-compatible
+cargo build --release -Z build-std=std,panic_abort --target wasm32-wasip3
+cd ../..
+cargo run -- plugins check
+```
+
 Each plugin is keyed by its stable id and maps directly to its component and
-settings:
+settings. The key must match the stable plugin id embedded in the component:
 
 ```toml
 [plugins.openai]
-component = "./plugins/openai-compatible.wasm"
+component = "./target/wasm32-wasip3/release/sage_openai_compatible.wasm"
 
 [plugins.openai.settings]
 model = "example-model"

@@ -37,6 +37,7 @@
             "rustfmt"
           ];
         };
+        wasiSysroot = import ./nix/wasip3-sysroot.nix { inherit pkgs system; };
         rustfmtHook = {
           enable = true;
           packageOverrides = {
@@ -89,6 +90,11 @@
           shellHook = gitHooks.shellHook;
 
           RUST_BACKTRACE = "1";
+          CARGO_TARGET_WASM32_WASIP3_RUSTFLAGS =
+            if wasiSysroot == null then
+              ""
+            else
+              "-Lnative=${wasiSysroot}/lib/wasm32-wasip3 -Clink-arg=${wasiSysroot}/lib/wasm32-wasip3/__cabi_realloc_wrapper.o -Clink-arg=-lc -Clink-arg=--export=__wasm_init_task -Clink-arg=--export=__wasm_init_async_task";
         };
       }
     );

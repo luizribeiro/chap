@@ -1,0 +1,14 @@
+package sage:agent@0.1.0;
+
+interface settings {
+  get: async func(key: string) -> option<string>;
+}
+
+interface provider {
+  complete: async func(prompt: string) -> result<string, string>;
+}
+
+world provider-plugin {
+  import settings;
+  export provider;
+}

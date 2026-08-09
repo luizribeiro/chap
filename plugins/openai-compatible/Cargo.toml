@@ -1,0 +1,11 @@
+[package]
+name = "sage-openai-compatible"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", rev = "49df9e7ec03c1843e73b2338087f9359c540bd3d" }

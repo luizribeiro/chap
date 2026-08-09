@@ -1,6 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 use std::{path::PathBuf, process::ExitCode};
 
+mod application;
 mod config;
 
 #[derive(Debug, Parser)]
@@ -28,6 +29,8 @@ struct Plugins {
 
 #[derive(Debug, Subcommand)]
 enum PluginsCommand {
+    /// Check that configured plugins can be loaded.
+    Check,
     /// List configured plugins.
     List,
 }
@@ -46,6 +49,12 @@ fn run(cli: Cli) -> Result<(), String> {
     let config = config::Config::load(&cli.config)?;
     match cli.command {
         Command::Plugins(Plugins {
+            command: PluginsCommand::Check,
+        }) => {
+            let application = application::Application::load(&config)?;
+            println!("Loaded {} plugin(s).", application.plugin_count());
+        }
+        Command::Plugins(Plugins {
             command: PluginsCommand::List,
         }) => print!("{}", plugin_list(&config)),
     }
@@ -54,10 +63,10 @@ fn run(cli: Cli) -> Result<(), String> {
 
 fn plugin_list(config: &config::Config) -> String {
     let mut output = String::from("ID\tCOMPONENT\n");
-    for (id, component) in config.plugins() {
+    for (id, plugin) in config.plugins() {
         output.push_str(id);
         output.push('\t');
-        output.push_str(&component.to_string_lossy());
+        output.push_str(&plugin.component().to_string_lossy());
         output.push('\n');
     }
     output
