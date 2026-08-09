@@ -1,8 +1,20 @@
 # SAGE
 
-SAGE (Sandboxed Agent with Guarded Extensions) is a coding agent built around
-an iocraft terminal interface and capability-scoped WebAssembly plugins provided
+SAGE (Sandboxed Agent with Guarded Extensions) is a coding agent with a headless
+core, user-facing frontends, and capability-scoped WebAssembly plugins provided
 by Lockgate.
+
+## Workspace
+
+- `crates/sage-core` owns configuration, plugin loading, and the headless agent
+  runtime.
+- `crates/sage-cli` builds the `sage` executable and owns command-line and
+  terminal interaction.
+- `plugins` contains independently compiled WebAssembly components.
+- `wit` contains the application-owned contracts shared by the core and plugins.
+
+The CLI is the default workspace member, so root-level `cargo run` commands keep
+working while other frontends can depend directly on `sage-core`.
 
 ## Plugins
 

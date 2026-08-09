@@ -56,7 +56,8 @@ component = "provider.wasm"
 
 fn provider_component(id: &str) -> Vec<u8> {
     let mut resolve = Resolve::new();
-    let package = resolve.push_path(Path::new("wit")).unwrap().0;
+    let wit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../wit");
+    let package = resolve.push_path(wit).unwrap().0;
     let world = resolve.packages[package].worlds["provider-plugin"];
     let mut module = dummy_module(&resolve, world, ManglingAndAbi::Standard32);
     embed_component_metadata(&mut module, &resolve, world, StringEncoding::UTF8).unwrap();

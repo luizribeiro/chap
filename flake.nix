@@ -59,14 +59,14 @@
               };
               settings = {
                 denyWarnings = true;
-                extraArgs = "--all-targets --locked";
+                extraArgs = "--workspace --all-targets --locked";
                 offline = false;
               };
             };
             cargo-test = {
               enable = true;
               name = "cargo test";
-              entry = "${rust}/bin/cargo test --all-targets --locked";
+              entry = "${rust}/bin/cargo test --workspace --all-targets --locked";
               files = "(^|/)(Cargo\\.toml|.*\\.rs)$";
               pass_filenames = false;
               stages = [ "pre-push" ];

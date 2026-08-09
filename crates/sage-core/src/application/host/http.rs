@@ -1,3 +1,5 @@
+//! Temporary application-owned HTTP transport for provider plugins.
+
 use super::AppState;
 use crate::application::bindings;
 use lockgate::HostContext;

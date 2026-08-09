@@ -11,13 +11,13 @@ const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
 type InnerApplication = lockgate::Application<AppState>;
 type LoadedPlugin = Component<bindings::ProviderPlugin>;
 
-pub(crate) struct Application {
+pub struct Application {
     lockgate: InnerApplication,
     plugins: BTreeMap<String, LoadedPlugin>,
 }
 
 impl Application {
-    pub(crate) fn load(config: &Config) -> Result<Self, String> {
+    pub fn load(config: &Config) -> Result<Self, String> {
         let mut lockgate = lockgate::Application::new(AppState::from_config(config)?)
             .map_err(|error| format!("failed to create Lockgate application: {error}"))?
             .fuel_per_call(PLUGIN_FUEL_PER_CALL);
@@ -27,11 +27,11 @@ impl Application {
         Ok(Self { lockgate, plugins })
     }
 
-    pub(crate) fn plugin_count(&self) -> usize {
+    pub fn plugin_count(&self) -> usize {
         self.plugins.len()
     }
 
-    pub(crate) async fn complete(self, provider: &str, prompt: String) -> Result<String, String> {
+    pub async fn complete(self, provider: &str, prompt: String) -> Result<String, String> {
         let plugin = self
             .plugins
             .get(provider)

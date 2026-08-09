@@ -1,0 +1,15 @@
+[package]
+name = "sage-cli"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "sage"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+iocraft.workspace = true
+sage-core = { path = "../sage-core" }
+tokio.workspace = true

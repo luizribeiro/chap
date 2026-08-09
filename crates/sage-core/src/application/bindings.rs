@@ -1,5 +1,5 @@
 lockgate::bindings! {
-    path: "wit",
+    path: "../../wit",
     worlds: {
         ProviderPlugin: "provider-plugin",
     },

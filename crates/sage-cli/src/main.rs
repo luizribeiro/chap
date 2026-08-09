@@ -1,8 +1,6 @@
 use clap::{Args, Parser, Subcommand};
+use sage_core::{Application, Config};
 use std::{path::PathBuf, process::ExitCode};
-
-mod application;
-mod config;
 
 #[derive(Debug, Parser)]
 #[command(version, about = "A plugin-powered coding agent")]
@@ -61,10 +59,10 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<(), String> {
-    let config = config::Config::load(&cli.config)?;
+    let config = Config::load(&cli.config)?;
     match cli.command {
         Command::Complete(command) => {
-            let application = application::Application::load(&config)?;
+            let application = Application::load(&config)?;
             let completion = application
                 .complete(&command.provider, command.prompt)
                 .await?;
@@ -73,7 +71,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Plugins(Plugins {
             command: PluginsCommand::Check,
         }) => {
-            let application = application::Application::load(&config)?;
+            let application = Application::load(&config)?;
             println!("Loaded {} plugin(s).", application.plugin_count());
         }
         Command::Plugins(Plugins {
@@ -83,7 +81,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     Ok(())
 }
 
-fn plugin_list(config: &config::Config) -> String {
+fn plugin_list(config: &Config) -> String {
     let mut output = String::from("ID\tCOMPONENT\n");
     for (id, plugin) in config.plugins() {
         output.push_str(id);

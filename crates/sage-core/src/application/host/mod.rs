@@ -1,3 +1,5 @@
+//! Host-owned capabilities exposed to admitted plugins.
+
 use crate::config::Config;
 
 mod http;

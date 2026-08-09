@@ -7,7 +7,7 @@ use std::{
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Config {
+pub struct Config {
     #[serde(default)]
     plugins: BTreeMap<String, Plugin>,
     #[serde(skip)]
@@ -16,14 +16,14 @@ pub(crate) struct Config {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Plugin {
+pub struct Plugin {
     component: PathBuf,
     #[serde(default)]
     settings: toml::Table,
 }
 
 impl Config {
-    pub(crate) fn load(path: &Path) -> Result<Self, String> {
+    pub fn load(path: &Path) -> Result<Self, String> {
         let source = fs::read_to_string(path)
             .map_err(|error| format!("failed to read `{}`: {error}", path.display()))?;
         let mut config: Self = toml::from_str(&source)
@@ -32,7 +32,7 @@ impl Config {
         Ok(config)
     }
 
-    pub(crate) fn plugins(&self) -> impl Iterator<Item = (&str, &Plugin)> {
+    pub fn plugins(&self) -> impl Iterator<Item = (&str, &Plugin)> {
         self.plugins
             .iter()
             .map(|(id, plugin)| (id.as_str(), plugin))
@@ -44,7 +44,7 @@ impl Config {
 }
 
 impl Plugin {
-    pub(crate) fn component(&self) -> &Path {
+    pub fn component(&self) -> &Path {
         &self.component
     }
 
