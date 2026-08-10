@@ -236,8 +236,6 @@ impl AgentBuilder {
         config: &Config,
         plugins: &BTreeMap<String, LoadedPlugin>,
     ) -> Result<InnerApplication, String> {
-        // TODO: Let Lockgate configure and enforce URL-scoped WASI HTTP policies instead of
-        // granting unrestricted outbound HTTP.
         for (id, plugin) in plugins {
             let configured = config
                 .plugin(id)
@@ -260,9 +258,9 @@ impl AgentBuilder {
         id: &str,
         component: Component<B>,
     ) -> Result<InnerApplication, String> {
-        if configured.outbound_http() {
+        if !configured.outbound_http().is_empty() {
             lockgate = lockgate
-                .allow_outbound_http(component)
+                .allow_outbound_http(component, configured.outbound_http())
                 .map_err(|error| format!("failed to configure plugin `{id}`: {error}"))?;
         }
         lockgate = lockgate

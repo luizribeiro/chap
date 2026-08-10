@@ -1,6 +1,6 @@
 [plugins.openai]
 component = "./target/wasm32-wasip2/release/sage_openai_compatible.wasm"
-outbound-http = true
+outbound-http = ["http://127.0.0.1:8080"]
 
 [plugins.openai.settings]
 base-url = "http://127.0.0.1:8080/v1"
@@ -8,7 +8,7 @@ model = "Inkling-Small-mxfp4-mtp4"
 
 [plugins.kagi]
 component = "./target/wasm32-wasip2/release/sage_kagi.wasm"
-outbound-http = true
+outbound-http = ["https://kagi.com"]
 
 [plugins.kagi.settings]
 api-key-env = "KAGI_API_KEY"

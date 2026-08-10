@@ -1305,13 +1305,15 @@ dependencies = [
 [[package]]
 name = "lockgate"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?rev=34a0a01a40878dfa41f3a36f25fed72062f1dfb0#34a0a01a40878dfa41f3a36f25fed72062f1dfb0"
+source = "git+https://github.com/luizribeiro/lockgate.git?rev=1acf5a8f89addb2f49cf0df459725df6c5580a54#1acf5a8f89addb2f49cf0df459725df6c5580a54"
 dependencies = [
  "anyhow",
+ "http",
  "lockgate-macros",
  "lockgate-schema",
  "thiserror 2.0.20",
  "tokio",
+ "url",
  "wasmparser 0.255.0",
  "wasmtime",
  "wasmtime-wasi",
@@ -1323,7 +1325,7 @@ dependencies = [
 [[package]]
 name = "lockgate-macros"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?rev=34a0a01a40878dfa41f3a36f25fed72062f1dfb0#34a0a01a40878dfa41f3a36f25fed72062f1dfb0"
+source = "git+https://github.com/luizribeiro/lockgate.git?rev=1acf5a8f89addb2f49cf0df459725df6c5580a54#1acf5a8f89addb2f49cf0df459725df6c5580a54"
 dependencies = [
  "heck",
  "lockgate-schema",
@@ -1339,7 +1341,7 @@ dependencies = [
 [[package]]
 name = "lockgate-plugin"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?rev=34a0a01a40878dfa41f3a36f25fed72062f1dfb0#34a0a01a40878dfa41f3a36f25fed72062f1dfb0"
+source = "git+https://github.com/luizribeiro/lockgate.git?rev=1acf5a8f89addb2f49cf0df459725df6c5580a54#1acf5a8f89addb2f49cf0df459725df6c5580a54"
 dependencies = [
  "lockgate-plugin-macros",
  "wit-bindgen 0.60.0",
@@ -1348,7 +1350,7 @@ dependencies = [
 [[package]]
 name = "lockgate-plugin-macros"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?rev=34a0a01a40878dfa41f3a36f25fed72062f1dfb0#34a0a01a40878dfa41f3a36f25fed72062f1dfb0"
+source = "git+https://github.com/luizribeiro/lockgate.git?rev=1acf5a8f89addb2f49cf0df459725df6c5580a54#1acf5a8f89addb2f49cf0df459725df6c5580a54"
 dependencies = [
  "lockgate-schema",
  "proc-macro-crate",
@@ -1360,7 +1362,7 @@ dependencies = [
 [[package]]
 name = "lockgate-schema"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?rev=34a0a01a40878dfa41f3a36f25fed72062f1dfb0#34a0a01a40878dfa41f3a36f25fed72062f1dfb0"
+source = "git+https://github.com/luizribeiro/lockgate.git?rev=1acf5a8f89addb2f49cf0df459725df6c5580a54#1acf5a8f89addb2f49cf0df459725df6c5580a54"
 dependencies = [
  "anyhow",
  "semver",

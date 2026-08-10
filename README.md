@@ -58,7 +58,7 @@ settings. The key must match the stable plugin id embedded in the component:
 ```toml
 [plugins.openai]
 component = "./target/wasm32-wasip2/release/sage_openai_compatible.wasm"
-outbound-http = true
+outbound-http = ["http://127.0.0.1:8080"]
 
 [plugins.openai.settings]
 base-url = "http://127.0.0.1:8080/v1"
@@ -67,6 +67,10 @@ model = "example-model"
 # in sage.toml.
 api-key-env = "OPENAI_API_KEY"
 ```
+
+`outbound-http` is an allowlist of exact origins. The scheme and effective port are part of the
+policy: `https://api.example.com` allows port 443 only, while a local service on another port must
+be written explicitly, such as `http://127.0.0.1:8080`. Omitting the field denies outbound HTTP.
 
 ## Development
 
