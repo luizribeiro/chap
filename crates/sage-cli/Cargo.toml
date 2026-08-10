@@ -13,3 +13,4 @@ clap.workspace = true
 iocraft.workspace = true
 sage-core = { path = "../sage-core" }
 tokio.workspace = true
+unicode-width.workspace = true

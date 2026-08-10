@@ -1900,6 +1900,7 @@ dependencies = [
  "iocraft",
  "sage-core",
  "tokio",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]

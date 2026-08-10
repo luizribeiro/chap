@@ -3,6 +3,7 @@ mod tui;
 use clap::{Args, Parser, Subcommand};
 use sage_core::SageBuilder;
 use std::{path::PathBuf, process::ExitCode};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Parser)]
 #[command(version, about = "A plugin-powered coding agent")]
@@ -67,21 +68,48 @@ async fn run(cli: Cli) -> Result<(), String> {
 }
 
 fn plugin_list(builder: &SageBuilder) -> Result<String, String> {
-    let mut output = String::from("ID\tROLES\tCOMPONENT\n");
+    let mut rows = Vec::new();
     for (id, component) in builder.plugins() {
         let roles = builder.plugin_roles(id)?;
-        output.push_str(id);
-        output.push('\t');
-        output.push_str(&if roles.is_empty() {
-            "-".to_owned()
-        } else {
-            roles.join(", ")
-        });
-        output.push('\t');
-        output.push_str(&component.to_string_lossy());
-        output.push('\n');
+        rows.push([
+            id.to_owned(),
+            if roles.is_empty() {
+                "-".to_owned()
+            } else {
+                roles.join(", ")
+            },
+            component.to_string_lossy().into_owned(),
+        ]);
     }
-    Ok(output)
+    Ok(render_table(&rows))
+}
+
+fn render_table(rows: &[[String; 3]]) -> String {
+    const HEADERS: [&str; 3] = ["ID", "ROLES", "COMPONENT"];
+
+    let mut widths = HEADERS.map(UnicodeWidthStr::width);
+    for row in rows {
+        for (index, cell) in row.iter().enumerate() {
+            widths[index] = widths[index].max(UnicodeWidthStr::width(cell.as_str()));
+        }
+    }
+
+    let mut output = String::new();
+    push_row(&mut output, HEADERS, widths);
+    for row in rows {
+        push_row(&mut output, row.each_ref().map(String::as_str), widths);
+    }
+    output
+}
+
+fn push_row(output: &mut String, row: [&str; 3], widths: [usize; 3]) {
+    for (index, cell) in row.into_iter().enumerate() {
+        output.push_str(cell);
+        if index < row.len() - 1 {
+            output.push_str(&" ".repeat(widths[index] - UnicodeWidthStr::width(cell) + 2));
+        }
+    }
+    output.push('\n');
 }
 
 #[cfg(test)]
@@ -105,5 +133,20 @@ mod tests {
                 command: PluginsCommand::List
             }))
         ));
+    }
+
+    #[test]
+    fn aligns_plugin_table_columns() {
+        let rows = [
+            ["short".into(), "provider".into(), "one.wasm".into()],
+            ["much-longer".into(), "-".into(), "two.wasm".into()],
+        ];
+
+        assert_eq!(
+            render_table(&rows),
+            "ID           ROLES     COMPONENT\n\
+             short        provider  one.wasm\n\
+             much-longer  -         two.wasm\n"
+        );
     }
 }
