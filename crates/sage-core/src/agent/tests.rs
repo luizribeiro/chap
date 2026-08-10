@@ -238,15 +238,20 @@ async fn applies_steering_before_the_next_provider_request() {
 }
 
 #[tokio::test]
-async fn interrupts_an_in_flight_provider_request_and_discards_steering() {
+async fn preserves_interrupted_input_for_the_next_provider_request() {
     let manager = SessionManager::new();
     let state = manager
         .create(SessionOptions::new("test-provider"))
         .unwrap();
     let mut events = state.subscribe();
-    let backend = Arc::new(PausedBackend::new([ProviderCompletion {
-        content: vec![AssistantContent::Text("too late".to_owned())],
-    }]));
+    let backend = Arc::new(PausedBackend::new([
+        ProviderCompletion {
+            content: vec![AssistantContent::Text("too late".to_owned())],
+        },
+        ProviderCompletion {
+            content: vec![AssistantContent::Text("welcome back".to_owned())],
+        },
+    ]));
     let first_request = backend.first_request.notified();
     let run_state = Arc::clone(&state);
     let run_backend = Arc::clone(&backend);
@@ -286,6 +291,25 @@ async fn interrupts_an_in_flight_provider_request_and_discards_steering() {
         *state.messages.read().await,
         [Message::User("hello".to_owned())]
     );
+
+    assert_eq!(
+        run_agent_loop(
+            &state,
+            "ops".to_owned(),
+            &ToolRegistry::new(),
+            backend.as_ref(),
+        )
+        .await
+        .unwrap(),
+        "welcome back"
+    );
+    let requests = backend.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(matches!(
+        requests[1].as_slice(),
+        [Message::User(interrupted), Message::User(next)]
+            if interrupted == "hello" && next == "ops"
+    ));
 }
 
 #[tokio::test]
