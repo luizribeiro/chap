@@ -5,10 +5,11 @@ use std::sync::Arc;
 
 #[component]
 pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
-    let (runtime, provider) = {
+    let (runtime, session) = {
         let context = hooks.use_context::<TuiContext>();
-        (Arc::clone(&context.runtime), context.provider.clone())
+        (Arc::clone(&context.runtime), context.session.clone())
     };
+    let provider = session.provider().to_owned();
     let mut system = hooks.use_context_mut::<SystemContext>();
     let mut input = hooks.use_state(String::new);
     let mut messages = hooks.use_state(Vec::<ChatMessage>::new);
@@ -17,12 +18,11 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let (terminal_width, terminal_height) = hooks.use_terminal_size();
 
     let complete = hooks.use_async_handler({
-        let provider = provider.clone();
         move |prompt: String| {
             let runtime = Arc::clone(&runtime);
-            let provider = provider.clone();
+            let session = session.clone();
             async move {
-                let message = match runtime.complete(&provider, prompt).await {
+                let message = match runtime.run_turn(&session, prompt).await {
                     Ok(completion) => ChatMessage::sage(completion),
                     Err(error) => ChatMessage::error(error),
                 };

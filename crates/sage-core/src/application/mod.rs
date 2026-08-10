@@ -132,11 +132,6 @@ impl Application {
 }
 
 impl Runtime {
-    pub async fn complete(&self, provider: &str, prompt: String) -> Result<String, String> {
-        self.request_completion(provider, vec![Message::User(prompt)])
-            .await
-    }
-
     pub fn create_session(&self, options: SessionOptions) -> Result<Session, String> {
         if !self.plugins.contains_key(&options.provider) {
             return Err(format!(

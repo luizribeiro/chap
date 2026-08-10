@@ -4,14 +4,14 @@ mod model;
 use components::Sage;
 use iocraft::prelude::*;
 use model::ChatMessage;
-use sage_core::{Application, Runtime};
+use sage_core::{Application, Runtime, Session, SessionOptions};
 use std::{io::IsTerminal, sync::Arc};
 
 const PROVIDER: &str = "openai";
 
 struct TuiContext {
     runtime: Arc<Runtime>,
-    provider: String,
+    session: Session,
 }
 
 pub async fn run(application: Application) -> Result<(), String> {
@@ -20,10 +20,11 @@ pub async fn run(application: Application) -> Result<(), String> {
     }
 
     let runtime = Arc::new(application.run().await?);
+    let session = runtime.create_session(SessionOptions::new(PROVIDER))?;
     let mut element = element! {
         ContextProvider(value: Context::owned(TuiContext {
             runtime,
-            provider: PROVIDER.to_owned(),
+            session,
         })) {
             Sage
         }
