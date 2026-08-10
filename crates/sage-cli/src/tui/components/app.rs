@@ -1,6 +1,6 @@
 use super::{Footer, Header, Prompt, Transcript};
 use crate::tui::{
-    ChatMessage, TuiContext,
+    ChatMessage, TuiContext, editor,
     model::{TranscriptModel, apply_event},
 };
 use iocraft::prelude::*;
@@ -14,6 +14,7 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let mut transcript = hooks.use_state(TranscriptModel::default);
     let mut busy = hooks.use_state(|| false);
     let mut terminal_has_focus = hooks.use_state(|| true);
+    let mut editor_requested = hooks.use_state(|| false);
     let mut should_exit = hooks.use_state(|| false);
     let (terminal_width, terminal_height) = hooks.use_terminal_size();
 
@@ -66,6 +67,9 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
                 KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
                     should_exit.set(true);
                 }
+                KeyCode::Char('g') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    editor_requested.set(true);
+                }
                 KeyCode::Esc => {
                     let _ = session.interrupt();
                 }
@@ -86,6 +90,15 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
             _ => {}
         }
     });
+
+    if editor_requested.get() {
+        editor_requested.set(false);
+        let draft = input.to_string();
+        system.suspend_terminal(move || match editor::edit(&draft) {
+            Ok(edited) => input.set(edited),
+            Err(error) => transcript.write().messages.push(ChatMessage::error(error)),
+        });
+    }
 
     if should_exit.get() {
         system.exit();

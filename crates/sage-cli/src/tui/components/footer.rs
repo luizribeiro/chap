@@ -9,9 +9,9 @@ pub struct FooterProps {
 #[component]
 pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
     let controls = if props.busy {
-        "enter steer  •  esc interrupt  •  ctrl+d quit"
+        "enter steer  •  ctrl+g editor  •  esc interrupt  •  ctrl+d quit"
     } else {
-        "enter send  •  ctrl+d quit"
+        "enter send  •  ctrl+g editor  •  ctrl+d quit"
     };
 
     element! {
