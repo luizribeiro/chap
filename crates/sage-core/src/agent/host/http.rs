@@ -1,7 +1,7 @@
-//! Temporary application-owned HTTP transport for provider plugins.
+//! Temporary agent-owned HTTP transport for provider plugins.
 
 use super::AppState;
-use crate::application::bindings;
+use crate::agent::bindings;
 use lockgate::HostContext;
 use reqwest::{header::HeaderMap, redirect::Policy};
 use std::time::Duration;

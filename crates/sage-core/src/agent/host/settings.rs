@@ -1,7 +1,7 @@
 //! Namespaced plugin settings and environment-backed secret resolution.
 
 use super::AppState;
-use crate::{application::bindings, config::Config};
+use crate::{agent::bindings, config::Config};
 use lockgate::HostContext;
 use std::{collections::BTreeMap, env};
 
