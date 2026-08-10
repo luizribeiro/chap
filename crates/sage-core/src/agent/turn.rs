@@ -1,6 +1,7 @@
 use super::{MAX_PROVIDER_STEPS_PER_TURN, provider::CompletionBackend};
 use crate::{
-    AssistantContent, Message, ToolCall, ToolResult, session::SessionState, tool::ToolRegistry,
+    session::{AssistantContent, Message, SessionState, ToolCall, ToolResult},
+    tool::ToolRegistry,
 };
 
 pub(super) async fn run_agent_loop(

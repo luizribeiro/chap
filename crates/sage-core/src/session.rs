@@ -9,7 +9,7 @@ use tokio::sync::{Mutex as AsyncMutex, RwLock};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Message {
+pub(crate) enum Message {
     System(String),
     User(String),
     Assistant(Vec<AssistantContent>),
@@ -17,25 +17,25 @@ pub enum Message {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AssistantContent {
+pub(crate) enum AssistantContent {
     Text(String),
     ToolCall(ToolCall),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ToolCall {
-    pub id: String,
-    pub name: String,
+pub(crate) struct ToolCall {
+    pub(crate) id: String,
+    pub(crate) name: String,
     /// JSON encoded arguments supplied by the provider.
-    pub arguments: String,
+    pub(crate) arguments: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ToolResult {
-    pub call_id: String,
-    pub name: String,
-    pub output: String,
-    pub is_error: bool,
+pub(crate) struct ToolResult {
+    pub(crate) call_id: String,
+    pub(crate) name: String,
+    pub(crate) output: String,
+    pub(crate) is_error: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -84,10 +84,6 @@ impl Session {
 
     pub fn provider(&self) -> &str {
         &self.state.provider
-    }
-
-    pub async fn history(&self) -> Vec<Message> {
-        self.state.messages.read().await.clone()
     }
 
     pub async fn send(&self, input: impl Into<String>) -> Result<String, String> {

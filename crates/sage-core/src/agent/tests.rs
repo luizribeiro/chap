@@ -4,8 +4,9 @@ use super::{
     turn::run_agent_loop,
 };
 use crate::{
-    AssistantContent, Message, SessionOptions, Tool, ToolCall, ToolDefinition,
-    session::SessionManager, tool::ToolRegistry,
+    SessionOptions, Tool, ToolDefinition,
+    session::{AssistantContent, Message, SessionManager, ToolCall},
+    tool::ToolRegistry,
 };
 use std::{collections::VecDeque, fs, path::Path, sync::Mutex, time::SystemTime};
 use wit_component::{ComponentEncoder, StringEncoding, dummy_module, embed_component_metadata};

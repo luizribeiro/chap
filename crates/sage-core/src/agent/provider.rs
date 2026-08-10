@@ -1,5 +1,8 @@
 use super::{AgentInner, bindings};
-use crate::{AssistantContent, Message, ToolCall, ToolDefinition};
+use crate::{
+    ToolDefinition,
+    session::{AssistantContent, Message, ToolCall},
+};
 use bindings::__lockgate_world_0::exports::sage::agent::provider as provider_bindings;
 use std::{future::Future, pin::Pin};
 
