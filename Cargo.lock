@@ -906,6 +906,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "html-escape"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9356095b4b41197bba32173600e1582792cda618f65d12f68e2e77d273413c5"
+
+[[package]]
 name = "http"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1780,6 +1786,20 @@ dependencies = [
  "wasmtime",
  "wit-component 0.255.0",
  "wit-parser 0.255.0",
+]
+
+[[package]]
+name = "sage-kagi"
+version = "0.1.0"
+dependencies = [
+ "html-escape",
+ "http",
+ "http-body-util",
+ "lockgate-plugin",
+ "serde",
+ "serde_json",
+ "url",
+ "wasi-fetch",
 ]
 
 [[package]]

@@ -2,6 +2,7 @@
 members = [
     "crates/sage-cli",
     "crates/sage-core",
+    "plugins/kagi",
     "plugins/openai-compatible",
 ]
 default-members = ["crates/sage-cli"]
