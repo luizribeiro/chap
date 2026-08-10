@@ -11,22 +11,25 @@ mod bindings {
     });
 }
 
-use bindings::exports::sage::agent::provider::Guest;
+use bindings::exports::sage::agent::provider::{
+    CompletionRequest, Guest, Message as ProviderMessage,
+};
 use bindings::sage::agent::{http_client, settings};
 use serde::{Deserialize, Serialize};
 
 struct OpenAiCompatible;
 
 impl Guest for OpenAiCompatible {
-    fn complete(prompt: String) -> Result<String, String> {
+    fn complete(request: CompletionRequest) -> Result<String, String> {
         let base_url = required_setting("base-url")?;
         let model = required_setting("model")?;
         let request = serde_json::to_string(&Request {
             model,
-            messages: vec![Message {
-                role: "user",
-                content: prompt,
-            }],
+            messages: request
+                .messages
+                .into_iter()
+                .map(ChatCompletionMessage::from)
+                .collect(),
             stream: false,
         })
         .map_err(|error| format!("failed to encode OpenAI-compatible request: {error}"))?;
@@ -82,14 +85,41 @@ fn parse_response(status: u16, body: &str) -> Result<String, String> {
 #[derive(Serialize)]
 struct Request {
     model: String,
-    messages: Vec<Message>,
+    messages: Vec<ChatCompletionMessage>,
     stream: bool,
 }
 
 #[derive(Serialize)]
-struct Message {
-    role: &'static str,
+struct ChatCompletionMessage {
+    role: MessageRole,
     content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+enum MessageRole {
+    System,
+    User,
+    Assistant,
+}
+
+impl From<ProviderMessage> for ChatCompletionMessage {
+    fn from(message: ProviderMessage) -> Self {
+        match message {
+            ProviderMessage::System(content) => Self {
+                role: MessageRole::System,
+                content,
+            },
+            ProviderMessage::User(content) => Self {
+                role: MessageRole::User,
+                content,
+            },
+            ProviderMessage::Assistant(content) => Self {
+                role: MessageRole::Assistant,
+                content,
+            },
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -146,6 +176,23 @@ mod tests {
             error,
             "OpenAI-compatible server returned no completion choices"
         );
+    }
+
+    #[test]
+    fn encodes_complete_conversation_history() {
+        let messages = vec![
+            ProviderMessage::System("be concise".to_owned()),
+            ProviderMessage::User("hello".to_owned()),
+            ProviderMessage::Assistant("hi".to_owned()),
+        ]
+        .into_iter()
+        .map(ChatCompletionMessage::from)
+        .collect::<Vec<_>>();
+
+        let encoded = serde_json::to_value(messages).unwrap();
+        assert_eq!(encoded[0]["role"], "system");
+        assert_eq!(encoded[1]["role"], "user");
+        assert_eq!(encoded[2]["role"], "assistant");
     }
 }
 

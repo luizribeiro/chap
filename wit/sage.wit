@@ -19,7 +19,17 @@ interface http-client {
 }
 
 interface provider {
-  complete: async func(prompt: string) -> result<string, string>;
+  variant message {
+    system(string),
+    user(string),
+    assistant(string),
+  }
+
+  record completion-request {
+    messages: list<message>,
+  }
+
+  complete: async func(request: completion-request) -> result<string, string>;
 }
 
 world provider-plugin {

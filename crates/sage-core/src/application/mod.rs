@@ -1,4 +1,6 @@
 use crate::config::{Config, Plugin as PluginConfig};
+use crate::session::{Message, Session, SessionId, SessionManager, SessionOptions};
+use bindings::__lockgate_world_0::exports::sage::agent::provider as provider_bindings;
 use host::{AppState, HTTP_CLIENT_INTERFACE, SETTINGS_INTERFACE};
 use lockgate::Component;
 use std::{collections::BTreeMap, fs, path::Path};
@@ -20,6 +22,7 @@ pub struct Application {
 pub struct Runtime {
     lockgate: InnerRuntime,
     plugins: BTreeMap<String, LoadedPlugin>,
+    sessions: SessionManager,
 }
 
 impl Application {
@@ -46,6 +49,7 @@ impl Application {
         Ok(Runtime {
             lockgate,
             plugins: self.plugins,
+            sessions: SessionManager::new(),
         })
     }
 
@@ -129,6 +133,57 @@ impl Application {
 
 impl Runtime {
     pub async fn complete(&self, provider: &str, prompt: String) -> Result<String, String> {
+        self.request_completion(provider, vec![Message::User(prompt)])
+            .await
+    }
+
+    pub fn create_session(&self, options: SessionOptions) -> Result<Session, String> {
+        if !self.plugins.contains_key(&options.provider) {
+            return Err(format!(
+                "provider plugin `{}` is not configured",
+                options.provider
+            ));
+        }
+        self.sessions.create(options)
+    }
+
+    pub fn session(&self, id: SessionId) -> Option<Session> {
+        self.sessions.get(id)
+    }
+
+    pub async fn run_turn(&self, session: &Session, input: String) -> Result<String, String> {
+        if !self.sessions.owns(session) {
+            return Err("session does not belong to this runtime".to_owned());
+        }
+        if input.trim().is_empty() {
+            return Err("turn input cannot be empty".to_owned());
+        }
+
+        let _turn = session.state.turn_lock.lock().await;
+        session
+            .state
+            .messages
+            .write()
+            .await
+            .push(Message::User(input));
+        let messages = session.state.messages.read().await.clone();
+        let completion = self
+            .request_completion(session.provider(), messages)
+            .await?;
+        session
+            .state
+            .messages
+            .write()
+            .await
+            .push(Message::Assistant(completion.clone()));
+        Ok(completion)
+    }
+
+    async fn request_completion(
+        &self,
+        provider: &str,
+        messages: Vec<Message>,
+    ) -> Result<String, String> {
         let plugin = self
             .plugins
             .get(provider)
@@ -136,10 +191,22 @@ impl Runtime {
             .ok_or_else(|| format!("provider plugin `{provider}` is not configured"))?;
         self.lockgate
             .component(plugin)
-            .complete(prompt)
+            .complete(provider_bindings::CompletionRequest {
+                messages: messages.into_iter().map(Into::into).collect(),
+            })
             .await
             .map_err(|error| format!("provider plugin `{provider}` failed: {error}"))?
             .map_err(|error| format!("provider plugin `{provider}`: {error}"))
+    }
+}
+
+impl From<Message> for provider_bindings::Message {
+    fn from(message: Message) -> Self {
+        match message {
+            Message::System(content) => Self::System(content),
+            Message::User(content) => Self::User(content),
+            Message::Assistant(content) => Self::Assistant(content),
+        }
     }
 }
 

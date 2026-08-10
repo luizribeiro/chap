@@ -8,7 +8,9 @@ publish.workspace = true
 lockgate.workspace = true
 reqwest.workspace = true
 serde.workspace = true
+tokio.workspace = true
 toml.workspace = true
+uuid.workspace = true
 wasmtime.workspace = true
 
 [dev-dependencies]
