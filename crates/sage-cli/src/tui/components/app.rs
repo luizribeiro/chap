@@ -1,6 +1,6 @@
 use super::{Footer, Header, Prompt, Transcript};
 use crate::tui::{
-    ChatMessage, TuiContext, editor,
+    ChatMessage, TuiContext,
     model::{TranscriptModel, apply_event},
 };
 use iocraft::prelude::*;
@@ -10,11 +10,8 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let session = hooks.use_context::<TuiContext>().session.clone();
     let provider = session.provider().to_owned();
     let mut system = hooks.use_context_mut::<SystemContext>();
-    let mut input = hooks.use_state(String::new);
     let mut transcript = hooks.use_state(TranscriptModel::default);
     let mut busy = hooks.use_state(|| false);
-    let mut terminal_has_focus = hooks.use_state(|| true);
-    let mut editor_requested = hooks.use_state(|| false);
     let mut should_exit = hooks.use_state(|| false);
     let (terminal_width, terminal_height) = hooks.use_terminal_size();
 
@@ -55,50 +52,28 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
 
     hooks.use_terminal_events({
         let session = session.clone();
-        move |event| match event {
-            TerminalEvent::FocusGained => terminal_has_focus.set(true),
-            TerminalEvent::FocusLost => terminal_has_focus.set(false),
-            TerminalEvent::Key(KeyEvent {
+        move |event| {
+            let TerminalEvent::Key(KeyEvent {
                 code,
                 kind: KeyEventKind::Press,
                 modifiers,
                 ..
-            }) => match code {
+            }) = event
+            else {
+                return;
+            };
+
+            match code {
                 KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
                     should_exit.set(true);
-                }
-                KeyCode::Char('g') if modifiers.contains(KeyModifiers::CONTROL) => {
-                    editor_requested.set(true);
                 }
                 KeyCode::Esc => {
                     let _ = session.interrupt();
                 }
-                KeyCode::Enter => {
-                    let prompt = input.read().trim().to_owned();
-                    if prompt.is_empty() {
-                        return;
-                    }
-
-                    input.set(String::new());
-                    if session.steer(prompt.clone()).is_err() {
-                        busy.set(true);
-                        send(prompt);
-                    }
-                }
                 _ => {}
-            },
-            _ => {}
+            }
         }
     });
-
-    if editor_requested.get() {
-        editor_requested.set(false);
-        let draft = input.to_string();
-        system.suspend_terminal(move || match editor::edit(&draft) {
-            Ok(edited) => input.set(edited),
-            Err(error) => transcript.write().messages.push(ChatMessage::error(error)),
-        });
-    }
 
     if should_exit.get() {
         system.exit();
@@ -121,9 +96,21 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
                 },
             )
             Prompt(
-                has_focus: terminal_has_focus.get(),
-                value: input.to_string(),
-                on_change: move |value| input.set(value),
+                on_submit: {
+                    let session = session.clone();
+                    let send = send.clone();
+                    move |prompt: String| {
+                        if session.steer(prompt.clone()).is_err() {
+                            let mut busy = busy;
+                            busy.set(true);
+                            send(prompt);
+                        }
+                    }
+                },
+                on_error: move |error| {
+                    let mut transcript = transcript;
+                    transcript.write().messages.push(ChatMessage::error(error));
+                },
             )
             Footer(busy: busy.get())
         }
