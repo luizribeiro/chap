@@ -192,7 +192,12 @@ impl Session {
     }
 
     pub async fn send(&self, input: impl Into<String>) -> Result<String, String> {
-        self.executor.send(self, input.into()).await
+        let session = self.clone();
+        let executor = Arc::clone(&self.executor);
+        let input = input.into();
+        tokio::spawn(async move { executor.send(&session, input).await })
+            .await
+            .map_err(|error| format!("session run task failed: {error}"))?
     }
 
     pub fn steer(&self, input: impl Into<String>) -> Result<SteeringId, String> {
@@ -447,12 +452,32 @@ impl Drop for ActiveRun<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+    use tokio::{sync::Notify, time::timeout};
 
     struct EchoExecutor;
 
     impl SessionExecutor for EchoExecutor {
         fn send<'a>(&'a self, _session: &'a Session, input: String) -> SessionFuture<'a> {
             Box::pin(async move { Ok(input) })
+        }
+    }
+
+    #[derive(Default)]
+    struct ControlledExecutor {
+        started: Notify,
+        release: Notify,
+        completed: Notify,
+    }
+
+    impl SessionExecutor for ControlledExecutor {
+        fn send<'a>(&'a self, _session: &'a Session, input: String) -> SessionFuture<'a> {
+            Box::pin(async move {
+                self.started.notify_one();
+                self.release.notified().await;
+                self.completed.notify_one();
+                Ok(input)
+            })
         }
     }
 
@@ -477,6 +502,24 @@ mod tests {
         let session = Session::new(state, Arc::new(EchoExecutor));
 
         assert_eq!(session.send("hello").await.unwrap(), "hello");
+    }
+
+    #[tokio::test]
+    async fn session_runs_outlive_their_callers() {
+        let manager = SessionManager::new();
+        let state = manager.create(SessionOptions::new("provider")).unwrap();
+        let executor = Arc::new(ControlledExecutor::default());
+        let session = Session::new(state, executor.clone());
+
+        let caller = tokio::spawn(async move { session.send("hello").await });
+        executor.started.notified().await;
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+
+        executor.release.notify_one();
+        timeout(Duration::from_secs(1), executor.completed.notified())
+            .await
+            .expect("session run should continue after its caller is cancelled");
     }
 
     #[tokio::test]
