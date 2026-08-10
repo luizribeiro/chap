@@ -35,7 +35,7 @@ pub enum MessageRole {
 pub struct ToolMessage {
     pub call_id: String,
     pub name: String,
-    pub arguments: String,
+    pub arguments: Arc<str>,
     pub state: ToolState,
 }
 
@@ -45,7 +45,7 @@ pub enum ToolState {
     Requested,
     Running,
     Interrupted,
-    Finished(Result<String, String>),
+    Finished(Result<Arc<str>, Arc<str>>),
 }
 
 impl ChatMessage {
@@ -78,7 +78,7 @@ impl ChatMessage {
         Self::Tool(ToolMessage {
             call_id,
             name,
-            arguments,
+            arguments: arguments.into(),
             state,
         })
     }
@@ -132,7 +132,7 @@ pub(super) fn apply_event(
         } => {
             if let Some(tool) = tool_mut(&mut transcript.messages, &call_id) {
                 tool.name = name;
-                tool.arguments = arguments;
+                tool.arguments = arguments.into();
                 tool.state = ToolState::Running;
             } else {
                 transcript.messages.push(ChatMessage::tool(
@@ -151,13 +151,13 @@ pub(super) fn apply_event(
         } => {
             if let Some(tool) = tool_mut(&mut transcript.messages, &call_id) {
                 tool.name = name;
-                tool.state = ToolState::Finished(result);
+                tool.state = ToolState::Finished(shared_result(result));
             } else {
                 transcript.messages.push(ChatMessage::tool(
                     call_id,
                     name,
                     String::new(),
-                    ToolState::Finished(result),
+                    ToolState::Finished(shared_result(result)),
                 ));
             }
             None
@@ -206,6 +206,10 @@ fn tool_mut<'a>(messages: &'a mut [ChatMessage], call_id: &str) -> Option<&'a mu
         ChatMessage::Tool(tool) if tool.call_id == call_id => Some(tool),
         _ => None,
     })
+}
+
+fn shared_result(result: Result<String, String>) -> Result<Arc<str>, Arc<str>> {
+    result.map(Into::into).map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -264,7 +268,7 @@ mod tests {
                     "call-1".to_owned(),
                     "echo".to_owned(),
                     r#"{"message":"hello"}"#.to_owned(),
-                    ToolState::Finished(Ok("hello".to_owned())),
+                    ToolState::Finished(Ok(Arc::from("hello"))),
                 ),
                 ChatMessage::sage("done".to_owned()),
             ]
