@@ -204,14 +204,18 @@ impl Runtime {
             .get(provider)
             .copied()
             .ok_or_else(|| format!("provider plugin `{provider}` is not configured"))?;
-        self.lockgate
+        let completion = self
+            .lockgate
             .component(plugin)
             .complete(provider_bindings::CompletionRequest {
                 messages: messages.into_iter().map(Into::into).collect(),
+                // Tool definitions are wired into the request when the execution loop lands.
+                tools: Vec::new(),
             })
             .await
             .map_err(|error| format!("provider plugin `{provider}` failed: {error}"))?
-            .map_err(|error| format!("provider plugin `{provider}`: {error}"))
+            .map_err(|error| format!("provider plugin `{provider}`: {error}"))?;
+        completion_text(completion)
     }
 }
 
@@ -220,9 +224,29 @@ impl From<Message> for provider_bindings::Message {
         match message {
             Message::System(content) => Self::System(content),
             Message::User(content) => Self::User(content),
-            Message::Assistant(content) => Self::Assistant(content),
+            Message::Assistant(content) => {
+                Self::Assistant(vec![provider_bindings::AssistantContent::Text(content)])
+            }
         }
     }
+}
+
+fn completion_text(completion: provider_bindings::Completion) -> Result<String, String> {
+    let mut text = Vec::new();
+    for content in completion.content {
+        match content {
+            provider_bindings::AssistantContent::Text(content) => text.push(content),
+            provider_bindings::AssistantContent::ToolCall(_) => {
+                return Err(
+                    "provider requested a tool, but tool execution is not enabled".to_owned(),
+                );
+            }
+        }
+    }
+    if text.is_empty() {
+        return Err("provider returned a completion without text".to_owned());
+    }
+    Ok(text.join("\n"))
 }
 
 #[cfg(test)]
