@@ -1,3 +1,5 @@
+mod tui;
+
 use clap::{Args, Parser, Subcommand};
 use sage_core::{Application, Config};
 use std::{path::PathBuf, process::ExitCode};
@@ -10,27 +12,13 @@ struct Cli {
     config: PathBuf,
 
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    // TODO: Remove this provider smoke-test command once completions are driven by the agent's
-    // runtime or user interface.
-    /// Send one prompt through a configured provider.
-    Complete(Complete),
     /// Inspect configured plugins.
     Plugins(Plugins),
-}
-
-#[derive(Debug, Args)]
-struct Complete {
-    /// Configured provider plugin id.
-    #[arg(long, default_value = "openai")]
-    provider: String,
-
-    /// Prompt to send.
-    prompt: String,
 }
 
 #[derive(Debug, Args)]
@@ -61,22 +49,19 @@ async fn main() -> ExitCode {
 async fn run(cli: Cli) -> Result<(), String> {
     let config = Config::load(&cli.config)?;
     match cli.command {
-        Command::Complete(command) => {
+        None => {
             let application = Application::load(&config)?;
-            let completion = application
-                .complete(&command.provider, command.prompt)
-                .await?;
-            println!("{completion}");
+            tui::run(application).await?;
         }
-        Command::Plugins(Plugins {
+        Some(Command::Plugins(Plugins {
             command: PluginsCommand::Check,
-        }) => {
+        })) => {
             let application = Application::load(&config)?;
             println!("Loaded {} plugin(s).", application.plugin_count());
         }
-        Command::Plugins(Plugins {
+        Some(Command::Plugins(Plugins {
             command: PluginsCommand::List,
-        }) => print!("{}", plugin_list(&config)),
+        })) => print!("{}", plugin_list(&config)),
     }
     Ok(())
 }
@@ -90,4 +75,28 @@ fn plugin_list(config: &Config) -> String {
         output.push('\n');
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn starts_the_tui_when_no_subcommand_is_given() {
+        let cli = Cli::try_parse_from(["sage"]).unwrap();
+
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn still_parses_plugin_commands() {
+        let cli = Cli::try_parse_from(["sage", "plugins", "list"]).unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Plugins(Plugins {
+                command: PluginsCommand::List
+            }))
+        ));
+    }
 }

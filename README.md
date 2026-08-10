@@ -16,6 +16,13 @@ by Lockgate.
 The CLI is the default workspace member, so root-level `cargo run` commands keep
 working while other frontends can depend directly on `sage-core`.
 
+Running SAGE without a subcommand opens its terminal interface using the
+configured `openai` provider:
+
+```console
+cargo run
+```
+
 ## Plugins
 
 Plugins and their configuration live in `sage.toml`. List the configured

@@ -9,10 +9,16 @@ mod host;
 const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
 
 type InnerApplication = lockgate::Application<AppState>;
+type InnerRuntime = lockgate::Runtime<AppState>;
 type LoadedPlugin = Component<bindings::ProviderPlugin>;
 
 pub struct Application {
     lockgate: InnerApplication,
+    plugins: BTreeMap<String, LoadedPlugin>,
+}
+
+pub struct Runtime {
+    lockgate: InnerRuntime,
     plugins: BTreeMap<String, LoadedPlugin>,
 }
 
@@ -31,23 +37,16 @@ impl Application {
         self.plugins.len()
     }
 
-    pub async fn complete(self, provider: &str, prompt: String) -> Result<String, String> {
-        let plugin = self
-            .plugins
-            .get(provider)
-            .copied()
-            .ok_or_else(|| format!("provider plugin `{provider}` is not configured"))?;
-        let runtime = self
+    pub async fn run(self) -> Result<Runtime, String> {
+        let lockgate = self
             .lockgate
             .run()
             .await
             .map_err(|error| format!("failed to start plugin runtime: {error}"))?;
-        runtime
-            .component(plugin)
-            .complete(prompt)
-            .await
-            .map_err(|error| format!("provider plugin `{provider}` failed: {error}"))?
-            .map_err(|error| format!("provider plugin `{provider}`: {error}"))
+        Ok(Runtime {
+            lockgate,
+            plugins: self.plugins,
+        })
     }
 
     fn load_plugins(
@@ -125,6 +124,22 @@ impl Application {
         }
 
         Ok(lockgate)
+    }
+}
+
+impl Runtime {
+    pub async fn complete(&self, provider: &str, prompt: String) -> Result<String, String> {
+        let plugin = self
+            .plugins
+            .get(provider)
+            .copied()
+            .ok_or_else(|| format!("provider plugin `{provider}` is not configured"))?;
+        self.lockgate
+            .component(plugin)
+            .complete(prompt)
+            .await
+            .map_err(|error| format!("provider plugin `{provider}` failed: {error}"))?
+            .map_err(|error| format!("provider plugin `{provider}`: {error}"))
     }
 }
 
