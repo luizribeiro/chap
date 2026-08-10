@@ -95,6 +95,11 @@
               ""
             else
               "-Lnative=${wasiSysroot}/lib/wasm32-wasip3 -Clink-arg=${wasiSysroot}/lib/wasm32-wasip3/__cabi_realloc_wrapper.o -Clink-arg=-lc -Clink-arg=--export=__wasm_init_task -Clink-arg=--export=__wasm_init_async_task";
+          CARGO_TARGET_WASM32_WASIP2_RUSTFLAGS =
+            if wasiSysroot == null then
+              ""
+            else
+              "-Lnative=${wasiSysroot.sdk}/share/wasi-sysroot/lib/wasm32-wasip2";
         };
       }
     );

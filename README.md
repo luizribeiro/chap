@@ -42,12 +42,12 @@ cargo run -- plugins check
 ```
 
 The repository includes an OpenAI-compatible Chat Completions provider that uses
-a host-provided HTTP client. From the Nix development shell, build it from its
+WASI HTTP. From the Nix development shell, build it from its
 source directory before checking configured plugins:
 
 ```console
 cd plugins/openai-compatible
-cargo build --release -Z build-std=std,panic_abort --target wasm32-wasip3
+cargo build --release -Z build-std=std,panic_abort --target wasm32-wasip2
 cd ../..
 cargo run -- plugins check
 ```
@@ -57,7 +57,8 @@ settings. The key must match the stable plugin id embedded in the component:
 
 ```toml
 [plugins.openai]
-component = "./target/wasm32-wasip3/release/sage_openai_compatible.wasm"
+component = "./target/wasm32-wasip2/release/sage_openai_compatible.wasm"
+outbound-http = true
 
 [plugins.openai.settings]
 base-url = "http://127.0.0.1:8080/v1"

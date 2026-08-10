@@ -15,8 +15,8 @@ publish = false
 [workspace.dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
 iocraft = "0.8.4"
-lockgate = { git = "https://github.com/luizribeiro/lockgate.git", rev = "34c3e4e53607a23a364d89d8d782dcb1127a9710" }
-lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", rev = "34c3e4e53607a23a364d89d8d782dcb1127a9710" }
+lockgate = { git = "https://github.com/luizribeiro/lockgate.git", rev = "34a0a01a40878dfa41f3a36f25fed72062f1dfb0" }
+lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", rev = "34a0a01a40878dfa41f3a36f25fed72062f1dfb0" }
 reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"

@@ -1,5 +1,6 @@
 [plugins.openai]
-component = "./target/wasm32-wasip3/release/sage_openai_compatible.wasm"
+component = "./target/wasm32-wasip2/release/sage_openai_compatible.wasm"
+outbound-http = true
 
 [plugins.openai.settings]
 base-url = "http://127.0.0.1:8080/v1"

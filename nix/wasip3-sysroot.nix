@@ -90,4 +90,5 @@ else
       mv __cabi_realloc_wrapper.S.obj \
         "$out/lib/wasm32-wasip3/__cabi_realloc_wrapper.o"
     '';
+    passthru = { inherit sdk; };
   }

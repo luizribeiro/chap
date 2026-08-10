@@ -6,7 +6,6 @@ mod http;
 mod settings;
 
 pub(super) const SETTINGS_INTERFACE: &str = "sage:agent/settings@0.1.0";
-pub(super) const HTTP_CLIENT_INTERFACE: &str = "sage:agent/http-client@0.1.0";
 
 pub(super) struct AppState {
     settings: settings::Settings,

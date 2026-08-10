@@ -2,7 +2,7 @@ use crate::config::{Config, Plugin as PluginConfig};
 use crate::session::{Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions};
 use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition};
-use host::{AppState, HTTP_CLIENT_INTERFACE, SETTINGS_INTERFACE};
+use host::{AppState, SETTINGS_INTERFACE};
 use lockgate::Component;
 use provider::PluginBackend;
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
@@ -78,7 +78,7 @@ impl AgentBuilder {
     pub async fn start(self) -> Result<Agent, String> {
         let mut lockgate = self.lockgate()?;
         let plugins = Self::load_plugins(&mut lockgate, &self.config)?;
-        let lockgate = Self::apply_policy(lockgate, &plugins)?;
+        let lockgate = Self::apply_policy(lockgate, &self.config, &plugins)?;
         let lockgate = lockgate
             .run()
             .await
@@ -165,15 +165,18 @@ impl AgentBuilder {
 
     fn apply_policy(
         mut lockgate: InnerApplication,
+        config: &Config,
         plugins: &BTreeMap<String, LoadedPlugin>,
     ) -> Result<InnerApplication, String> {
-        // TODO: Move capability policy into Lockgate configuration instead of granting every
-        // plugin the same host imports. HTTP should use `wasi:http`, with Lockgate granting and
-        // enforcing per-plugin URL restrictions.
+        // TODO: Let Lockgate configure and enforce URL-scoped WASI HTTP policies instead of
+        // granting unrestricted outbound HTTP.
         for (id, plugin) in plugins {
+            if config.plugin(id).is_some_and(PluginConfig::outbound_http) {
+                lockgate = lockgate
+                    .allow_outbound_http(*plugin)
+                    .map_err(|error| format!("failed to configure plugin `{id}`: {error}"))?;
+            }
             lockgate = lockgate
-                .allow_host_import(*plugin, HTTP_CLIENT_INTERFACE)
-                .map_err(|error| format!("failed to configure plugin `{id}`: {error}"))?
                 .allow_host_import(*plugin, SETTINGS_INTERFACE)
                 .map_err(|error| format!("failed to configure plugin `{id}`: {error}"))?;
         }

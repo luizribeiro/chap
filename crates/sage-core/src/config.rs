@@ -18,6 +18,8 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 pub struct Plugin {
     component: PathBuf,
+    #[serde(default, rename = "outbound-http")]
+    outbound_http: bool,
     #[serde(default)]
     settings: toml::Table,
 }
@@ -55,6 +57,10 @@ impl Plugin {
     pub(crate) fn settings(&self) -> &toml::Table {
         &self.settings
     }
+
+    pub(crate) fn outbound_http(&self) -> bool {
+        self.outbound_http
+    }
 }
 
 #[cfg(test)]
@@ -67,6 +73,7 @@ mod tests {
             r#"
 [plugins.openai]
 component = "./plugins/openai-compatible.wasm"
+outbound-http = true
 
 [plugins.openai.settings]
 model = "example-model"
@@ -80,6 +87,7 @@ model = "example-model"
             plugin.component(),
             Path::new("./plugins/openai-compatible.wasm")
         );
+        assert!(plugin.outbound_http());
         assert_eq!(plugin.settings()["model"].as_str(), Some("example-model"));
     }
 }

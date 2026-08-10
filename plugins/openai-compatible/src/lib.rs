@@ -15,15 +15,20 @@ use bindings::exports::sage::agent::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Guest,
     Message as ProviderMessage, ToolCall as ProviderToolCall, ToolDefinition as ProviderTool,
 };
-use bindings::sage::agent::{http_client, settings};
+use bindings::sage::agent::settings;
+use http::{HeaderMap, HeaderName, HeaderValue};
+use http_body_util::BodyExt;
 use serde::{Deserialize, Serialize};
+use wasi_fetch::Client;
+
+const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 struct OpenAiCompatible;
 
 impl Guest for OpenAiCompatible {
-    fn complete(request: CompletionRequest) -> Result<Completion, String> {
-        let base_url = required_setting("base-url")?;
-        let model = required_setting("model")?;
+    async fn complete(request: CompletionRequest) -> Result<Completion, String> {
+        let base_url = required_setting("base-url").await?;
+        let model = required_setting("model").await?;
         let request = serde_json::to_string(&Request {
             model,
             messages: request
@@ -39,29 +44,67 @@ impl Guest for OpenAiCompatible {
             stream: false,
         })
         .map_err(|error| format!("failed to encode OpenAI-compatible request: {error}"))?;
-        let mut headers = vec![http_client::Header {
-            name: "content-type".to_owned(),
-            value: "application/json".to_owned(),
-        }];
-        if let Some(api_key) = settings::get("api-key").filter(|key| !key.is_empty()) {
-            headers.push(http_client::Header {
-                name: "authorization".to_owned(),
-                value: format!("Bearer {api_key}"),
-            });
+        let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+        let mut headers = vec![("content-type".to_owned(), "application/json".to_owned())];
+        if let Some(api_key) = settings::get("api-key".to_owned())
+            .await
+            .filter(|key| !key.is_empty())
+        {
+            headers.push(("authorization".to_owned(), format!("Bearer {api_key}")));
         }
-        let response = http_client::post(
-            &format!("{}/chat/completions", base_url.trim_end_matches('/')),
-            &headers,
-            &request,
-        )?;
-        parse_response(response.status, &response.body)
+        let (status, body) = post(&url, &headers, request.as_bytes()).await?;
+        parse_response(status, &body)
     }
 }
 
-fn required_setting(key: &str) -> Result<String, String> {
-    settings::get(key)
+async fn required_setting(key: &str) -> Result<String, String> {
+    settings::get(key.to_owned())
+        .await
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| format!("provider setting `{key}` is required"))
+}
+
+async fn post(
+    url: &str,
+    headers: &[(String, String)],
+    body: &[u8],
+) -> Result<(u16, String), String> {
+    let mut request_headers = HeaderMap::new();
+    for (name, value) in headers {
+        let name = HeaderName::try_from(name)
+            .map_err(|error| format!("invalid HTTP header name: {error}"))?;
+        let value = HeaderValue::try_from(value)
+            .map_err(|error| format!("invalid HTTP header value: {error}"))?;
+        request_headers.append(name, value);
+    }
+
+    let response = Client::new()
+        .post(url)
+        .headers(request_headers)
+        .body(body.to_vec())
+        .send()
+        .await
+        .map_err(|error| format!("HTTP request failed: {error}"))?;
+    let status = response.status().as_u16();
+    let body = collect_limited(response.into_body(), MAX_RESPONSE_BYTES).await?;
+    let body = String::from_utf8(body)
+        .map_err(|error| format!("HTTP response body was not valid UTF-8: {error}"))?;
+    Ok((status, body))
+}
+
+async fn collect_limited(mut body: wasi_fetch::Body, limit: usize) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    while let Some(frame) = body.frame().await {
+        let frame = frame.map_err(|error| format!("failed to read HTTP response body: {error}"))?;
+        let Ok(chunk) = frame.into_data() else {
+            continue;
+        };
+        if bytes.len().saturating_add(chunk.len()) > limit {
+            return Err(format!("HTTP response exceeded the {limit}-byte limit"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 fn parse_response(status: u16, body: &str) -> Result<Completion, String> {
