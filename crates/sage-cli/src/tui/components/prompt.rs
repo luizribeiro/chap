@@ -2,7 +2,6 @@ use iocraft::prelude::*;
 
 #[derive(Default, Props)]
 pub struct PromptProps {
-    pub busy: bool,
     pub value: String,
     pub on_change: HandlerMut<'static, String>,
 }
@@ -23,7 +22,7 @@ pub fn Prompt(props: &mut PromptProps) -> impl Into<AnyElement<'static>> {
             Text(content: "› ", color: Color::Cyan, weight: Weight::Bold)
             View(flex_grow: 1.0_f32) {
                 TextInput(
-                    has_focus: !props.busy,
+                    has_focus: true,
                     value: props.value.clone(),
                     on_change: props.on_change.take(),
                 )

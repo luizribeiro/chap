@@ -38,7 +38,8 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
         }
     });
 
-    let complete = hooks.use_async_handler({
+    let send = hooks.use_async_handler({
+        let session = session.clone();
         move |prompt: String| {
             let session = session.clone();
             async move {
@@ -62,15 +63,17 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
             KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
                 should_exit.set(true);
             }
-            KeyCode::Enter if !busy.get() => {
+            KeyCode::Enter => {
                 let prompt = input.read().trim().to_owned();
                 if prompt.is_empty() {
                     return;
                 }
 
                 input.set(String::new());
-                busy.set(true);
-                complete(prompt);
+                if session.steer(prompt.clone()).is_err() {
+                    busy.set(true);
+                    send(prompt);
+                }
             }
             _ => {}
         }
@@ -89,7 +92,6 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
             Header(provider: provider)
             Transcript(messages: messages.read().clone())
             Prompt(
-                busy: busy.get(),
                 value: input.to_string(),
                 on_change: move |value| input.set(value),
             )

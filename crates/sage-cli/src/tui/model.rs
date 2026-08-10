@@ -71,6 +71,10 @@ pub(super) fn apply_event(
             messages.push(ChatMessage::user(input));
             Some(true)
         }
+        SessionEventKind::RunSteered { input } => {
+            messages.push(ChatMessage::user(input));
+            None
+        }
         SessionEventKind::AssistantMessage { text } => {
             messages.push(ChatMessage::sage(text));
             None
@@ -158,6 +162,15 @@ mod tests {
             ),
             Some(true)
         );
+        assert_eq!(
+            apply_event(
+                &mut messages,
+                SessionEventKind::RunSteered {
+                    input: "and be concise".to_owned(),
+                },
+            ),
+            None
+        );
         apply_event(
             &mut messages,
             SessionEventKind::ToolRequested {
@@ -193,6 +206,7 @@ mod tests {
             messages,
             vec![
                 ChatMessage::user("hello".to_owned()),
+                ChatMessage::user("and be concise".to_owned()),
                 ChatMessage::tool(
                     "call-1".to_owned(),
                     "echo".to_owned(),
