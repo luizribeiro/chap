@@ -1,4 +1,4 @@
-use super::MessageView;
+use super::{MessageView, ToolView};
 use crate::tui::ChatMessage;
 use iocraft::prelude::*;
 
@@ -13,15 +13,19 @@ pub fn Transcript(props: &TranscriptProps) -> impl Into<AnyElement<'static>> {
         .messages
         .iter()
         .enumerate()
-        .map(|(index, message)| {
-            element! {
+        .map(|(index, message)| match message {
+            ChatMessage::Text { role, content } => element! {
                 MessageView(
                     key: index,
-                    role: message.role,
-                    content: message.content.clone(),
+                    role: *role,
+                    content: content.clone(),
                 )
             }
-            .into_any()
+            .into_any(),
+            ChatMessage::Tool(tool) => element! {
+                ToolView(key: index, tool: tool.clone())
+            }
+            .into_any(),
         })
         .collect::<Vec<_>>();
 

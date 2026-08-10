@@ -4,6 +4,7 @@ mod header;
 mod message;
 mod prompt;
 mod spinner;
+mod tool;
 mod transcript;
 
 pub(super) use app::Sage;
@@ -12,4 +13,5 @@ use header::Header;
 use message::MessageView;
 use prompt::Prompt;
 use spinner::Spinner;
+use tool::ToolView;
 use transcript::Transcript;

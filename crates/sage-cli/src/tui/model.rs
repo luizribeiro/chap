@@ -1,10 +1,12 @@
-#[derive(Clone)]
-pub struct ChatMessage {
-    pub role: MessageRole,
-    pub content: String,
+use sage_core::SessionEventKind;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ChatMessage {
+    Text { role: MessageRole, content: String },
+    Tool(ToolMessage),
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum MessageRole {
     User,
     #[default]
@@ -12,25 +14,218 @@ pub enum MessageRole {
     Error,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ToolMessage {
+    pub call_id: String,
+    pub name: String,
+    pub arguments: String,
+    pub state: ToolState,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum ToolState {
+    #[default]
+    Requested,
+    Running,
+    Finished(Result<String, String>),
+}
+
 impl ChatMessage {
     pub(super) fn user(content: String) -> Self {
-        Self {
+        Self::Text {
             role: MessageRole::User,
             content,
         }
     }
 
     pub(super) fn sage(content: String) -> Self {
-        Self {
+        Self::Text {
             role: MessageRole::Sage,
             content,
         }
     }
 
     pub(super) fn error(content: String) -> Self {
-        Self {
+        Self::Text {
             role: MessageRole::Error,
             content,
         }
+    }
+
+    fn tool(call_id: String, name: String, arguments: String, state: ToolState) -> Self {
+        Self::Tool(ToolMessage {
+            call_id,
+            name,
+            arguments,
+            state,
+        })
+    }
+}
+
+pub(super) fn apply_event(
+    messages: &mut Vec<ChatMessage>,
+    event: SessionEventKind,
+) -> Option<bool> {
+    match event {
+        SessionEventKind::RunStarted { input } => {
+            messages.push(ChatMessage::user(input));
+            Some(true)
+        }
+        SessionEventKind::AssistantMessage { text } => {
+            messages.push(ChatMessage::sage(text));
+            None
+        }
+        SessionEventKind::ToolRequested {
+            call_id,
+            name,
+            arguments,
+        } => {
+            messages.push(ChatMessage::tool(
+                call_id,
+                name,
+                arguments,
+                ToolState::Requested,
+            ));
+            None
+        }
+        SessionEventKind::ToolStarted {
+            call_id,
+            name,
+            arguments,
+        } => {
+            if let Some(tool) = tool_mut(messages, &call_id) {
+                tool.name = name;
+                tool.arguments = arguments;
+                tool.state = ToolState::Running;
+            } else {
+                messages.push(ChatMessage::tool(
+                    call_id,
+                    name,
+                    arguments,
+                    ToolState::Running,
+                ));
+            }
+            None
+        }
+        SessionEventKind::ToolFinished {
+            call_id,
+            name,
+            result,
+        } => {
+            if let Some(tool) = tool_mut(messages, &call_id) {
+                tool.name = name;
+                tool.state = ToolState::Finished(result);
+            } else {
+                messages.push(ChatMessage::tool(
+                    call_id,
+                    name,
+                    String::new(),
+                    ToolState::Finished(result),
+                ));
+            }
+            None
+        }
+        SessionEventKind::RunCompleted { .. } => Some(false),
+        SessionEventKind::RunFailed { error } => {
+            messages.push(ChatMessage::error(error));
+            Some(false)
+        }
+        _ => None,
+    }
+}
+
+fn tool_mut<'a>(messages: &'a mut [ChatMessage], call_id: &str) -> Option<&'a mut ToolMessage> {
+    messages.iter_mut().rev().find_map(|message| match message {
+        ChatMessage::Tool(tool) if tool.call_id == call_id => Some(tool),
+        _ => None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn applies_run_and_tool_events_to_the_transcript() {
+        let mut messages = Vec::new();
+
+        assert_eq!(
+            apply_event(
+                &mut messages,
+                SessionEventKind::RunStarted {
+                    input: "hello".to_owned(),
+                },
+            ),
+            Some(true)
+        );
+        apply_event(
+            &mut messages,
+            SessionEventKind::ToolRequested {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+        );
+        apply_event(
+            &mut messages,
+            SessionEventKind::ToolStarted {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: r#"{"message":"hello"}"#.to_owned(),
+            },
+        );
+        apply_event(
+            &mut messages,
+            SessionEventKind::ToolFinished {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                result: Ok("hello".to_owned()),
+            },
+        );
+        apply_event(
+            &mut messages,
+            SessionEventKind::AssistantMessage {
+                text: "done".to_owned(),
+            },
+        );
+
+        assert_eq!(
+            messages,
+            vec![
+                ChatMessage::user("hello".to_owned()),
+                ChatMessage::tool(
+                    "call-1".to_owned(),
+                    "echo".to_owned(),
+                    r#"{"message":"hello"}"#.to_owned(),
+                    ToolState::Finished(Ok("hello".to_owned())),
+                ),
+                ChatMessage::sage("done".to_owned()),
+            ]
+        );
+        assert_eq!(
+            apply_event(
+                &mut messages,
+                SessionEventKind::RunCompleted {
+                    response: "done".to_owned(),
+                },
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn renders_run_failures_as_errors() {
+        let mut messages = Vec::new();
+
+        assert_eq!(
+            apply_event(
+                &mut messages,
+                SessionEventKind::RunFailed {
+                    error: "broken".to_owned(),
+                },
+            ),
+            Some(false)
+        );
+        assert_eq!(messages, vec![ChatMessage::error("broken".to_owned())]);
     }
 }

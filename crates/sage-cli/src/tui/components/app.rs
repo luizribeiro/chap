@@ -1,5 +1,5 @@
 use super::{Footer, Header, Prompt, Transcript};
-use crate::tui::{ChatMessage, TuiContext};
+use crate::tui::{ChatMessage, TuiContext, model::apply_event};
 use iocraft::prelude::*;
 
 #[component]
@@ -13,16 +13,36 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let mut should_exit = hooks.use_state(|| false);
     let (terminal_width, terminal_height) = hooks.use_terminal_size();
 
+    let mut events = session.subscribe();
+    hooks.use_future(async move {
+        loop {
+            match events.recv().await {
+                Ok(Some(event)) => {
+                    let busy_update = {
+                        let mut messages = messages.write();
+                        apply_event(&mut messages, event.kind)
+                    };
+                    if let Some(value) = busy_update {
+                        busy.set(value);
+                    }
+                }
+                Ok(None) => {
+                    busy.set(false);
+                    break;
+                }
+                Err(error) => {
+                    messages.write().push(ChatMessage::error(error.to_string()));
+                    busy.set(false);
+                }
+            }
+        }
+    });
+
     let complete = hooks.use_async_handler({
         move |prompt: String| {
             let session = session.clone();
             async move {
-                let message = match session.send(prompt).await {
-                    Ok(completion) => ChatMessage::sage(completion),
-                    Err(error) => ChatMessage::error(error),
-                };
-                messages.write().push(message);
-                busy.set(false);
+                let _ = session.send(prompt).await;
             }
         }
     });
@@ -48,7 +68,6 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
                     return;
                 }
 
-                messages.write().push(ChatMessage::user(prompt.clone()));
                 input.set(String::new());
                 busy.set(true);
                 complete(prompt);
