@@ -49,6 +49,15 @@ impl fmt::Display for SessionId {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SteeringId(Uuid);
+
+impl fmt::Display for SteeringId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct SessionEvent {
@@ -62,7 +71,16 @@ pub enum SessionEventKind {
     RunStarted {
         input: String,
     },
-    RunSteered {
+    SteeringQueued {
+        id: SteeringId,
+        input: String,
+    },
+    SteeringApplied {
+        id: SteeringId,
+        input: String,
+    },
+    SteeringDiscarded {
+        id: SteeringId,
         input: String,
     },
     AssistantMessage {
@@ -172,12 +190,16 @@ impl Session {
         self.executor.send(self, input.into()).await
     }
 
-    pub fn steer(&self, input: impl Into<String>) -> Result<(), String> {
+    pub fn steer(&self, input: impl Into<String>) -> Result<SteeringId, String> {
         let input = input.into();
         if input.trim().is_empty() {
             return Err("steering input cannot be empty".to_owned());
         }
         self.state.steer(input)
+    }
+
+    pub fn discard_steering(&self, id: SteeringId) -> Result<(), String> {
+        self.state.discard_steering(id)
     }
 }
 
@@ -248,7 +270,13 @@ pub(crate) struct SessionState {
 #[derive(Default)]
 struct RunState {
     active: bool,
-    steering: VecDeque<String>,
+    steering: VecDeque<Steering>,
+}
+
+#[derive(Clone)]
+pub(crate) struct Steering {
+    pub(crate) id: SteeringId,
+    pub(crate) input: String,
 }
 
 impl SessionState {
@@ -275,22 +303,48 @@ impl SessionState {
 
     pub(crate) fn start_run(&self) -> ActiveRun<'_> {
         let mut run = self.run.lock().expect("session run state lock poisoned");
+        debug_assert!(!run.active, "session run should not already be active");
+        debug_assert!(
+            run.steering.is_empty(),
+            "inactive session should not retain queued steering"
+        );
         run.active = true;
-        run.steering.clear();
         ActiveRun { session: self }
     }
 
-    pub(crate) fn steer(&self, input: String) -> Result<(), String> {
+    pub(crate) fn steer(&self, input: String) -> Result<SteeringId, String> {
         let mut run = self.run.lock().expect("session run state lock poisoned");
         if !run.active {
             return Err("session has no active run to steer".to_owned());
         }
-        run.steering.push_back(input.clone());
-        self.emit(SessionEventKind::RunSteered { input });
+        let id = SteeringId(Uuid::now_v7());
+        run.steering.push_back(Steering {
+            id,
+            input: input.clone(),
+        });
+        self.emit(SessionEventKind::SteeringQueued { id, input });
+        Ok(id)
+    }
+
+    fn discard_steering(&self, id: SteeringId) -> Result<(), String> {
+        let mut run = self.run.lock().expect("session run state lock poisoned");
+        let index = run
+            .steering
+            .iter()
+            .position(|steering| steering.id == id)
+            .ok_or_else(|| format!("steering input `{id}` is not queued"))?;
+        let steering = run
+            .steering
+            .remove(index)
+            .expect("queued steering index should exist");
+        self.emit(SessionEventKind::SteeringDiscarded {
+            id: steering.id,
+            input: steering.input,
+        });
         Ok(())
     }
 
-    pub(crate) fn take_steering(&self) -> Vec<String> {
+    pub(crate) fn take_steering(&self) -> Vec<Steering> {
         self.run
             .lock()
             .expect("session run state lock poisoned")
@@ -299,13 +353,27 @@ impl SessionState {
             .collect()
     }
 
-    pub(crate) fn finish_or_take_steering(&self) -> Option<Vec<String>> {
+    pub(crate) fn finish_or_take_steering(&self) -> Option<Vec<Steering>> {
         let mut run = self.run.lock().expect("session run state lock poisoned");
         if run.steering.is_empty() {
             run.active = false;
             None
         } else {
             Some(run.steering.drain(..).collect())
+        }
+    }
+
+    fn finish_run(&self) {
+        let discarded = {
+            let mut run = self.run.lock().expect("session run state lock poisoned");
+            run.active = false;
+            run.steering.drain(..).collect::<Vec<_>>()
+        };
+        for steering in discarded {
+            self.emit(SessionEventKind::SteeringDiscarded {
+                id: steering.id,
+                input: steering.input,
+            });
         }
     }
 }
@@ -316,13 +384,7 @@ pub(crate) struct ActiveRun<'a> {
 
 impl Drop for ActiveRun<'_> {
     fn drop(&mut self) {
-        let mut run = self
-            .session
-            .run
-            .lock()
-            .expect("session run state lock poisoned");
-        run.active = false;
-        run.steering.clear();
+        self.session.finish_run();
     }
 }
 
@@ -362,7 +424,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sessions_only_accept_steering_during_an_active_run() {
+    async fn sessions_can_discard_queued_steering() {
         let manager = SessionManager::new();
         let state = manager.create(SessionOptions::new("provider")).unwrap();
         let session = Session::new(Arc::clone(&state), Arc::new(EchoExecutor));
@@ -373,15 +435,37 @@ mod tests {
             Err("session has no active run to steer".to_owned())
         );
 
-        let _run = state.start_run();
-        session.steer("another detail").unwrap();
+        let run = state.start_run();
+        let discarded = session.steer("another detail").unwrap();
+        session.discard_steering(discarded).unwrap();
+        let abandoned = session.steer("never applied").unwrap();
+        drop(run);
 
-        assert_eq!(state.take_steering(), ["another detail"]);
         assert_eq!(
-            events.recv().await.unwrap().unwrap().kind,
-            SessionEventKind::RunSteered {
-                input: "another detail".to_owned(),
-            }
+            [
+                events.recv().await.unwrap().unwrap().kind,
+                events.recv().await.unwrap().unwrap().kind,
+                events.recv().await.unwrap().unwrap().kind,
+                events.recv().await.unwrap().unwrap().kind,
+            ],
+            [
+                SessionEventKind::SteeringQueued {
+                    id: discarded,
+                    input: "another detail".to_owned(),
+                },
+                SessionEventKind::SteeringDiscarded {
+                    id: discarded,
+                    input: "another detail".to_owned(),
+                },
+                SessionEventKind::SteeringQueued {
+                    id: abandoned,
+                    input: "never applied".to_owned(),
+                },
+                SessionEventKind::SteeringDiscarded {
+                    id: abandoned,
+                    input: "never applied".to_owned(),
+                },
+            ]
         );
     }
 

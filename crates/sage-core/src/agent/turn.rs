@@ -1,6 +1,8 @@
 use super::{MAX_PROVIDER_STEPS_PER_TURN, provider::CompletionBackend};
 use crate::{
-    session::{AssistantContent, Message, SessionEventKind, SessionState, ToolCall, ToolResult},
+    session::{
+        AssistantContent, Message, SessionEventKind, SessionState, Steering, ToolCall, ToolResult,
+    },
     tool::ToolRegistry,
 };
 
@@ -15,7 +17,7 @@ pub(super) async fn run_agent_loop(
     }
 
     let _run = session.turn_lock.lock().await;
-    let _active_run = session.start_run();
+    let active_run = session.start_run();
     session
         .messages
         .write()
@@ -24,6 +26,7 @@ pub(super) async fn run_agent_loop(
     session.emit(SessionEventKind::RunStarted { input });
 
     let result = run_steps(session, tools, backend).await;
+    drop(active_run);
     match &result {
         Ok(response) => session.emit(SessionEventKind::RunCompleted {
             response: response.clone(),
@@ -112,12 +115,18 @@ async fn run_steps(
     ))
 }
 
-async fn append_steering(session: &SessionState, steering: Vec<String>) {
-    session
-        .messages
-        .write()
-        .await
-        .extend(steering.into_iter().map(Message::User));
+async fn append_steering(session: &SessionState, steering: Vec<Steering>) {
+    for steering in steering {
+        session
+            .messages
+            .write()
+            .await
+            .push(Message::User(steering.input.clone()));
+        session.emit(SessionEventKind::SteeringApplied {
+            id: steering.id,
+            input: steering.input,
+        });
+    }
 }
 
 async fn execute_tool(tools: &ToolRegistry, call: ToolCall) -> ToolResult {

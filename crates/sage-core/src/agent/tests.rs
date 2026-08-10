@@ -198,21 +198,26 @@ async fn applies_steering_before_the_next_provider_request() {
     });
 
     first_request.await;
-    state.steer("focus on the second part".to_owned()).unwrap();
+    let steering_id = state.steer("focus on the second part".to_owned()).unwrap();
     backend.release_first.notify_one();
 
     assert_eq!(run.await.unwrap().unwrap(), "My revised answer.");
     assert_eq!(
-        receive_event_kinds(&mut events, 5).await,
+        receive_event_kinds(&mut events, 6).await,
         vec![
             SessionEventKind::RunStarted {
                 input: "answer this".to_owned(),
             },
-            SessionEventKind::RunSteered {
+            SessionEventKind::SteeringQueued {
+                id: steering_id,
                 input: "focus on the second part".to_owned(),
             },
             SessionEventKind::AssistantMessage {
                 text: "My first answer.".to_owned(),
+            },
+            SessionEventKind::SteeringApplied {
+                id: steering_id,
+                input: "focus on the second part".to_owned(),
             },
             SessionEventKind::AssistantMessage {
                 text: "My revised answer.".to_owned(),
