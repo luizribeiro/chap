@@ -15,7 +15,7 @@ publish = false
 
 [workspace.dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
-iocraft = { git = "https://github.com/luizribeiro/iocraft.git", rev = "f10abda33fadc8e8fa5970de465f97ccd0dfd3b9" }
+iocraft = { git = "https://github.com/luizribeiro/iocraft.git", rev = "9c3e06399201a446d8c424acb1e6923c5c4617e4" }
 lockgate = { git = "https://github.com/luizribeiro/lockgate.git", rev = "34a0a01a40878dfa41f3a36f25fed72062f1dfb0" }
 lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", rev = "34a0a01a40878dfa41f3a36f25fed72062f1dfb0" }
 serde = { version = "1.0.228", features = ["derive"] }
