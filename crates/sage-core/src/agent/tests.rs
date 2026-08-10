@@ -10,7 +10,14 @@ use crate::{
     },
     tool::ToolRegistry,
 };
-use std::{collections::VecDeque, fs, path::Path, sync::Mutex, time::SystemTime};
+use std::{
+    collections::VecDeque,
+    fs,
+    path::Path,
+    sync::{Arc, Mutex},
+    time::SystemTime,
+};
+use tokio::sync::Notify;
 use wit_component::{ComponentEncoder, StringEncoding, dummy_module, embed_component_metadata};
 use wit_parser::{ManglingAndAbi, Resolve};
 
@@ -163,6 +170,69 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
 }
 
 #[tokio::test]
+async fn applies_steering_before_the_next_provider_request() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let mut events = state.subscribe();
+    let backend = Arc::new(PausedBackend::new([
+        ProviderCompletion {
+            content: vec![AssistantContent::Text("My first answer.".to_owned())],
+        },
+        ProviderCompletion {
+            content: vec![AssistantContent::Text("My revised answer.".to_owned())],
+        },
+    ]));
+    let first_request = backend.first_request.notified();
+    let run_state = Arc::clone(&state);
+    let run_backend = Arc::clone(&backend);
+    let run = tokio::spawn(async move {
+        run_agent_loop(
+            &run_state,
+            "answer this".to_owned(),
+            &ToolRegistry::new(),
+            run_backend.as_ref(),
+        )
+        .await
+    });
+
+    first_request.await;
+    state.steer("focus on the second part".to_owned()).unwrap();
+    backend.release_first.notify_one();
+
+    assert_eq!(run.await.unwrap().unwrap(), "My revised answer.");
+    assert_eq!(
+        receive_event_kinds(&mut events, 5).await,
+        vec![
+            SessionEventKind::RunStarted {
+                input: "answer this".to_owned(),
+            },
+            SessionEventKind::RunSteered {
+                input: "focus on the second part".to_owned(),
+            },
+            SessionEventKind::AssistantMessage {
+                text: "My first answer.".to_owned(),
+            },
+            SessionEventKind::AssistantMessage {
+                text: "My revised answer.".to_owned(),
+            },
+            SessionEventKind::RunCompleted {
+                response: "My revised answer.".to_owned(),
+            },
+        ]
+    );
+
+    let requests = backend.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(matches!(
+        requests[1].as_slice(),
+        [Message::User(initial), Message::Assistant(_), Message::User(steering)]
+            if initial == "answer this" && steering == "focus on the second part"
+    ));
+}
+
+#[tokio::test]
 async fn returns_tool_failures_to_the_provider() {
     let manager = SessionManager::new();
     let state = manager
@@ -253,6 +323,45 @@ async fn receive_event_kinds(events: &mut SessionEvents, count: usize) -> Vec<Se
 struct FakeBackend {
     completions: Mutex<VecDeque<ProviderCompletion>>,
     requests: Mutex<Vec<Vec<Message>>>,
+}
+
+struct PausedBackend {
+    completions: Mutex<VecDeque<ProviderCompletion>>,
+    requests: Mutex<Vec<Vec<Message>>>,
+    first_request: Notify,
+    release_first: Notify,
+}
+
+impl PausedBackend {
+    fn new(completions: impl IntoIterator<Item = ProviderCompletion>) -> Self {
+        Self {
+            completions: Mutex::new(completions.into_iter().collect()),
+            requests: Mutex::new(Vec::new()),
+            first_request: Notify::new(),
+            release_first: Notify::new(),
+        }
+    }
+}
+
+impl CompletionBackend for PausedBackend {
+    fn complete(&self, messages: Vec<Message>) -> CompletionFuture<'_> {
+        let is_first = self.requests.lock().unwrap().is_empty();
+        self.requests.lock().unwrap().push(messages);
+        let completion = self
+            .completions
+            .lock()
+            .unwrap()
+            .pop_front()
+            .ok_or_else(|| "paused provider ran out of completions".to_owned());
+
+        Box::pin(async move {
+            if is_first {
+                self.first_request.notify_one();
+                self.release_first.notified().await;
+            }
+            completion
+        })
+    }
 }
 
 impl FakeBackend {

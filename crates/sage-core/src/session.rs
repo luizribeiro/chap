@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fmt,
     future::Future,
     pin::Pin,
@@ -60,6 +60,9 @@ pub struct SessionEvent {
 #[non_exhaustive]
 pub enum SessionEventKind {
     RunStarted {
+        input: String,
+    },
+    RunSteered {
         input: String,
     },
     AssistantMessage {
@@ -168,6 +171,14 @@ impl Session {
     pub async fn send(&self, input: impl Into<String>) -> Result<String, String> {
         self.executor.send(self, input.into()).await
     }
+
+    pub fn steer(&self, input: impl Into<String>) -> Result<(), String> {
+        let input = input.into();
+        if input.trim().is_empty() {
+            return Err("steering input cannot be empty".to_owned());
+        }
+        self.state.steer(input)
+    }
 }
 
 pub(crate) type SessionFuture<'a> =
@@ -203,6 +214,7 @@ impl SessionManager {
             id,
             provider: options.provider,
             turn_lock: AsyncMutex::new(()),
+            run: Mutex::new(RunState::default()),
             messages: RwLock::new(messages),
             next_event_sequence: Mutex::new(1),
             events,
@@ -227,9 +239,16 @@ pub(crate) struct SessionState {
     id: SessionId,
     provider: String,
     pub(crate) turn_lock: AsyncMutex<()>,
+    run: Mutex<RunState>,
     pub(crate) messages: RwLock<Vec<Message>>,
     next_event_sequence: Mutex<u64>,
     events: broadcast::Sender<SessionEvent>,
+}
+
+#[derive(Default)]
+struct RunState {
+    active: bool,
+    steering: VecDeque<String>,
 }
 
 impl SessionState {
@@ -252,6 +271,58 @@ impl SessionState {
             .checked_add(1)
             .expect("session event sequence exhausted");
         let _ = self.events.send(event);
+    }
+
+    pub(crate) fn start_run(&self) -> ActiveRun<'_> {
+        let mut run = self.run.lock().expect("session run state lock poisoned");
+        run.active = true;
+        run.steering.clear();
+        ActiveRun { session: self }
+    }
+
+    pub(crate) fn steer(&self, input: String) -> Result<(), String> {
+        let mut run = self.run.lock().expect("session run state lock poisoned");
+        if !run.active {
+            return Err("session has no active run to steer".to_owned());
+        }
+        run.steering.push_back(input.clone());
+        self.emit(SessionEventKind::RunSteered { input });
+        Ok(())
+    }
+
+    pub(crate) fn take_steering(&self) -> Vec<String> {
+        self.run
+            .lock()
+            .expect("session run state lock poisoned")
+            .steering
+            .drain(..)
+            .collect()
+    }
+
+    pub(crate) fn finish_or_take_steering(&self) -> Option<Vec<String>> {
+        let mut run = self.run.lock().expect("session run state lock poisoned");
+        if run.steering.is_empty() {
+            run.active = false;
+            None
+        } else {
+            Some(run.steering.drain(..).collect())
+        }
+    }
+}
+
+pub(crate) struct ActiveRun<'a> {
+    session: &'a SessionState,
+}
+
+impl Drop for ActiveRun<'_> {
+    fn drop(&mut self) {
+        let mut run = self
+            .session
+            .run
+            .lock()
+            .expect("session run state lock poisoned");
+        run.active = false;
+        run.steering.clear();
     }
 }
 
@@ -288,6 +359,30 @@ mod tests {
         let session = Session::new(state, Arc::new(EchoExecutor));
 
         assert_eq!(session.send("hello").await.unwrap(), "hello");
+    }
+
+    #[tokio::test]
+    async fn sessions_only_accept_steering_during_an_active_run() {
+        let manager = SessionManager::new();
+        let state = manager.create(SessionOptions::new("provider")).unwrap();
+        let session = Session::new(Arc::clone(&state), Arc::new(EchoExecutor));
+        let mut events = session.subscribe();
+
+        assert_eq!(
+            session.steer("too early"),
+            Err("session has no active run to steer".to_owned())
+        );
+
+        let _run = state.start_run();
+        session.steer("another detail").unwrap();
+
+        assert_eq!(state.take_steering(), ["another detail"]);
+        assert_eq!(
+            events.recv().await.unwrap().unwrap().kind,
+            SessionEventKind::RunSteered {
+                input: "another detail".to_owned(),
+            }
+        );
     }
 
     #[tokio::test]

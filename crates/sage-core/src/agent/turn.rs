@@ -15,6 +15,7 @@ pub(super) async fn run_agent_loop(
     }
 
     let _run = session.turn_lock.lock().await;
+    let _active_run = session.start_run();
     session
         .messages
         .write()
@@ -62,6 +63,10 @@ async fn run_steps(
             })
             .collect::<Vec<_>>();
         if tool_calls.is_empty() {
+            if let Some(steering) = session.finish_or_take_steering() {
+                append_steering(session, steering).await;
+                continue;
+            }
             return text.ok_or_else(|| "provider returned a completion without text".to_owned());
         }
 
@@ -98,11 +103,21 @@ async fn run_steps(
                 result: event_result,
             });
         }
+
+        append_steering(session, session.take_steering()).await;
     }
 
     Err(format!(
         "turn exceeded the limit of {MAX_PROVIDER_STEPS_PER_TURN} provider requests"
     ))
+}
+
+async fn append_steering(session: &SessionState, steering: Vec<String>) {
+    session
+        .messages
+        .write()
+        .await
+        .extend(steering.into_iter().map(Message::User));
 }
 
 async fn execute_tool(tools: &ToolRegistry, call: ToolCall) -> ToolResult {
