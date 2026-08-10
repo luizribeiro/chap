@@ -26,7 +26,6 @@ pub async fn run(sage: sage_core::Agent) -> Result<(), String> {
     };
     element
         .fullscreen()
-        .disable_mouse_capture()
         .await
         .map_err(|error| format!("terminal interface failed: {error}"))
 }
