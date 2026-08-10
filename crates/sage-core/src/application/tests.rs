@@ -1,18 +1,18 @@
 use super::{
-    Application,
+    SageBuilder,
     provider::{CompletionBackend, CompletionFuture, ProviderCompletion},
     turn::run_agent_loop,
 };
 use crate::{
-    AssistantContent, Message, SessionOptions, Tool, ToolCall, ToolDefinition, config::Config,
+    AssistantContent, Message, SessionOptions, Tool, ToolCall, ToolDefinition,
     session::SessionManager, tool::ToolRegistry,
 };
 use std::{collections::VecDeque, fs, path::Path, sync::Mutex, time::SystemTime};
 use wit_component::{ComponentEncoder, StringEncoding, dummy_module, embed_component_metadata};
 use wit_parser::{ManglingAndAbi, Resolve};
 
-#[test]
-fn loads_a_configured_provider() {
+#[tokio::test]
+async fn loads_a_configured_provider() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
     fs::write(&component, provider_component("example.provider")).unwrap();
@@ -29,15 +29,15 @@ model = "example-model"
     )
     .unwrap();
 
-    let config = Config::load(&config_path).unwrap();
-    let application = Application::load(&config).unwrap();
+    let builder = SageBuilder::load(&config_path).unwrap();
 
-    assert_eq!(application.plugin_count(), 1);
+    assert_eq!(builder.plugins().count(), 1);
+    builder.start().await.unwrap();
     fs::remove_dir_all(directory).unwrap();
 }
 
-#[test]
-fn rejects_a_config_id_that_differs_from_plugin_metadata() {
+#[tokio::test]
+async fn rejects_a_config_id_that_differs_from_plugin_metadata() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
     fs::write(&component, provider_component("embedded.id")).unwrap();
@@ -51,8 +51,7 @@ component = "provider.wasm"
     )
     .unwrap();
 
-    let config = Config::load(&config_path).unwrap();
-    let error = match Application::load(&config) {
+    let error = match SageBuilder::load(&config_path).unwrap().start().await {
         Ok(_) => panic!("mismatched plugin id should be rejected"),
         Err(error) => error,
     };

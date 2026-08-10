@@ -1,7 +1,5 @@
 use crate::config::{Config, Plugin as PluginConfig};
-use crate::session::{
-    Session, SessionExecutor, SessionFuture, SessionId, SessionManager, SessionOptions,
-};
+use crate::session::{Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions};
 use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition};
 use host::{AppState, HTTP_CLIENT_INTERFACE, SETTINGS_INTERFACE};
@@ -22,59 +20,58 @@ type InnerApplication = lockgate::Application<AppState>;
 type InnerRuntime = lockgate::Runtime<AppState>;
 type LoadedPlugin = Component<bindings::ProviderPlugin>;
 
-pub struct Application {
-    lockgate: InnerApplication,
-    plugins: BTreeMap<String, LoadedPlugin>,
+pub struct SageBuilder {
+    config: Config,
     tools: ToolRegistry,
 }
 
-pub struct Runtime {
-    inner: Arc<RuntimeInner>,
+pub struct Sage {
+    inner: Arc<SageInner>,
 }
 
-pub(crate) struct RuntimeInner {
+pub(crate) struct SageInner {
     lockgate: InnerRuntime,
     plugins: BTreeMap<String, LoadedPlugin>,
     sessions: SessionManager,
     tools: ToolRegistry,
 }
 
-impl Application {
-    pub fn load(config: &Config) -> Result<Self, String> {
-        let mut lockgate = lockgate::Application::new(AppState::from_config(config)?)
-            .map_err(|error| format!("failed to create Lockgate application: {error}"))?
-            .fuel_per_call(PLUGIN_FUEL_PER_CALL);
-        let plugins = Self::load_plugins(&mut lockgate, config)?;
-        let lockgate = Self::apply_policy(lockgate, &plugins)?;
-
+impl SageBuilder {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         Ok(Self {
-            lockgate,
-            plugins,
+            config: Config::load(path.as_ref())?,
             tools: ToolRegistry::new(),
         })
     }
 
-    pub fn plugin_count(&self) -> usize {
-        self.plugins.len()
+    pub fn plugins(&self) -> impl Iterator<Item = (&str, &Path)> {
+        self.config
+            .plugins()
+            .map(|(id, plugin)| (id, plugin.component()))
     }
 
-    pub fn register_tool<T>(&mut self, tool: T) -> Result<(), String>
+    pub fn tool<T>(mut self, tool: T) -> Result<Self, String>
     where
         T: Tool + 'static,
     {
-        self.tools.register(tool)
+        self.tools.register(tool)?;
+        Ok(self)
     }
 
-    pub async fn run(self) -> Result<Runtime, String> {
-        let lockgate = self
-            .lockgate
+    pub async fn start(self) -> Result<Sage, String> {
+        let mut lockgate = lockgate::Application::new(AppState::from_config(&self.config)?)
+            .map_err(|error| format!("failed to create Lockgate application: {error}"))?
+            .fuel_per_call(PLUGIN_FUEL_PER_CALL);
+        let plugins = Self::load_plugins(&mut lockgate, &self.config)?;
+        let lockgate = Self::apply_policy(lockgate, &plugins)?;
+        let lockgate = lockgate
             .run()
             .await
             .map_err(|error| format!("failed to start plugin runtime: {error}"))?;
-        Ok(Runtime {
-            inner: Arc::new(RuntimeInner {
+        Ok(Sage {
+            inner: Arc::new(SageInner {
                 lockgate,
-                plugins: self.plugins,
+                plugins,
                 sessions: SessionManager::new(),
                 tools: self.tools,
             }),
@@ -159,12 +156,12 @@ impl Application {
     }
 }
 
-impl Runtime {
+impl Sage {
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
         self.inner.tools.definitions()
     }
 
-    pub fn create_session(&self, options: SessionOptions) -> Result<Session, String> {
+    pub fn session(&self, options: SessionOptions) -> Result<Session, String> {
         if !self.inner.plugins.contains_key(&options.provider) {
             return Err(format!(
                 "provider plugin `{}` is not configured",
@@ -174,16 +171,9 @@ impl Runtime {
         let state = self.inner.sessions.create(options)?;
         Ok(Session::new(state, self.inner.clone()))
     }
-
-    pub fn session(&self, id: SessionId) -> Option<Session> {
-        self.inner
-            .sessions
-            .get(id)
-            .map(|state| Session::new(state, self.inner.clone()))
-    }
 }
 
-impl RuntimeInner {
+impl SageInner {
     async fn run_turn(&self, session: &Session, input: String) -> Result<String, String> {
         if !self.sessions.owns(&session.state) {
             return Err("session does not belong to this runtime".to_owned());
@@ -193,7 +183,7 @@ impl RuntimeInner {
     }
 }
 
-impl SessionExecutor for RuntimeInner {
+impl SessionExecutor for SageInner {
     fn send<'a>(&'a self, session: &'a Session, input: String) -> SessionFuture<'a> {
         Box::pin(self.run_turn(session, input))
     }

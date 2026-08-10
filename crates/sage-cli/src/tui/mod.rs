@@ -4,7 +4,7 @@ mod model;
 use components::Sage;
 use iocraft::prelude::*;
 use model::ChatMessage;
-use sage_core::{Application, Session, SessionOptions};
+use sage_core::{Session, SessionOptions};
 use std::io::IsTerminal;
 
 const PROVIDER: &str = "openai";
@@ -13,13 +13,12 @@ struct TuiContext {
     session: Session,
 }
 
-pub async fn run(application: Application) -> Result<(), String> {
+pub async fn run(sage: sage_core::Sage) -> Result<(), String> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return Err("the terminal interface requires an interactive terminal".into());
     }
 
-    let runtime = application.run().await?;
-    let session = runtime.create_session(SessionOptions::new(PROVIDER))?;
+    let session = sage.session(SessionOptions::new(PROVIDER))?;
     let mut element = element! {
         ContextProvider(value: Context::owned(TuiContext { session })) {
             Sage

@@ -1,7 +1,7 @@
 mod tui;
 
 use clap::{Args, Parser, Subcommand};
-use sage_core::{Application, Config};
+use sage_core::SageBuilder;
 use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Debug, Parser)]
@@ -47,31 +47,31 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<(), String> {
-    let config = Config::load(&cli.config)?;
+    let builder = SageBuilder::load(&cli.config)?;
     match cli.command {
         None => {
-            let application = Application::load(&config)?;
-            tui::run(application).await?;
+            tui::run(builder.start().await?).await?;
         }
         Some(Command::Plugins(Plugins {
             command: PluginsCommand::Check,
         })) => {
-            let application = Application::load(&config)?;
-            println!("Loaded {} plugin(s).", application.plugin_count());
+            let plugin_count = builder.plugins().count();
+            builder.start().await?;
+            println!("Loaded {plugin_count} plugin(s).");
         }
         Some(Command::Plugins(Plugins {
             command: PluginsCommand::List,
-        })) => print!("{}", plugin_list(&config)),
+        })) => print!("{}", plugin_list(&builder)),
     }
     Ok(())
 }
 
-fn plugin_list(config: &Config) -> String {
+fn plugin_list(builder: &SageBuilder) -> String {
     let mut output = String::from("ID\tCOMPONENT\n");
-    for (id, plugin) in config.plugins() {
+    for (id, component) in builder.plugins() {
         output.push_str(id);
         output.push('\t');
-        output.push_str(&plugin.component().to_string_lossy());
+        output.push_str(&component.to_string_lossy());
         output.push('\n');
     }
     output

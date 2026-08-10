@@ -136,14 +136,6 @@ impl SessionManager {
         Ok(state)
     }
 
-    pub(crate) fn get(&self, id: SessionId) -> Option<Arc<SessionState>> {
-        self.sessions
-            .lock()
-            .expect("session registry lock poisoned")
-            .get(&id)
-            .cloned()
-    }
-
     pub(crate) fn owns(&self, state: &Arc<SessionState>) -> bool {
         self.sessions
             .lock()
@@ -184,7 +176,6 @@ mod tests {
             vec![Message::System("be helpful".to_owned())]
         );
         assert!(manager.owns(&state));
-        assert!(Arc::ptr_eq(&manager.get(state.id).unwrap(), &state));
     }
 
     #[tokio::test]
