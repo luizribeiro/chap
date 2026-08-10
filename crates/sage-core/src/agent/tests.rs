@@ -1,5 +1,5 @@
 use super::{
-    SageBuilder,
+    AgentBuilder,
     provider::{CompletionBackend, CompletionFuture, ProviderCompletion},
     turn::run_agent_loop,
 };
@@ -29,7 +29,7 @@ model = "example-model"
     )
     .unwrap();
 
-    let builder = SageBuilder::load(&config_path).unwrap();
+    let builder = AgentBuilder::load(&config_path).unwrap();
 
     assert_eq!(builder.plugins().count(), 1);
     assert_eq!(
@@ -55,7 +55,7 @@ component = "provider.wasm"
     )
     .unwrap();
 
-    let error = match SageBuilder::load(&config_path).unwrap().start().await {
+    let error = match AgentBuilder::load(&config_path).unwrap().start().await {
         Ok(_) => panic!("mismatched plugin id should be rejected"),
         Err(error) => error,
     };

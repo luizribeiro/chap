@@ -3,7 +3,7 @@ mod config;
 mod session;
 mod tool;
 
-pub use agent::{Sage, SageBuilder};
+pub use agent::{Agent, AgentBuilder};
 pub use session::{
     AssistantContent, Message, Session, SessionId, SessionOptions, ToolCall, ToolResult,
 };

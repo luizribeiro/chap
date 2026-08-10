@@ -1,7 +1,7 @@
 mod tui;
 
 use clap::{Args, Parser, Subcommand};
-use sage_core::SageBuilder;
+use sage_core::AgentBuilder;
 use std::{path::PathBuf, process::ExitCode};
 use unicode_width::UnicodeWidthStr;
 
@@ -48,7 +48,7 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<(), String> {
-    let builder = SageBuilder::load(&cli.config)?;
+    let builder = AgentBuilder::load(&cli.config)?;
     match cli.command {
         None => {
             tui::run(builder.start().await?).await?;
@@ -67,7 +67,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     Ok(())
 }
 
-fn plugin_list(builder: &SageBuilder) -> Result<String, String> {
+fn plugin_list(builder: &AgentBuilder) -> Result<String, String> {
     let mut rows = Vec::new();
     for (id, component) in builder.plugins() {
         let roles = builder.plugin_roles(id)?;

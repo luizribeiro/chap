@@ -20,23 +20,23 @@ type InnerApplication = lockgate::Application<AppState>;
 type InnerRuntime = lockgate::Runtime<AppState>;
 type LoadedPlugin = Component<bindings::ProviderPlugin>;
 
-pub struct SageBuilder {
+pub struct AgentBuilder {
     config: Config,
     tools: ToolRegistry,
 }
 
-pub struct Sage {
-    inner: Arc<SageInner>,
+pub struct Agent {
+    inner: Arc<AgentInner>,
 }
 
-pub(crate) struct SageInner {
+pub(crate) struct AgentInner {
     lockgate: InnerRuntime,
     plugins: BTreeMap<String, LoadedPlugin>,
     sessions: SessionManager,
     tools: ToolRegistry,
 }
 
-impl SageBuilder {
+impl AgentBuilder {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         Ok(Self {
             config: Config::load(path.as_ref())?,
@@ -75,7 +75,7 @@ impl SageBuilder {
         Ok(self)
     }
 
-    pub async fn start(self) -> Result<Sage, String> {
+    pub async fn start(self) -> Result<Agent, String> {
         let mut lockgate = self.lockgate()?;
         let plugins = Self::load_plugins(&mut lockgate, &self.config)?;
         let lockgate = Self::apply_policy(lockgate, &plugins)?;
@@ -83,8 +83,8 @@ impl SageBuilder {
             .run()
             .await
             .map_err(|error| format!("failed to start plugin runtime: {error}"))?;
-        Ok(Sage {
-            inner: Arc::new(SageInner {
+        Ok(Agent {
+            inner: Arc::new(AgentInner {
                 lockgate,
                 plugins,
                 sessions: SessionManager::new(),
@@ -182,7 +182,7 @@ impl SageBuilder {
     }
 }
 
-impl Sage {
+impl Agent {
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
         self.inner.tools.definitions()
     }
@@ -199,7 +199,7 @@ impl Sage {
     }
 }
 
-impl SageInner {
+impl AgentInner {
     async fn run_turn(&self, session: &Session, input: String) -> Result<String, String> {
         if !self.sessions.owns(&session.state) {
             return Err("session does not belong to this runtime".to_owned());
@@ -209,7 +209,7 @@ impl SageInner {
     }
 }
 
-impl SessionExecutor for SageInner {
+impl SessionExecutor for AgentInner {
     fn send<'a>(&'a self, session: &'a Session, input: String) -> SessionFuture<'a> {
         Box::pin(self.run_turn(session, input))
     }

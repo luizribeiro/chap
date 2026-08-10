@@ -13,7 +13,7 @@ struct TuiContext {
     session: Session,
 }
 
-pub async fn run(sage: sage_core::Sage) -> Result<(), String> {
+pub async fn run(sage: sage_core::Agent) -> Result<(), String> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return Err("the terminal interface requires an interactive terminal".into());
     }

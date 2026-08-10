@@ -1,4 +1,4 @@
-use super::{SageInner, bindings};
+use super::{AgentInner, bindings};
 use crate::{AssistantContent, Message, ToolCall, ToolDefinition};
 use bindings::__lockgate_world_0::exports::sage::agent::provider as provider_bindings;
 use std::{future::Future, pin::Pin};
@@ -11,12 +11,12 @@ pub(super) trait CompletionBackend: Sync {
 }
 
 pub(super) struct PluginBackend<'a> {
-    runtime: &'a SageInner,
+    runtime: &'a AgentInner,
     provider: &'a str,
 }
 
 impl<'a> PluginBackend<'a> {
-    pub(super) fn new(runtime: &'a SageInner, provider: &'a str) -> Self {
+    pub(super) fn new(runtime: &'a AgentInner, provider: &'a str) -> Self {
         Self { runtime, provider }
     }
 }
@@ -27,7 +27,7 @@ impl CompletionBackend for PluginBackend<'_> {
     }
 }
 
-impl SageInner {
+impl AgentInner {
     async fn request_completion(
         &self,
         provider: &str,
