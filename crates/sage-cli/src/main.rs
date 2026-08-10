@@ -61,20 +61,27 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Some(Command::Plugins(Plugins {
             command: PluginsCommand::List,
-        })) => print!("{}", plugin_list(&builder)),
+        })) => print!("{}", plugin_list(&builder)?),
     }
     Ok(())
 }
 
-fn plugin_list(builder: &SageBuilder) -> String {
-    let mut output = String::from("ID\tCOMPONENT\n");
+fn plugin_list(builder: &SageBuilder) -> Result<String, String> {
+    let mut output = String::from("ID\tROLES\tCOMPONENT\n");
     for (id, component) in builder.plugins() {
+        let roles = builder.plugin_roles(id)?;
         output.push_str(id);
+        output.push('\t');
+        output.push_str(&if roles.is_empty() {
+            "-".to_owned()
+        } else {
+            roles.join(", ")
+        });
         output.push('\t');
         output.push_str(&component.to_string_lossy());
         output.push('\n');
     }
-    output
+    Ok(output)
 }
 
 #[cfg(test)]

@@ -38,6 +38,10 @@ impl Config {
             .map(|(id, plugin)| (id.as_str(), plugin))
     }
 
+    pub(crate) fn plugin(&self, id: &str) -> Option<&Plugin> {
+        self.plugins.get(id)
+    }
+
     pub(crate) fn component_path(&self, plugin: &Plugin) -> PathBuf {
         self.directory.join(&plugin.component)
     }

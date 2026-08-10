@@ -32,6 +32,10 @@ model = "example-model"
     let builder = SageBuilder::load(&config_path).unwrap();
 
     assert_eq!(builder.plugins().count(), 1);
+    assert_eq!(
+        builder.plugin_roles("example.provider").unwrap(),
+        ["provider"]
+    );
     builder.start().await.unwrap();
     fs::remove_dir_all(directory).unwrap();
 }

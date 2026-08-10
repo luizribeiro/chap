@@ -50,6 +50,23 @@ impl SageBuilder {
             .map(|(id, plugin)| (id, plugin.component()))
     }
 
+    pub fn plugin_roles(&self, id: &str) -> Result<Vec<&'static str>, String> {
+        let plugin = self
+            .config
+            .plugin(id)
+            .ok_or_else(|| format!("plugin `{id}` is not configured"))?;
+        let lockgate = self.lockgate()?;
+        let bytes = Self::plugin_bytes(&self.config, id, plugin)?;
+        let mut roles = Vec::new();
+        if lockgate
+            .supports::<bindings::ProviderPlugin>(&bytes)
+            .map_err(|error| format!("failed to inspect plugin `{id}`: {error}"))?
+        {
+            roles.push("provider");
+        }
+        Ok(roles)
+    }
+
     pub fn tool<T>(mut self, tool: T) -> Result<Self, String>
     where
         T: Tool + 'static,
@@ -59,9 +76,7 @@ impl SageBuilder {
     }
 
     pub async fn start(self) -> Result<Sage, String> {
-        let mut lockgate = lockgate::Application::new(AppState::from_config(&self.config)?)
-            .map_err(|error| format!("failed to create Lockgate application: {error}"))?
-            .fuel_per_call(PLUGIN_FUEL_PER_CALL);
+        let mut lockgate = self.lockgate()?;
         let plugins = Self::load_plugins(&mut lockgate, &self.config)?;
         let lockgate = Self::apply_policy(lockgate, &plugins)?;
         let lockgate = lockgate
@@ -76,6 +91,12 @@ impl SageBuilder {
                 tools: self.tools,
             }),
         })
+    }
+
+    fn lockgate(&self) -> Result<InnerApplication, String> {
+        lockgate::Application::new(AppState::from_config(&self.config)?)
+            .map_err(|error| format!("failed to create Lockgate application: {error}"))
+            .map(|lockgate| lockgate.fuel_per_call(PLUGIN_FUEL_PER_CALL))
     }
 
     fn load_plugins(
@@ -99,12 +120,7 @@ impl SageBuilder {
         plugin: &PluginConfig,
     ) -> Result<LoadedPlugin, String> {
         let path = config.component_path(plugin);
-        let bytes = fs::read(&path).map_err(|error| {
-            format!(
-                "failed to read plugin `{id}` from `{}`: {error}",
-                path.display()
-            )
-        })?;
+        let bytes = Self::plugin_bytes(config, id, plugin)?;
         let loaded = lockgate
             .add::<bindings::ProviderPlugin>(bytes)
             .map_err(|error| {
@@ -116,6 +132,16 @@ impl SageBuilder {
 
         Self::validate_plugin_id(lockgate, loaded, id, &path)?;
         Ok(loaded)
+    }
+
+    fn plugin_bytes(config: &Config, id: &str, plugin: &PluginConfig) -> Result<Vec<u8>, String> {
+        let path = config.component_path(plugin);
+        fs::read(&path).map_err(|error| {
+            format!(
+                "failed to read plugin `{id}` from `{}`: {error}",
+                path.display()
+            )
+        })
     }
 
     fn validate_plugin_id(
