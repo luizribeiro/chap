@@ -16,4 +16,6 @@ sage-core = { path = "../sage-core" }
 shlex.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
+two-face.workspace = true
+unicode-segmentation.workspace = true
 unicode-width.workspace = true
