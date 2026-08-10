@@ -1,14 +1,10 @@
 use super::{Footer, Header, Prompt, Transcript};
 use crate::tui::{ChatMessage, TuiContext};
 use iocraft::prelude::*;
-use std::sync::Arc;
 
 #[component]
 pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
-    let (runtime, session) = {
-        let context = hooks.use_context::<TuiContext>();
-        (Arc::clone(&context.runtime), context.session.clone())
-    };
+    let session = hooks.use_context::<TuiContext>().session.clone();
     let provider = session.provider().to_owned();
     let mut system = hooks.use_context_mut::<SystemContext>();
     let mut input = hooks.use_state(String::new);
@@ -19,10 +15,9 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
 
     let complete = hooks.use_async_handler({
         move |prompt: String| {
-            let runtime = Arc::clone(&runtime);
             let session = session.clone();
             async move {
-                let message = match runtime.run_turn(&session, prompt).await {
+                let message = match session.send(prompt).await {
                     Ok(completion) => ChatMessage::sage(completion),
                     Err(error) => ChatMessage::error(error),
                 };

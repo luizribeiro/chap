@@ -1,11 +1,13 @@
 use crate::config::{Config, Plugin as PluginConfig};
-use crate::session::{Session, SessionId, SessionManager, SessionOptions};
+use crate::session::{
+    Session, SessionExecutor, SessionFuture, SessionId, SessionManager, SessionOptions,
+};
 use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition};
 use host::{AppState, HTTP_CLIENT_INTERFACE, SETTINGS_INTERFACE};
 use lockgate::Component;
 use provider::PluginBackend;
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 use turn::run_agent_loop;
 
 mod bindings;
@@ -27,6 +29,10 @@ pub struct Application {
 }
 
 pub struct Runtime {
+    inner: Arc<RuntimeInner>,
+}
+
+pub(crate) struct RuntimeInner {
     lockgate: InnerRuntime,
     plugins: BTreeMap<String, LoadedPlugin>,
     sessions: SessionManager,
@@ -66,10 +72,12 @@ impl Application {
             .await
             .map_err(|error| format!("failed to start plugin runtime: {error}"))?;
         Ok(Runtime {
-            lockgate,
-            plugins: self.plugins,
-            sessions: SessionManager::new(),
-            tools: self.tools,
+            inner: Arc::new(RuntimeInner {
+                lockgate,
+                plugins: self.plugins,
+                sessions: SessionManager::new(),
+                tools: self.tools,
+            }),
         })
     }
 
@@ -153,29 +161,41 @@ impl Application {
 
 impl Runtime {
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
-        self.tools.definitions()
+        self.inner.tools.definitions()
     }
 
     pub fn create_session(&self, options: SessionOptions) -> Result<Session, String> {
-        if !self.plugins.contains_key(&options.provider) {
+        if !self.inner.plugins.contains_key(&options.provider) {
             return Err(format!(
                 "provider plugin `{}` is not configured",
                 options.provider
             ));
         }
-        self.sessions.create(options)
+        let state = self.inner.sessions.create(options)?;
+        Ok(Session::new(state, self.inner.clone()))
     }
 
     pub fn session(&self, id: SessionId) -> Option<Session> {
-        self.sessions.get(id)
+        self.inner
+            .sessions
+            .get(id)
+            .map(|state| Session::new(state, self.inner.clone()))
     }
+}
 
-    pub async fn run_turn(&self, session: &Session, input: String) -> Result<String, String> {
-        if !self.sessions.owns(session) {
+impl RuntimeInner {
+    async fn run_turn(&self, session: &Session, input: String) -> Result<String, String> {
+        if !self.sessions.owns(&session.state) {
             return Err("session does not belong to this runtime".to_owned());
         }
         let backend = PluginBackend::new(self, session.provider());
-        run_agent_loop(session, input, &self.tools, &backend).await
+        run_agent_loop(&session.state, input, &self.tools, &backend).await
+    }
+}
+
+impl SessionExecutor for RuntimeInner {
+    fn send<'a>(&'a self, session: &'a Session, input: String) -> SessionFuture<'a> {
+        Box::pin(self.run_turn(session, input))
     }
 }
 

@@ -64,7 +64,7 @@ component = "provider.wasm"
 #[tokio::test]
 async fn resumes_a_turn_after_executing_a_tool_call() {
     let manager = SessionManager::new();
-    let session = manager
+    let state = manager
         .create(SessionOptions::new("test-provider"))
         .unwrap();
     let backend = FakeBackend::new([
@@ -82,7 +82,7 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
     let mut tools = ToolRegistry::new();
     tools.register(EchoTool).unwrap();
 
-    let response = run_agent_loop(&session, "say hello".to_owned(), &tools, &backend)
+    let response = run_agent_loop(&state, "say hello".to_owned(), &tools, &backend)
         .await
         .unwrap();
 
@@ -100,7 +100,7 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
         ));
     }
 
-    let history = session.history().await;
+    let history = state.messages.read().await;
     assert_eq!(history.len(), 4);
     assert!(matches!(history[0], Message::User(ref input) if input == "say hello"));
     assert!(matches!(
@@ -119,7 +119,7 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
 #[tokio::test]
 async fn returns_tool_failures_to_the_provider() {
     let manager = SessionManager::new();
-    let session = manager
+    let state = manager
         .create(SessionOptions::new("test-provider"))
         .unwrap();
     let backend = FakeBackend::new([
@@ -138,7 +138,7 @@ async fn returns_tool_failures_to_the_provider() {
     ]);
 
     let response = run_agent_loop(
-        &session,
+        &state,
         "use a missing tool".to_owned(),
         &ToolRegistry::new(),
         &backend,

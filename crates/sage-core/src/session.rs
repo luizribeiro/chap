@@ -1,6 +1,8 @@
 use std::{
     collections::BTreeMap,
     fmt,
+    future::Future,
+    pin::Pin,
     sync::{Arc, Mutex},
 };
 use tokio::sync::{Mutex as AsyncMutex, RwLock};
@@ -68,9 +70,14 @@ impl SessionOptions {
 #[derive(Clone)]
 pub struct Session {
     pub(crate) state: Arc<SessionState>,
+    executor: Arc<dyn SessionExecutor>,
 }
 
 impl Session {
+    pub(crate) fn new(state: Arc<SessionState>, executor: Arc<dyn SessionExecutor>) -> Self {
+        Self { state, executor }
+    }
+
     pub fn id(&self) -> SessionId {
         self.state.id
     }
@@ -82,6 +89,17 @@ impl Session {
     pub async fn history(&self) -> Vec<Message> {
         self.state.messages.read().await.clone()
     }
+
+    pub async fn send(&self, input: impl Into<String>) -> Result<String, String> {
+        self.executor.send(self, input.into()).await
+    }
+}
+
+pub(crate) type SessionFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>>;
+
+pub(crate) trait SessionExecutor: Send + Sync {
+    fn send<'a>(&'a self, session: &'a Session, input: String) -> SessionFuture<'a>;
 }
 
 pub(crate) struct SessionManager {
@@ -95,7 +113,7 @@ impl SessionManager {
         }
     }
 
-    pub(crate) fn create(&self, options: SessionOptions) -> Result<Session, String> {
+    pub(crate) fn create(&self, options: SessionOptions) -> Result<Arc<SessionState>, String> {
         if options.provider.trim().is_empty() {
             return Err("a session provider is required".to_owned());
         }
@@ -115,24 +133,23 @@ impl SessionManager {
             .lock()
             .expect("session registry lock poisoned")
             .insert(id, Arc::clone(&state));
-        Ok(Session { state })
+        Ok(state)
     }
 
-    pub(crate) fn get(&self, id: SessionId) -> Option<Session> {
+    pub(crate) fn get(&self, id: SessionId) -> Option<Arc<SessionState>> {
         self.sessions
             .lock()
             .expect("session registry lock poisoned")
             .get(&id)
             .cloned()
-            .map(|state| Session { state })
     }
 
-    pub(crate) fn owns(&self, session: &Session) -> bool {
+    pub(crate) fn owns(&self, state: &Arc<SessionState>) -> bool {
         self.sessions
             .lock()
             .expect("session registry lock poisoned")
-            .get(&session.id())
-            .is_some_and(|state| Arc::ptr_eq(state, &session.state))
+            .get(&state.id)
+            .is_some_and(|registered| Arc::ptr_eq(registered, state))
     }
 }
 
@@ -147,18 +164,35 @@ pub(crate) struct SessionState {
 mod tests {
     use super::*;
 
+    struct EchoExecutor;
+
+    impl SessionExecutor for EchoExecutor {
+        fn send<'a>(&'a self, _session: &'a Session, input: String) -> SessionFuture<'a> {
+            Box::pin(async move { Ok(input) })
+        }
+    }
+
     #[tokio::test]
     async fn sessions_retain_system_prompts_in_their_history() {
         let manager = SessionManager::new();
-        let session = manager
+        let state = manager
             .create(SessionOptions::new("provider").with_system_prompt("be helpful"))
             .unwrap();
 
         assert_eq!(
-            session.history().await,
+            *state.messages.read().await,
             vec![Message::System("be helpful".to_owned())]
         );
-        assert!(manager.owns(&session));
-        assert_eq!(manager.get(session.id()).unwrap().id(), session.id());
+        assert!(manager.owns(&state));
+        assert!(Arc::ptr_eq(&manager.get(state.id).unwrap(), &state));
+    }
+
+    #[tokio::test]
+    async fn sessions_send_through_their_executor() {
+        let manager = SessionManager::new();
+        let state = manager.create(SessionOptions::new("provider")).unwrap();
+        let session = Session::new(state, Arc::new(EchoExecutor));
+
+        assert_eq!(session.send("hello").await.unwrap(), "hello");
     }
 }

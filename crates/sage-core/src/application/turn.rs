@@ -1,8 +1,10 @@
 use super::{MAX_PROVIDER_STEPS_PER_TURN, provider::CompletionBackend};
-use crate::{AssistantContent, Message, Session, ToolCall, ToolResult, tool::ToolRegistry};
+use crate::{
+    AssistantContent, Message, ToolCall, ToolResult, session::SessionState, tool::ToolRegistry,
+};
 
 pub(super) async fn run_agent_loop(
-    session: &Session,
+    session: &SessionState,
     input: String,
     tools: &ToolRegistry,
     backend: &impl CompletionBackend,
@@ -11,19 +13,13 @@ pub(super) async fn run_agent_loop(
         return Err("turn input cannot be empty".to_owned());
     }
 
-    let _turn = session.state.turn_lock.lock().await;
-    session
-        .state
-        .messages
-        .write()
-        .await
-        .push(Message::User(input));
+    let _turn = session.turn_lock.lock().await;
+    session.messages.write().await.push(Message::User(input));
 
     for _ in 0..MAX_PROVIDER_STEPS_PER_TURN {
-        let messages = session.state.messages.read().await.clone();
+        let messages = session.messages.read().await.clone();
         let completion = backend.complete(messages).await?;
         session
-            .state
             .messages
             .write()
             .await
@@ -44,7 +40,6 @@ pub(super) async fn run_agent_loop(
         for call in tool_calls {
             let result = execute_tool(tools, call).await;
             session
-                .state
                 .messages
                 .write()
                 .await
