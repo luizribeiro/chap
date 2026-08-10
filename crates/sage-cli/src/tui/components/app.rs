@@ -13,6 +13,7 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let mut input = hooks.use_state(String::new);
     let mut transcript = hooks.use_state(TranscriptModel::default);
     let mut busy = hooks.use_state(|| false);
+    let mut terminal_has_focus = hooks.use_state(|| true);
     let mut should_exit = hooks.use_state(|| false);
     let (terminal_width, terminal_height) = hooks.use_terminal_size();
 
@@ -53,18 +54,15 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
 
     hooks.use_terminal_events({
         let session = session.clone();
-        move |event| {
-            let TerminalEvent::Key(KeyEvent {
+        move |event| match event {
+            TerminalEvent::FocusGained => terminal_has_focus.set(true),
+            TerminalEvent::FocusLost => terminal_has_focus.set(false),
+            TerminalEvent::Key(KeyEvent {
                 code,
                 kind: KeyEventKind::Press,
                 modifiers,
                 ..
-            }) = event
-            else {
-                return;
-            };
-
-            match code {
+            }) => match code {
                 KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
                     should_exit.set(true);
                 }
@@ -84,7 +82,8 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
                     }
                 }
                 _ => {}
-            }
+            },
+            _ => {}
         }
     });
 
@@ -109,6 +108,7 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
                 },
             )
             Prompt(
+                has_focus: terminal_has_focus.get(),
                 value: input.to_string(),
                 on_change: move |value| input.set(value),
             )
