@@ -1,4 +1,16 @@
-use sage_core::SessionEventKind;
+use sage_core::{SessionEventKind, SteeringId};
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TranscriptModel {
+    pub messages: Vec<ChatMessage>,
+    pub pending_steering: Vec<PendingSteering>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingSteering {
+    pub id: SteeringId,
+    pub input: String,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChatMessage {
@@ -63,23 +75,31 @@ impl ChatMessage {
 }
 
 pub(super) fn apply_event(
-    messages: &mut Vec<ChatMessage>,
+    transcript: &mut TranscriptModel,
     event: SessionEventKind,
 ) -> Option<bool> {
     match event {
         SessionEventKind::RunStarted { input } => {
-            messages.push(ChatMessage::user(input));
+            transcript.messages.push(ChatMessage::user(input));
             Some(true)
         }
-        SessionEventKind::SteeringQueued { .. } | SessionEventKind::SteeringDiscarded { .. } => {
+        SessionEventKind::SteeringQueued { id, input } => {
+            transcript
+                .pending_steering
+                .push(PendingSteering { id, input });
             None
         }
-        SessionEventKind::SteeringApplied { input, .. } => {
-            messages.push(ChatMessage::user(input));
+        SessionEventKind::SteeringDiscarded { id, .. } => {
+            remove_pending_steering(transcript, id);
+            None
+        }
+        SessionEventKind::SteeringApplied { id, input } => {
+            remove_pending_steering(transcript, id);
+            transcript.messages.push(ChatMessage::user(input));
             None
         }
         SessionEventKind::AssistantMessage { text } => {
-            messages.push(ChatMessage::sage(text));
+            transcript.messages.push(ChatMessage::sage(text));
             None
         }
         SessionEventKind::ToolRequested {
@@ -87,7 +107,7 @@ pub(super) fn apply_event(
             name,
             arguments,
         } => {
-            messages.push(ChatMessage::tool(
+            transcript.messages.push(ChatMessage::tool(
                 call_id,
                 name,
                 arguments,
@@ -100,12 +120,12 @@ pub(super) fn apply_event(
             name,
             arguments,
         } => {
-            if let Some(tool) = tool_mut(messages, &call_id) {
+            if let Some(tool) = tool_mut(&mut transcript.messages, &call_id) {
                 tool.name = name;
                 tool.arguments = arguments;
                 tool.state = ToolState::Running;
             } else {
-                messages.push(ChatMessage::tool(
+                transcript.messages.push(ChatMessage::tool(
                     call_id,
                     name,
                     arguments,
@@ -119,11 +139,11 @@ pub(super) fn apply_event(
             name,
             result,
         } => {
-            if let Some(tool) = tool_mut(messages, &call_id) {
+            if let Some(tool) = tool_mut(&mut transcript.messages, &call_id) {
                 tool.name = name;
                 tool.state = ToolState::Finished(result);
             } else {
-                messages.push(ChatMessage::tool(
+                transcript.messages.push(ChatMessage::tool(
                     call_id,
                     name,
                     String::new(),
@@ -134,10 +154,20 @@ pub(super) fn apply_event(
         }
         SessionEventKind::RunCompleted { .. } => Some(false),
         SessionEventKind::RunFailed { error } => {
-            messages.push(ChatMessage::error(error));
+            transcript.messages.push(ChatMessage::error(error));
             Some(false)
         }
         _ => None,
+    }
+}
+
+fn remove_pending_steering(transcript: &mut TranscriptModel, id: SteeringId) {
+    if let Some(index) = transcript
+        .pending_steering
+        .iter()
+        .position(|steering| steering.id == id)
+    {
+        transcript.pending_steering.remove(index);
     }
 }
 
@@ -154,11 +184,11 @@ mod tests {
 
     #[test]
     fn applies_run_and_tool_events_to_the_transcript() {
-        let mut messages = Vec::new();
+        let mut transcript = TranscriptModel::default();
 
         assert_eq!(
             apply_event(
-                &mut messages,
+                &mut transcript,
                 SessionEventKind::RunStarted {
                     input: "hello".to_owned(),
                 },
@@ -166,7 +196,7 @@ mod tests {
             Some(true)
         );
         apply_event(
-            &mut messages,
+            &mut transcript,
             SessionEventKind::ToolRequested {
                 call_id: "call-1".to_owned(),
                 name: "echo".to_owned(),
@@ -174,7 +204,7 @@ mod tests {
             },
         );
         apply_event(
-            &mut messages,
+            &mut transcript,
             SessionEventKind::ToolStarted {
                 call_id: "call-1".to_owned(),
                 name: "echo".to_owned(),
@@ -182,7 +212,7 @@ mod tests {
             },
         );
         apply_event(
-            &mut messages,
+            &mut transcript,
             SessionEventKind::ToolFinished {
                 call_id: "call-1".to_owned(),
                 name: "echo".to_owned(),
@@ -190,14 +220,14 @@ mod tests {
             },
         );
         apply_event(
-            &mut messages,
+            &mut transcript,
             SessionEventKind::AssistantMessage {
                 text: "done".to_owned(),
             },
         );
 
         assert_eq!(
-            messages,
+            transcript.messages,
             vec![
                 ChatMessage::user("hello".to_owned()),
                 ChatMessage::tool(
@@ -211,7 +241,7 @@ mod tests {
         );
         assert_eq!(
             apply_event(
-                &mut messages,
+                &mut transcript,
                 SessionEventKind::RunCompleted {
                     response: "done".to_owned(),
                 },
@@ -222,17 +252,20 @@ mod tests {
 
     #[test]
     fn renders_run_failures_as_errors() {
-        let mut messages = Vec::new();
+        let mut transcript = TranscriptModel::default();
 
         assert_eq!(
             apply_event(
-                &mut messages,
+                &mut transcript,
                 SessionEventKind::RunFailed {
                     error: "broken".to_owned(),
                 },
             ),
             Some(false)
         );
-        assert_eq!(messages, vec![ChatMessage::error("broken".to_owned())]);
+        assert_eq!(
+            transcript.messages,
+            vec![ChatMessage::error("broken".to_owned())]
+        );
     }
 }

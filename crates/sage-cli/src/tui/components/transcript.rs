@@ -1,15 +1,18 @@
-use super::{MessageView, ToolView};
-use crate::tui::ChatMessage;
+use super::{MessageView, PendingSteeringView, ToolView};
+use crate::tui::{ChatMessage, model::TranscriptModel};
 use iocraft::prelude::*;
+use sage_core::SteeringId;
 
 #[derive(Default, Props)]
 pub struct TranscriptProps {
-    pub messages: Vec<ChatMessage>,
+    pub model: TranscriptModel,
+    pub on_discard: Handler<SteeringId>,
 }
 
 #[component]
 pub fn Transcript(props: &TranscriptProps) -> impl Into<AnyElement<'static>> {
     let messages = props
+        .model
         .messages
         .iter()
         .enumerate()
@@ -26,6 +29,21 @@ pub fn Transcript(props: &TranscriptProps) -> impl Into<AnyElement<'static>> {
                 ToolView(key: index, tool: tool.clone())
             }
             .into_any(),
+        })
+        .collect::<Vec<_>>();
+    let pending = props
+        .model
+        .pending_steering
+        .iter()
+        .enumerate()
+        .map(|(index, steering)| {
+            element! {
+                PendingSteeringView(
+                    key: props.model.messages.len() + index,
+                    steering: Some(steering.clone()),
+                    on_discard: props.on_discard.clone(),
+                )
+            }
         })
         .collect::<Vec<_>>();
 
@@ -46,6 +64,7 @@ pub fn Transcript(props: &TranscriptProps) -> impl Into<AnyElement<'static>> {
                     row_gap: 1,
                 ) {
                     #(messages)
+                    #(pending)
                 }
             }
         }
