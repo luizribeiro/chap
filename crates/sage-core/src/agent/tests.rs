@@ -50,6 +50,27 @@ model = "example-model"
     fs::remove_dir_all(directory).unwrap();
 }
 
+#[test]
+fn discovers_a_configured_tool_plugin() {
+    let directory = test_directory();
+    let component = directory.join("tools.wasm");
+    fs::write(&component, tool_component("example.tools")).unwrap();
+    let config_path = directory.join("sage.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins."example.tools"]
+component = "tools.wasm"
+"#,
+    )
+    .unwrap();
+
+    let builder = AgentBuilder::load(&config_path).unwrap();
+
+    assert_eq!(builder.plugin_roles("example.tools").unwrap(), ["tool"]);
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[tokio::test]
 async fn rejects_a_config_id_that_differs_from_plugin_metadata() {
     let directory = test_directory();
@@ -578,10 +599,18 @@ impl Tool for EchoTool {
 }
 
 fn provider_component(id: &str) -> Vec<u8> {
+    plugin_component(id, "provider-plugin")
+}
+
+fn tool_component(id: &str) -> Vec<u8> {
+    plugin_component(id, "tool-plugin")
+}
+
+fn plugin_component(id: &str, world_name: &str) -> Vec<u8> {
     let mut resolve = Resolve::new();
     let wit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../wit");
     let package = resolve.push_path(wit).unwrap().0;
-    let world = resolve.packages[package].worlds["provider-plugin"];
+    let world = resolve.packages[package].worlds[world_name];
     let mut module = dummy_module(&resolve, world, ManglingAndAbi::Standard32);
     embed_component_metadata(&mut module, &resolve, world, StringEncoding::UTF8).unwrap();
     let bytes = ComponentEncoder::default()

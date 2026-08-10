@@ -4,6 +4,17 @@ interface settings {
   get: async func(key: string) -> option<string>;
 }
 
+interface tools {
+  record tool-definition {
+    name: string,
+    description: string,
+    parameters: string,
+  }
+
+  definitions: async func() -> result<list<tool-definition>, string>;
+  execute: async func(name: string, arguments: string) -> result<string, string>;
+}
+
 interface provider {
   record tool-definition {
     name: string,
@@ -59,4 +70,9 @@ interface provider {
 world provider-plugin {
   import settings;
   export provider;
+}
+
+world tool-plugin {
+  import settings;
+  export tools;
 }

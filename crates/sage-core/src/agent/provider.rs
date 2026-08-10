@@ -39,7 +39,7 @@ impl AgentInner {
         let plugin = self
             .plugins
             .get(provider)
-            .copied()
+            .and_then(|plugin| plugin.provider)
             .ok_or_else(|| format!("provider plugin `{provider}` is not configured"))?;
         self.lockgate
             .component(plugin)
