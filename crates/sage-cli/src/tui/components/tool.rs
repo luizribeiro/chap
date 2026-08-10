@@ -3,6 +3,8 @@ use iocraft::prelude::*;
 use serde_json::Value;
 use std::sync::Arc;
 
+use super::Markdown;
+
 const MAX_ARGUMENT_SUMMARY_CHARS: usize = 160;
 const MAX_ARGUMENT_VALUE_CHARS: usize = 80;
 
@@ -84,11 +86,26 @@ struct ToolDetailsProps {
 }
 
 #[component]
-fn ToolDetails(props: &ToolDetailsProps) -> impl Into<AnyElement<'static>> {
+fn ToolDetails(mut hooks: Hooks, props: &ToolDetailsProps) -> impl Into<AnyElement<'static>> {
+    let arguments = Arc::clone(&props.tool.arguments);
+    let arguments_document = hooks.use_memo(
+        {
+            let arguments = Arc::clone(&arguments);
+            move || detail_document(&arguments)
+        },
+        arc_identity(&arguments),
+    );
     let output = match &props.tool.state {
         ToolState::Finished(Ok(output)) => Some(Arc::clone(output)),
         _ => None,
     };
+    let output_document = hooks.use_memo(
+        {
+            let output = output.clone();
+            move || output.map(|output| detail_document(&output))
+        },
+        output.as_ref().map(arc_identity),
+    );
 
     element! {
         View(
@@ -102,14 +119,14 @@ fn ToolDetails(props: &ToolDetailsProps) -> impl Into<AnyElement<'static>> {
                 Some(element! {
                     View(flex_direction: FlexDirection::Column) {
                         Text(content: "input", color: Color::DarkGrey, weight: Weight::Bold)
-                        Text(content: props.tool.arguments.to_string())
+                        Markdown(content: Arc::clone(&arguments_document))
                     }
                 })
             })
-            #(output.map(|output| element! {
+            #(output_document.map(|output| element! {
                 View(flex_direction: FlexDirection::Column, padding_top: 1) {
                     Text(content: "output", color: Color::DarkGrey, weight: Weight::Bold)
-                    Text(content: output.to_string())
+                    Markdown(content: output)
                 }
             }))
         }
@@ -165,6 +182,36 @@ fn truncate(value: &str, max_chars: usize) -> String {
     }
 }
 
+fn arc_identity(value: &Arc<str>) -> (usize, usize) {
+    (Arc::as_ptr(value) as *const () as usize, value.len())
+}
+
+fn detail_document(content: &str) -> Arc<str> {
+    let (content, language) = match serde_json::from_str::<Value>(content) {
+        Ok(value) => (
+            serde_json::to_string_pretty(&value).unwrap_or_else(|_| content.to_owned()),
+            "json",
+        ),
+        Err(_) => (content.to_owned(), "text"),
+    };
+    let fence = "`".repeat(longest_backtick_run(&content).saturating_add(1).max(3));
+
+    format!("{fence}{language}\n{content}\n{fence}").into()
+}
+
+fn longest_backtick_run(content: &str) -> usize {
+    content
+        .chars()
+        .fold((0, 0), |(longest, current), character| {
+            if character == '`' {
+                (longest.max(current + 1), current + 1)
+            } else {
+                (longest, 0)
+            }
+        })
+        .0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +237,40 @@ mod tests {
             Some("some unstructured input".to_owned())
         );
         assert_eq!(summarize_arguments("{}"), None);
+    }
+
+    #[test]
+    fn formats_json_details_for_highlighting() {
+        assert_eq!(
+            detail_document(r#"{"query":"iocraft","limit":2}"#).as_ref(),
+            "```json\n{\n  \"limit\": 2,\n  \"query\": \"iocraft\"\n}\n```"
+        );
+    }
+
+    #[test]
+    fn chooses_a_fence_that_cannot_terminate_plain_text() {
+        assert_eq!(
+            detail_document("before ``` after").as_ref(),
+            "````text\nbefore ``` after\n````"
+        );
+    }
+
+    #[test]
+    fn keeps_successful_output_out_of_the_collapsed_view() {
+        let output = element! {
+            View(width: 80) {
+                ToolView(tool: ToolMessage {
+                    call_id: "call-1".to_owned(),
+                    name: "web_search".to_owned(),
+                    arguments: Arc::from(r#"{"query":"iocraft"}"#),
+                    state: ToolState::Finished(Ok(Arc::from("large private output"))),
+                })
+            }
+        }
+        .to_string();
+
+        assert!(output.contains("✓ web search · done"));
+        assert!(output.contains("query: “iocraft”"));
+        assert!(!output.contains("large private output"));
     }
 }
