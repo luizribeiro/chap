@@ -1,4 +1,5 @@
 use sage_core::{SessionEventKind, SteeringId};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TranscriptModel {
@@ -14,7 +15,10 @@ pub struct PendingSteering {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChatMessage {
-    Text { role: MessageRole, content: String },
+    Text {
+        role: MessageRole,
+        content: Arc<str>,
+    },
     Tool(ToolMessage),
     Status(String),
 }
@@ -48,21 +52,21 @@ impl ChatMessage {
     pub(super) fn user(content: String) -> Self {
         Self::Text {
             role: MessageRole::User,
-            content,
+            content: content.into(),
         }
     }
 
     pub(super) fn sage(content: String) -> Self {
         Self::Text {
             role: MessageRole::Sage,
-            content,
+            content: content.into(),
         }
     }
 
     pub(super) fn error(content: String) -> Self {
         Self::Text {
             role: MessageRole::Error,
-            content,
+            content: content.into(),
         }
     }
 

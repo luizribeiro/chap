@@ -13,6 +13,7 @@ mod transcript;
 pub(super) use app::Sage;
 use footer::Footer;
 use header::Header;
+use markdown::Markdown;
 use message::MessageView;
 use pending_steering::PendingSteeringView;
 use prompt::Prompt;

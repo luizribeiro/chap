@@ -91,7 +91,6 @@ pub(super) struct RenderedDocument {
 }
 
 impl RenderedDocument {
-    #[allow(dead_code)]
     pub fn size(&self) -> (usize, usize) {
         (
             self.lines
@@ -331,6 +330,9 @@ fn layout_table(
         return Vec::new();
     }
     let separator_width = columns.saturating_sub(1) * 3;
+    if width < separator_width + columns {
+        return layout_compact_table(head, rows, width);
+    }
     let available = width.saturating_sub(separator_width).max(columns);
     let mut widths = vec![1; columns];
     for row in std::iter::once(head).chain(rows.iter().map(Vec::as_slice)) {
@@ -375,6 +377,47 @@ fn layout_table(
     }
     for row in rows {
         output.extend(layout_table_row(row, alignments, &widths, false));
+    }
+    output
+}
+
+fn layout_compact_table(
+    head: &[TableCell],
+    rows: &[Vec<TableCell>],
+    width: usize,
+) -> Vec<RenderedLine> {
+    let mut output = Vec::new();
+    for (index, row) in std::iter::once(head)
+        .chain(rows.iter().map(Vec::as_slice))
+        .enumerate()
+    {
+        let base = TextStyle {
+            weight: if index == 0 && !head.is_empty() {
+                Weight::Bold
+            } else {
+                Weight::Normal
+            },
+            ..Default::default()
+        };
+        let mut spans = Vec::new();
+        for (cell_index, cell) in row.iter().enumerate() {
+            if cell_index > 0 {
+                push_span(
+                    &mut spans,
+                    RenderedSpan::new(
+                        " | ",
+                        TextStyle {
+                            color: Some(Color::DarkGrey),
+                            ..Default::default()
+                        },
+                    ),
+                );
+            }
+            for span in inline_spans(&cell.content, base.clone()) {
+                push_span(&mut spans, span);
+            }
+        }
+        output.extend(wrap_words(&spans, width));
     }
     output
 }
@@ -542,40 +585,67 @@ fn wrap_words(spans: &[RenderedSpan], width: usize) -> Vec<RenderedLine> {
     let width = width.max(1);
     let mut lines = vec![RenderedLine::default()];
 
-    for span in spans {
-        for boundary in span.text.split_word_bounds() {
-            let mut pieces = boundary.split('\n').peekable();
-            while let Some(piece) = pieces.next() {
-                if !piece.is_empty() {
-                    append_word_piece(&mut lines, piece, &span.style, width);
-                }
-                if pieces.peek().is_some() {
+    for token in word_tokens(spans) {
+        match token {
+            WordToken::Word(spans) => {
+                let token_width = spans.iter().map(RenderedSpan::width).sum::<usize>();
+                let current_width = lines.last().unwrap().width();
+                if current_width > 0 && current_width + token_width > width {
                     finish_line(&mut lines);
                 }
+                for span in spans {
+                    append_fitting(&mut lines, &span.text, &span.style, width);
+                }
             }
+            WordToken::Space(style) => {
+                let current_width = lines.last().unwrap().width();
+                if current_width > 0 && current_width < width {
+                    lines
+                        .last_mut()
+                        .unwrap()
+                        .push(RenderedSpan::new(" ", style));
+                }
+            }
+            WordToken::Break => finish_line(&mut lines),
         }
     }
     lines.last_mut().unwrap().trim_end();
     lines
 }
 
-fn append_word_piece(lines: &mut Vec<RenderedLine>, piece: &str, style: &TextStyle, width: usize) {
-    if piece.chars().all(char::is_whitespace) {
-        let current_width = lines.last().unwrap().width();
-        if current_width > 0 && current_width < width {
-            lines
-                .last_mut()
-                .unwrap()
-                .push(RenderedSpan::new(" ", style.clone()));
+enum WordToken {
+    Word(Vec<RenderedSpan>),
+    Space(TextStyle),
+    Break,
+}
+
+fn word_tokens(spans: &[RenderedSpan]) -> Vec<WordToken> {
+    let mut tokens = Vec::new();
+    let mut word = Vec::new();
+
+    for span in spans {
+        for grapheme in span.text.graphemes(true) {
+            if grapheme == "\n" {
+                flush_word(&mut tokens, &mut word);
+                tokens.push(WordToken::Break);
+            } else if grapheme.chars().all(char::is_whitespace) {
+                flush_word(&mut tokens, &mut word);
+                if !matches!(tokens.last(), Some(WordToken::Space(_) | WordToken::Break)) {
+                    tokens.push(WordToken::Space(span.style.clone()));
+                }
+            } else {
+                push_span(&mut word, RenderedSpan::new(grapheme, span.style.clone()));
+            }
         }
-        return;
     }
-    let piece_width = piece.width();
-    let current_width = lines.last().unwrap().width();
-    if current_width > 0 && current_width + piece_width > width {
-        finish_line(lines);
+    flush_word(&mut tokens, &mut word);
+    tokens
+}
+
+fn flush_word(tokens: &mut Vec<WordToken>, word: &mut Vec<RenderedSpan>) {
+    if !word.is_empty() {
+        tokens.push(WordToken::Word(std::mem::take(word)));
     }
-    append_fitting(lines, piece, style, width);
 }
 
 fn append_fitting(lines: &mut Vec<RenderedLine>, text: &str, style: &TextStyle, width: usize) {
@@ -677,6 +747,14 @@ mod tests {
     }
 
     #[test]
+    fn keeps_punctuation_attached_to_the_preceding_word() {
+        let mut layout = MarkdownLayout::new(Arc::from("hello, world"));
+        let document = layout.layout(6);
+
+        assert_eq!(plain(&document), ["hello,", "world"]);
+    }
+
+    #[test]
     fn lays_out_lists_quotes_and_task_markers() {
         let mut layout = MarkdownLayout::new(Arc::from(
             "> quoted words here\n\n- [x] finished\n- a longer pending item",
@@ -707,6 +785,15 @@ mod tests {
             plain(&document),
             ["left  │ right", "──────┼──────", "value │    42",]
         );
+    }
+
+    #[test]
+    fn keeps_tables_within_very_narrow_layouts() {
+        let mut layout =
+            MarkdownLayout::new(Arc::from("| a | b | c |\n| - | - | - |\n| 1 | 2 | 3 |"));
+        let document = layout.layout(5);
+
+        assert!(document.lines.iter().all(|line| line.width() <= 5));
     }
 
     #[test]

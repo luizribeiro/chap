@@ -1,10 +1,13 @@
 use crate::tui::model::MessageRole;
 use iocraft::prelude::*;
+use std::sync::Arc;
+
+use super::Markdown;
 
 #[derive(Default, Props)]
 pub struct MessageViewProps {
     pub role: MessageRole,
-    pub content: String,
+    pub content: Arc<str>,
 }
 
 #[component]
@@ -15,10 +18,20 @@ pub fn MessageView(props: &MessageViewProps) -> impl Into<AnyElement<'static>> {
         MessageRole::Error => ("error", Color::Red),
     };
 
-    element! {
-        View(flex_direction: FlexDirection::Column) {
-            Text(content: label, color, weight: Weight::Bold)
-            Text(content: props.content.clone())
+    match props.role {
+        MessageRole::Sage => element! {
+            View(flex_direction: FlexDirection::Column) {
+                Text(content: label, color, weight: Weight::Bold)
+                Markdown(content: Arc::clone(&props.content))
+            }
         }
+        .into_any(),
+        MessageRole::User | MessageRole::Error => element! {
+            View(flex_direction: FlexDirection::Column) {
+                Text(content: label, color, weight: Weight::Bold)
+                Text(content: props.content.to_string())
+            }
+        }
+        .into_any(),
     }
 }
