@@ -1853,6 +1853,7 @@ dependencies = [
  "iocraft",
  "pulldown-cmark",
  "sage-core",
+ "serde_json",
  "shlex",
  "tempfile",
  "tokio",
