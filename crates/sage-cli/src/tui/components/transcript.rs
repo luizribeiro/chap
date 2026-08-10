@@ -57,7 +57,7 @@ pub fn Transcript(props: &TranscriptProps) -> impl Into<AnyElement<'static>> {
             padding_top: 1,
             margin_bottom: 1,
         ) {
-            ScrollView(auto_scroll: true) {
+            ScrollView(auto_scroll: true, keyboard_scroll: Some(false)) {
                 View(
                     width: 100pct,
                     flex_direction: FlexDirection::Column,
