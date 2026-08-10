@@ -1,6 +1,6 @@
 use super::{MAX_PROVIDER_STEPS_PER_TURN, provider::CompletionBackend};
 use crate::{
-    session::{AssistantContent, Message, SessionState, ToolCall, ToolResult},
+    session::{AssistantContent, Message, SessionEventKind, SessionState, ToolCall, ToolResult},
     tool::ToolRegistry,
 };
 
@@ -14,9 +14,31 @@ pub(super) async fn run_agent_loop(
         return Err("turn input cannot be empty".to_owned());
     }
 
-    let _turn = session.turn_lock.lock().await;
-    session.messages.write().await.push(Message::User(input));
+    let _run = session.turn_lock.lock().await;
+    session
+        .messages
+        .write()
+        .await
+        .push(Message::User(input.clone()));
+    session.emit(SessionEventKind::RunStarted { input });
 
+    let result = run_steps(session, tools, backend).await;
+    match &result {
+        Ok(response) => session.emit(SessionEventKind::RunCompleted {
+            response: response.clone(),
+        }),
+        Err(error) => session.emit(SessionEventKind::RunFailed {
+            error: error.clone(),
+        }),
+    }
+    result
+}
+
+async fn run_steps(
+    session: &SessionState,
+    tools: &ToolRegistry,
+    backend: &impl CompletionBackend,
+) -> Result<String, String> {
     for _ in 0..MAX_PROVIDER_STEPS_PER_TURN {
         let messages = session.messages.read().await.clone();
         let completion = backend.complete(messages).await?;
@@ -25,6 +47,11 @@ pub(super) async fn run_agent_loop(
             .write()
             .await
             .push(Message::Assistant(completion.content.clone()));
+
+        let text = completion_text(&completion.content);
+        if let Some(text) = &text {
+            session.emit(SessionEventKind::AssistantMessage { text: text.clone() });
+        }
 
         let tool_calls = completion
             .content
@@ -35,16 +62,41 @@ pub(super) async fn run_agent_loop(
             })
             .collect::<Vec<_>>();
         if tool_calls.is_empty() {
-            return completion_text(&completion.content);
+            return text.ok_or_else(|| "provider returned a completion without text".to_owned());
+        }
+
+        for call in &tool_calls {
+            session.emit(SessionEventKind::ToolRequested {
+                call_id: call.id.clone(),
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+            });
         }
 
         for call in tool_calls {
+            session.emit(SessionEventKind::ToolStarted {
+                call_id: call.id.clone(),
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+            });
             let result = execute_tool(tools, call).await;
+            let event_result = if result.is_error {
+                Err(result.output.clone())
+            } else {
+                Ok(result.output.clone())
+            };
+            let call_id = result.call_id.clone();
+            let name = result.name.clone();
             session
                 .messages
                 .write()
                 .await
                 .push(Message::ToolResult(result));
+            session.emit(SessionEventKind::ToolFinished {
+                call_id,
+                name,
+                result: event_result,
+            });
         }
     }
 
@@ -71,7 +123,7 @@ async fn execute_tool(tools: &ToolRegistry, call: ToolCall) -> ToolResult {
     }
 }
 
-fn completion_text(content: &[AssistantContent]) -> Result<String, String> {
+fn completion_text(content: &[AssistantContent]) -> Option<String> {
     let text = content
         .iter()
         .filter_map(|content| match content {
@@ -80,7 +132,7 @@ fn completion_text(content: &[AssistantContent]) -> Result<String, String> {
         })
         .collect::<Vec<_>>();
     if text.is_empty() {
-        return Err("provider returned a completion without text".to_owned());
+        return None;
     }
-    Ok(text.join("\n"))
+    Some(text.join("\n"))
 }

@@ -5,7 +5,9 @@ use super::{
 };
 use crate::{
     SessionOptions, Tool, ToolDefinition,
-    session::{AssistantContent, Message, SessionManager, ToolCall},
+    session::{
+        AssistantContent, Message, SessionEventKind, SessionEvents, SessionManager, ToolCall,
+    },
     tool::ToolRegistry,
 };
 use std::{collections::VecDeque, fs, path::Path, sync::Mutex, time::SystemTime};
@@ -71,13 +73,17 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
     let state = manager
         .create(SessionOptions::new("test-provider"))
         .unwrap();
+    let mut events = state.subscribe();
     let backend = FakeBackend::new([
         ProviderCompletion {
-            content: vec![AssistantContent::ToolCall(ToolCall {
-                id: "call-1".to_owned(),
-                name: "echo".to_owned(),
-                arguments: r#"{"message":"hello"}"#.to_owned(),
-            })],
+            content: vec![
+                AssistantContent::Text("Let me check.".to_owned()),
+                AssistantContent::ToolCall(ToolCall {
+                    id: "call-1".to_owned(),
+                    name: "echo".to_owned(),
+                    arguments: r#"{"message":"hello"}"#.to_owned(),
+                }),
+            ],
         },
         ProviderCompletion {
             content: vec![AssistantContent::Text("The tool said hello.".to_owned())],
@@ -91,6 +97,38 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
         .unwrap();
 
     assert_eq!(response, "The tool said hello.");
+    assert_eq!(
+        receive_event_kinds(&mut events, 7).await,
+        vec![
+            SessionEventKind::RunStarted {
+                input: "say hello".to_owned(),
+            },
+            SessionEventKind::AssistantMessage {
+                text: "Let me check.".to_owned(),
+            },
+            SessionEventKind::ToolRequested {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: r#"{"message":"hello"}"#.to_owned(),
+            },
+            SessionEventKind::ToolStarted {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: r#"{"message":"hello"}"#.to_owned(),
+            },
+            SessionEventKind::ToolFinished {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                result: Ok(r#"{"message":"hello"}"#.to_owned()),
+            },
+            SessionEventKind::AssistantMessage {
+                text: "The tool said hello.".to_owned(),
+            },
+            SessionEventKind::RunCompleted {
+                response: "The tool said hello.".to_owned(),
+            },
+        ]
+    );
     {
         let requests = backend.requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
@@ -110,7 +148,11 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
     assert!(matches!(
         history[1],
         Message::Assistant(ref content)
-            if matches!(content.as_slice(), [AssistantContent::ToolCall(call)] if call.name == "echo")
+            if matches!(
+                content.as_slice(),
+                [AssistantContent::Text(text), AssistantContent::ToolCall(call)]
+                    if text == "Let me check." && call.name == "echo"
+            )
     ));
     assert!(matches!(history[2], Message::ToolResult(_)));
     assert!(matches!(
@@ -126,6 +168,7 @@ async fn returns_tool_failures_to_the_provider() {
     let state = manager
         .create(SessionOptions::new("test-provider"))
         .unwrap();
+    let mut events = state.subscribe();
     let backend = FakeBackend::new([
         ProviderCompletion {
             content: vec![AssistantContent::ToolCall(ToolCall {
@@ -151,12 +194,60 @@ async fn returns_tool_failures_to_the_provider() {
     .unwrap();
 
     assert_eq!(response, "I could not run that tool.");
+    let events = receive_event_kinds(&mut events, 6).await;
+    assert_eq!(
+        events[3],
+        SessionEventKind::ToolFinished {
+            call_id: "call-1".to_owned(),
+            name: "missing".to_owned(),
+            result: Err("tool `missing` is not registered".to_owned()),
+        }
+    );
     let requests = backend.requests.lock().unwrap();
     assert!(matches!(
         requests[1].last(),
         Some(Message::ToolResult(result))
             if result.output == "tool `missing` is not registered" && result.is_error
     ));
+}
+
+#[tokio::test]
+async fn emits_a_failed_terminal_event_when_the_provider_fails() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let mut events = state.subscribe();
+
+    let error = run_agent_loop(
+        &state,
+        "hello".to_owned(),
+        &ToolRegistry::new(),
+        &FakeBackend::new([]),
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(error, "fake provider ran out of completions");
+    assert_eq!(
+        receive_event_kinds(&mut events, 2).await,
+        vec![
+            SessionEventKind::RunStarted {
+                input: "hello".to_owned(),
+            },
+            SessionEventKind::RunFailed { error },
+        ]
+    );
+}
+
+async fn receive_event_kinds(events: &mut SessionEvents, count: usize) -> Vec<SessionEventKind> {
+    let mut kinds = Vec::with_capacity(count);
+    for expected_sequence in 1..=count as u64 {
+        let event = events.recv().await.unwrap().unwrap();
+        assert_eq!(event.sequence, expected_sequence);
+        kinds.push(event.kind);
+    }
+    kinds
 }
 
 struct FakeBackend {

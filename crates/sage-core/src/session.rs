@@ -162,9 +162,7 @@ impl Session {
     }
 
     pub fn subscribe(&self) -> SessionEvents {
-        SessionEvents {
-            receiver: self.state.events.subscribe(),
-        }
+        self.state.subscribe()
     }
 
     pub async fn send(&self, input: impl Into<String>) -> Result<String, String> {
@@ -206,6 +204,7 @@ impl SessionManager {
             provider: options.provider,
             turn_lock: AsyncMutex::new(()),
             messages: RwLock::new(messages),
+            next_event_sequence: Mutex::new(1),
             events,
         });
         self.sessions
@@ -229,7 +228,31 @@ pub(crate) struct SessionState {
     provider: String,
     pub(crate) turn_lock: AsyncMutex<()>,
     pub(crate) messages: RwLock<Vec<Message>>,
+    next_event_sequence: Mutex<u64>,
     events: broadcast::Sender<SessionEvent>,
+}
+
+impl SessionState {
+    pub(crate) fn subscribe(&self) -> SessionEvents {
+        SessionEvents {
+            receiver: self.events.subscribe(),
+        }
+    }
+
+    pub(crate) fn emit(&self, kind: SessionEventKind) {
+        let mut sequence = self
+            .next_event_sequence
+            .lock()
+            .expect("session event sequence lock poisoned");
+        let event = SessionEvent {
+            sequence: *sequence,
+            kind,
+        };
+        *sequence = sequence
+            .checked_add(1)
+            .expect("session event sequence exhausted");
+        let _ = self.events.send(event);
+    }
 }
 
 #[cfg(test)]
@@ -287,8 +310,8 @@ mod tests {
             },
         };
 
-        state.events.send(started.clone()).unwrap();
-        state.events.send(completed.clone()).unwrap();
+        state.emit(started.kind.clone());
+        state.emit(completed.kind.clone());
 
         assert_eq!(first.recv().await.unwrap(), Some(started.clone()));
         assert_eq!(first.recv().await.unwrap(), Some(completed.clone()));
@@ -304,15 +327,9 @@ mod tests {
         let mut events = session.subscribe();
 
         for sequence in 1..=(EVENT_CHANNEL_CAPACITY as u64 + 1) {
-            state
-                .events
-                .send(SessionEvent {
-                    sequence,
-                    kind: SessionEventKind::AssistantMessage {
-                        text: sequence.to_string(),
-                    },
-                })
-                .unwrap();
+            state.emit(SessionEventKind::AssistantMessage {
+                text: sequence.to_string(),
+            });
         }
 
         assert_eq!(
