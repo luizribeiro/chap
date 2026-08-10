@@ -1,6 +1,7 @@
 mod app;
 mod footer;
 mod header;
+mod markdown;
 mod message;
 mod pending_steering;
 mod prompt;
