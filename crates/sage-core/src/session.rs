@@ -10,7 +10,30 @@ use uuid::Uuid;
 pub enum Message {
     System(String),
     User(String),
-    Assistant(String),
+    Assistant(Vec<AssistantContent>),
+    ToolResult(ToolResult),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AssistantContent {
+    Text(String),
+    ToolCall(ToolCall),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    /// JSON encoded arguments supplied by the provider.
+    pub arguments: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolResult {
+    pub call_id: String,
+    pub name: String,
+    pub output: String,
+    pub is_error: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]

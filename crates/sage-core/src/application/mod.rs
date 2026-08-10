@@ -1,16 +1,20 @@
 use crate::config::{Config, Plugin as PluginConfig};
-use crate::session::{Message, Session, SessionId, SessionManager, SessionOptions};
+use crate::session::{Session, SessionId, SessionManager, SessionOptions};
 use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition};
-use bindings::__lockgate_world_0::exports::sage::agent::provider as provider_bindings;
 use host::{AppState, HTTP_CLIENT_INTERFACE, SETTINGS_INTERFACE};
 use lockgate::Component;
+use provider::PluginBackend;
 use std::{collections::BTreeMap, fs, path::Path};
+use turn::run_agent_loop;
 
 mod bindings;
 mod host;
+mod provider;
+mod turn;
 
 const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
+const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
 type InnerApplication = lockgate::Application<AppState>;
 type InnerRuntime = lockgate::Runtime<AppState>;
@@ -170,83 +174,9 @@ impl Runtime {
         if !self.sessions.owns(session) {
             return Err("session does not belong to this runtime".to_owned());
         }
-        if input.trim().is_empty() {
-            return Err("turn input cannot be empty".to_owned());
-        }
-
-        let _turn = session.state.turn_lock.lock().await;
-        session
-            .state
-            .messages
-            .write()
-            .await
-            .push(Message::User(input));
-        let messages = session.state.messages.read().await.clone();
-        let completion = self
-            .request_completion(session.provider(), messages)
-            .await?;
-        session
-            .state
-            .messages
-            .write()
-            .await
-            .push(Message::Assistant(completion.clone()));
-        Ok(completion)
+        let backend = PluginBackend::new(self, session.provider());
+        run_agent_loop(session, input, &self.tools, &backend).await
     }
-
-    async fn request_completion(
-        &self,
-        provider: &str,
-        messages: Vec<Message>,
-    ) -> Result<String, String> {
-        let plugin = self
-            .plugins
-            .get(provider)
-            .copied()
-            .ok_or_else(|| format!("provider plugin `{provider}` is not configured"))?;
-        let completion = self
-            .lockgate
-            .component(plugin)
-            .complete(provider_bindings::CompletionRequest {
-                messages: messages.into_iter().map(Into::into).collect(),
-                // Tool definitions are wired into the request when the execution loop lands.
-                tools: Vec::new(),
-            })
-            .await
-            .map_err(|error| format!("provider plugin `{provider}` failed: {error}"))?
-            .map_err(|error| format!("provider plugin `{provider}`: {error}"))?;
-        completion_text(completion)
-    }
-}
-
-impl From<Message> for provider_bindings::Message {
-    fn from(message: Message) -> Self {
-        match message {
-            Message::System(content) => Self::System(content),
-            Message::User(content) => Self::User(content),
-            Message::Assistant(content) => {
-                Self::Assistant(vec![provider_bindings::AssistantContent::Text(content)])
-            }
-        }
-    }
-}
-
-fn completion_text(completion: provider_bindings::Completion) -> Result<String, String> {
-    let mut text = Vec::new();
-    for content in completion.content {
-        match content {
-            provider_bindings::AssistantContent::Text(content) => text.push(content),
-            provider_bindings::AssistantContent::ToolCall(_) => {
-                return Err(
-                    "provider requested a tool, but tool execution is not enabled".to_owned(),
-                );
-            }
-        }
-    }
-    if text.is_empty() {
-        return Err("provider returned a completion without text".to_owned());
-    }
-    Ok(text.join("\n"))
 }
 
 #[cfg(test)]

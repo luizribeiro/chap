@@ -44,6 +44,14 @@ impl ToolRegistry {
     pub(crate) fn definitions(&self) -> Vec<ToolDefinition> {
         self.tools.values().map(|tool| tool.definition()).collect()
     }
+
+    pub(crate) async fn execute(&self, name: &str, arguments: String) -> Result<String, String> {
+        let tool = self
+            .tools
+            .get(name)
+            .ok_or_else(|| format!("tool `{name}` is not registered"))?;
+        tool.execute(arguments).await
+    }
 }
 
 fn validate(definition: &ToolDefinition) -> Result<(), String> {
