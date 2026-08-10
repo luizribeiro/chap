@@ -1,5 +1,7 @@
 use crate::config::{Config, Plugin as PluginConfig};
 use crate::session::{Message, Session, SessionId, SessionManager, SessionOptions};
+use crate::tool::ToolRegistry;
+use crate::{Tool, ToolDefinition};
 use bindings::__lockgate_world_0::exports::sage::agent::provider as provider_bindings;
 use host::{AppState, HTTP_CLIENT_INTERFACE, SETTINGS_INTERFACE};
 use lockgate::Component;
@@ -17,12 +19,14 @@ type LoadedPlugin = Component<bindings::ProviderPlugin>;
 pub struct Application {
     lockgate: InnerApplication,
     plugins: BTreeMap<String, LoadedPlugin>,
+    tools: ToolRegistry,
 }
 
 pub struct Runtime {
     lockgate: InnerRuntime,
     plugins: BTreeMap<String, LoadedPlugin>,
     sessions: SessionManager,
+    tools: ToolRegistry,
 }
 
 impl Application {
@@ -33,11 +37,22 @@ impl Application {
         let plugins = Self::load_plugins(&mut lockgate, config)?;
         let lockgate = Self::apply_policy(lockgate, &plugins)?;
 
-        Ok(Self { lockgate, plugins })
+        Ok(Self {
+            lockgate,
+            plugins,
+            tools: ToolRegistry::new(),
+        })
     }
 
     pub fn plugin_count(&self) -> usize {
         self.plugins.len()
+    }
+
+    pub fn register_tool<T>(&mut self, tool: T) -> Result<(), String>
+    where
+        T: Tool + 'static,
+    {
+        self.tools.register(tool)
     }
 
     pub async fn run(self) -> Result<Runtime, String> {
@@ -50,6 +65,7 @@ impl Application {
             lockgate,
             plugins: self.plugins,
             sessions: SessionManager::new(),
+            tools: self.tools,
         })
     }
 
@@ -132,6 +148,10 @@ impl Application {
 }
 
 impl Runtime {
+    pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
+        self.tools.definitions()
+    }
+
     pub fn create_session(&self, options: SessionOptions) -> Result<Session, String> {
         if !self.plugins.contains_key(&options.provider) {
             return Err(format!(
