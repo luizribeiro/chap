@@ -68,6 +68,9 @@ pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
                 KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
                     should_exit.set(true);
                 }
+                KeyCode::Esc => {
+                    let _ = session.interrupt();
+                }
                 KeyCode::Enter => {
                     let prompt = input.read().trim().to_owned();
                     if prompt.is_empty() {

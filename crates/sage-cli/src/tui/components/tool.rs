@@ -11,6 +11,7 @@ pub fn ToolView(props: &ToolViewProps) -> impl Into<AnyElement<'static>> {
     let (status, color, result) = match &props.tool.state {
         ToolState::Requested => ("requested", Color::DarkGrey, None),
         ToolState::Running => ("running", Color::DarkGrey, None),
+        ToolState::Interrupted => ("interrupted", Color::DarkGrey, None),
         ToolState::Finished(Ok(output)) => ("done", Color::Green, Some(("output", output))),
         ToolState::Finished(Err(error)) => ("failed", Color::Red, Some(("error", error))),
     };

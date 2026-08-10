@@ -1,4 +1,4 @@
-use super::{MessageView, PendingSteeringView, ToolView};
+use super::{MessageView, PendingSteeringView, StatusView, ToolView};
 use crate::tui::{ChatMessage, model::TranscriptModel};
 use iocraft::prelude::*;
 use sage_core::SteeringId;
@@ -27,6 +27,10 @@ pub fn Transcript(props: &TranscriptProps) -> impl Into<AnyElement<'static>> {
             .into_any(),
             ChatMessage::Tool(tool) => element! {
                 ToolView(key: index, tool: tool.clone())
+            }
+            .into_any(),
+            ChatMessage::Status(content) => element! {
+                StatusView(key: index, content: content.clone())
             }
             .into_any(),
         })

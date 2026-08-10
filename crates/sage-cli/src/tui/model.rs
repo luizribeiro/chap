@@ -16,6 +16,7 @@ pub struct PendingSteering {
 pub enum ChatMessage {
     Text { role: MessageRole, content: String },
     Tool(ToolMessage),
+    Status(String),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -39,6 +40,7 @@ pub enum ToolState {
     #[default]
     Requested,
     Running,
+    Interrupted,
     Finished(Result<String, String>),
 }
 
@@ -62,6 +64,10 @@ impl ChatMessage {
             role: MessageRole::Error,
             content,
         }
+    }
+
+    fn status(content: impl Into<String>) -> Self {
+        Self::Status(content.into())
     }
 
     fn tool(call_id: String, name: String, arguments: String, state: ToolState) -> Self {
@@ -152,9 +158,29 @@ pub(super) fn apply_event(
             }
             None
         }
+        SessionEventKind::ToolInterrupted { call_id, name } => {
+            if let Some(tool) = tool_mut(&mut transcript.messages, &call_id) {
+                tool.name = name;
+                tool.state = ToolState::Interrupted;
+            } else {
+                transcript.messages.push(ChatMessage::tool(
+                    call_id,
+                    name,
+                    String::new(),
+                    ToolState::Interrupted,
+                ));
+            }
+            None
+        }
         SessionEventKind::RunCompleted { .. } => Some(false),
         SessionEventKind::RunFailed { error } => {
             transcript.messages.push(ChatMessage::error(error));
+            Some(false)
+        }
+        SessionEventKind::RunInterrupted => {
+            transcript
+                .messages
+                .push(ChatMessage::status("run interrupted"));
             Some(false)
         }
         _ => None,
@@ -266,6 +292,43 @@ mod tests {
         assert_eq!(
             transcript.messages,
             vec![ChatMessage::error("broken".to_owned())]
+        );
+    }
+
+    #[test]
+    fn renders_interrupted_runs_and_tools_as_terminal_states() {
+        let mut transcript = TranscriptModel::default();
+        apply_event(
+            &mut transcript,
+            SessionEventKind::ToolStarted {
+                call_id: "call-1".to_owned(),
+                name: "pause".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+        );
+        apply_event(
+            &mut transcript,
+            SessionEventKind::ToolInterrupted {
+                call_id: "call-1".to_owned(),
+                name: "pause".to_owned(),
+            },
+        );
+
+        assert_eq!(
+            apply_event(&mut transcript, SessionEventKind::RunInterrupted),
+            Some(false)
+        );
+        assert_eq!(
+            transcript.messages,
+            [
+                ChatMessage::tool(
+                    "call-1".to_owned(),
+                    "pause".to_owned(),
+                    "{}".to_owned(),
+                    ToolState::Interrupted,
+                ),
+                ChatMessage::status("run interrupted"),
+            ]
         );
     }
 }

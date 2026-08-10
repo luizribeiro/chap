@@ -5,6 +5,7 @@ mod message;
 mod pending_steering;
 mod prompt;
 mod spinner;
+mod status;
 mod tool;
 mod transcript;
 
@@ -15,5 +16,6 @@ use message::MessageView;
 use pending_steering::PendingSteeringView;
 use prompt::Prompt;
 use spinner::Spinner;
+use status::StatusView;
 use tool::ToolView;
 use transcript::Transcript;

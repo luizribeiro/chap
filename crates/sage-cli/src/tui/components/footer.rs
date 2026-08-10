@@ -8,7 +8,11 @@ pub struct FooterProps {
 
 #[component]
 pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
-    let action = if props.busy { "steer" } else { "send" };
+    let controls = if props.busy {
+        "enter steer  •  esc interrupt  •  ctrl+d quit"
+    } else {
+        "enter send  •  ctrl+d quit"
+    };
 
     element! {
         View(
@@ -21,7 +25,7 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
             View(flex_grow: 1.0_f32) {
                 #(if props.busy { Some(element!(Spinner)) } else { None })
             }
-            Text(content: format!("enter {action}  •  ctrl+d quit"), color: Color::DarkGrey)
+            Text(content: controls, color: Color::DarkGrey)
         }
     }
 }
