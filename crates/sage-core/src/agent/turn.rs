@@ -1,7 +1,8 @@
 use super::{MAX_PROVIDER_STEPS_PER_TURN, provider::CompletionBackend};
 use crate::{
     session::{
-        AssistantContent, Message, SessionEventKind, SessionState, Steering, ToolCall, ToolResult,
+        ActiveRun, AssistantContent, Message, RunBoundary, SessionEventKind, SessionState,
+        Steering, ToolCall, ToolResult,
     },
     tool::ToolRegistry,
 };
@@ -17,7 +18,7 @@ pub(super) async fn run_agent_loop(
     }
 
     let _run = session.turn_lock.lock().await;
-    let active_run = session.start_run();
+    let mut active_run = session.start_run();
     session
         .messages
         .write()
@@ -25,27 +26,59 @@ pub(super) async fn run_agent_loop(
         .push(Message::User(input.clone()));
     session.emit(SessionEventKind::RunStarted { input });
 
-    let result = run_steps(session, tools, backend).await;
+    let outcome = run_steps(session, tools, backend, &mut active_run).await;
     drop(active_run);
-    match &result {
-        Ok(response) => session.emit(SessionEventKind::RunCompleted {
-            response: response.clone(),
-        }),
-        Err(error) => session.emit(SessionEventKind::RunFailed {
-            error: error.clone(),
-        }),
+    match outcome {
+        RunOutcome::Completed(response) => {
+            session.emit(SessionEventKind::RunCompleted {
+                response: response.clone(),
+            });
+            Ok(response)
+        }
+        RunOutcome::Failed(error) => {
+            session.emit(SessionEventKind::RunFailed {
+                error: error.clone(),
+            });
+            Err(error)
+        }
+        RunOutcome::Interrupted => {
+            session.emit(SessionEventKind::RunInterrupted);
+            Err("run interrupted".to_owned())
+        }
     }
-    result
+}
+
+enum RunOutcome {
+    Completed(String),
+    Failed(String),
+    Interrupted,
+}
+
+impl From<Result<String, String>> for RunOutcome {
+    fn from(result: Result<String, String>) -> Self {
+        match result {
+            Ok(response) => Self::Completed(response),
+            Err(error) => Self::Failed(error),
+        }
+    }
 }
 
 async fn run_steps(
     session: &SessionState,
     tools: &ToolRegistry,
     backend: &impl CompletionBackend,
-) -> Result<String, String> {
+    active_run: &mut ActiveRun<'_>,
+) -> RunOutcome {
     for _ in 0..MAX_PROVIDER_STEPS_PER_TURN {
         let messages = session.messages.read().await.clone();
-        let completion = backend.complete(messages).await?;
+        let completion = tokio::select! {
+            biased;
+            _ = active_run.interrupted() => return RunOutcome::Interrupted,
+            completion = backend.complete(messages) => match completion {
+                Ok(completion) => completion,
+                Err(error) => return RunOutcome::Failed(error),
+            },
+        };
         session
             .messages
             .write()
@@ -66,11 +99,18 @@ async fn run_steps(
             })
             .collect::<Vec<_>>();
         if tool_calls.is_empty() {
-            if let Some(steering) = session.finish_or_take_steering() {
-                append_steering(session, steering).await;
-                continue;
+            match session.finish_or_take_steering() {
+                RunBoundary::ApplySteering(steering) => {
+                    append_steering(session, steering).await;
+                    continue;
+                }
+                RunBoundary::Complete => {
+                    return text
+                        .ok_or_else(|| "provider returned a completion without text".to_owned())
+                        .into();
+                }
+                RunBoundary::Interrupted => return RunOutcome::Interrupted,
             }
-            return text.ok_or_else(|| "provider returned a completion without text".to_owned());
         }
 
         for call in &tool_calls {
@@ -81,13 +121,20 @@ async fn run_steps(
             });
         }
 
-        for call in tool_calls {
+        for (index, call) in tool_calls.iter().cloned().enumerate() {
             session.emit(SessionEventKind::ToolStarted {
                 call_id: call.id.clone(),
                 name: call.name.clone(),
                 arguments: call.arguments.clone(),
             });
-            let result = execute_tool(tools, call).await;
+            let result = tokio::select! {
+                biased;
+                _ = active_run.interrupted() => {
+                    interrupt_tools(session, &tool_calls[index..]).await;
+                    return RunOutcome::Interrupted;
+                }
+                result = execute_tool(tools, call) => result,
+            };
             let event_result = if result.is_error {
                 Err(result.output.clone())
             } else {
@@ -107,12 +154,35 @@ async fn run_steps(
             });
         }
 
-        append_steering(session, session.take_steering()).await;
+        let Some(steering) = session.take_steering() else {
+            return RunOutcome::Interrupted;
+        };
+        append_steering(session, steering).await;
     }
 
-    Err(format!(
+    RunOutcome::Failed(format!(
         "turn exceeded the limit of {MAX_PROVIDER_STEPS_PER_TURN} provider requests"
     ))
+}
+
+async fn interrupt_tools(session: &SessionState, calls: &[ToolCall]) {
+    {
+        let mut messages = session.messages.write().await;
+        messages.extend(calls.iter().map(|call| {
+            Message::ToolResult(ToolResult {
+                call_id: call.id.clone(),
+                name: call.name.clone(),
+                output: "run interrupted before tool completion".to_owned(),
+                is_error: true,
+            })
+        }));
+    }
+    for call in calls {
+        session.emit(SessionEventKind::ToolInterrupted {
+            call_id: call.id.clone(),
+            name: call.name.clone(),
+        });
+    }
 }
 
 async fn append_steering(session: &SessionState, steering: Vec<Steering>) {

@@ -238,6 +238,123 @@ async fn applies_steering_before_the_next_provider_request() {
 }
 
 #[tokio::test]
+async fn interrupts_an_in_flight_provider_request_and_discards_steering() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let mut events = state.subscribe();
+    let backend = Arc::new(PausedBackend::new([ProviderCompletion {
+        content: vec![AssistantContent::Text("too late".to_owned())],
+    }]));
+    let first_request = backend.first_request.notified();
+    let run_state = Arc::clone(&state);
+    let run_backend = Arc::clone(&backend);
+    let run = tokio::spawn(async move {
+        run_agent_loop(
+            &run_state,
+            "hello".to_owned(),
+            &ToolRegistry::new(),
+            run_backend.as_ref(),
+        )
+        .await
+    });
+
+    first_request.await;
+    let steering_id = state.steer("queued detail".to_owned()).unwrap();
+    state.interrupt().unwrap();
+
+    assert_eq!(run.await.unwrap(), Err("run interrupted".to_owned()));
+    assert_eq!(
+        receive_event_kinds(&mut events, 4).await,
+        vec![
+            SessionEventKind::RunStarted {
+                input: "hello".to_owned(),
+            },
+            SessionEventKind::SteeringQueued {
+                id: steering_id,
+                input: "queued detail".to_owned(),
+            },
+            SessionEventKind::SteeringDiscarded {
+                id: steering_id,
+                input: "queued detail".to_owned(),
+            },
+            SessionEventKind::RunInterrupted,
+        ]
+    );
+    assert_eq!(
+        *state.messages.read().await,
+        [Message::User("hello".to_owned())]
+    );
+}
+
+#[tokio::test]
+async fn closes_unfinished_tool_calls_when_interrupted() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let mut events = state.subscribe();
+    let backend = FakeBackend::new([ProviderCompletion {
+        content: vec![AssistantContent::ToolCall(ToolCall {
+            id: "call-1".to_owned(),
+            name: "pause".to_owned(),
+            arguments: "{}".to_owned(),
+        })],
+    }]);
+    let started = Arc::new(Notify::new());
+    let tool_started = started.notified();
+    let mut tools = ToolRegistry::new();
+    tools
+        .register(PausedTool {
+            started: Arc::clone(&started),
+        })
+        .unwrap();
+    let run_state = Arc::clone(&state);
+    let run = tokio::spawn(async move {
+        run_agent_loop(&run_state, "pause".to_owned(), &tools, &backend).await
+    });
+
+    tool_started.await;
+    state.interrupt().unwrap();
+
+    assert_eq!(run.await.unwrap(), Err("run interrupted".to_owned()));
+    assert_eq!(
+        receive_event_kinds(&mut events, 5).await,
+        vec![
+            SessionEventKind::RunStarted {
+                input: "pause".to_owned(),
+            },
+            SessionEventKind::ToolRequested {
+                call_id: "call-1".to_owned(),
+                name: "pause".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+            SessionEventKind::ToolStarted {
+                call_id: "call-1".to_owned(),
+                name: "pause".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+            SessionEventKind::ToolInterrupted {
+                call_id: "call-1".to_owned(),
+                name: "pause".to_owned(),
+            },
+            SessionEventKind::RunInterrupted,
+        ]
+    );
+    let history = state.messages.read().await;
+    assert_eq!(history.len(), 3);
+    assert!(matches!(
+        history.last(),
+        Some(Message::ToolResult(result))
+            if result.call_id == "call-1"
+                && result.name == "pause"
+                && result.output == "run interrupted before tool completion"
+                && result.is_error
+    ));
+}
+
+#[tokio::test]
 async fn returns_tool_failures_to_the_provider() {
     let manager = SessionManager::new();
     let state = manager
@@ -392,6 +509,31 @@ impl CompletionBackend for FakeBackend {
 }
 
 struct EchoTool;
+
+struct PausedTool {
+    started: Arc<Notify>,
+}
+
+impl Tool for PausedTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "pause".to_owned(),
+            description: "Waits forever".to_owned(),
+            parameters: r#"{"type":"object"}"#.to_owned(),
+        }
+    }
+
+    fn execute(
+        &self,
+        _arguments: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
+    {
+        Box::pin(async move {
+            self.started.notify_one();
+            std::future::pending().await
+        })
+    }
+}
 
 impl Tool for EchoTool {
     fn definition(&self) -> ToolDefinition {

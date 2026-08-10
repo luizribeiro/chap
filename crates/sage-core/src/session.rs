@@ -5,7 +5,7 @@ use std::{
     pin::Pin,
     sync::{Arc, Mutex},
 };
-use tokio::sync::{Mutex as AsyncMutex, RwLock, broadcast};
+use tokio::sync::{Mutex as AsyncMutex, RwLock, broadcast, watch};
 use uuid::Uuid;
 
 const EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -101,12 +101,17 @@ pub enum SessionEventKind {
         name: String,
         result: Result<String, String>,
     },
+    ToolInterrupted {
+        call_id: String,
+        name: String,
+    },
     RunCompleted {
         response: String,
     },
     RunFailed {
         error: String,
     },
+    RunInterrupted,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -201,6 +206,10 @@ impl Session {
     pub fn discard_steering(&self, id: SteeringId) -> Result<(), String> {
         self.state.discard_steering(id)
     }
+
+    pub fn interrupt(&self) -> Result<(), String> {
+        self.state.interrupt()
+    }
 }
 
 pub(crate) type SessionFuture<'a> =
@@ -270,6 +279,8 @@ pub(crate) struct SessionState {
 #[derive(Default)]
 struct RunState {
     active: bool,
+    interrupted: bool,
+    interrupt: Option<watch::Sender<()>>,
     steering: VecDeque<Steering>,
 }
 
@@ -277,6 +288,12 @@ struct RunState {
 pub(crate) struct Steering {
     pub(crate) id: SteeringId,
     pub(crate) input: String,
+}
+
+pub(crate) enum RunBoundary {
+    ApplySteering(Vec<Steering>),
+    Complete,
+    Interrupted,
 }
 
 impl SessionState {
@@ -308,14 +325,42 @@ impl SessionState {
             run.steering.is_empty(),
             "inactive session should not retain queued steering"
         );
+        debug_assert!(
+            run.interrupt.is_none(),
+            "inactive session should not retain an interrupt signal"
+        );
+        let (interrupt, receiver) = watch::channel(());
         run.active = true;
-        ActiveRun { session: self }
+        run.interrupted = false;
+        run.interrupt = Some(interrupt);
+        ActiveRun {
+            session: self,
+            interrupt: receiver,
+        }
+    }
+
+    pub(crate) fn interrupt(&self) -> Result<(), String> {
+        let mut run = self.run.lock().expect("session run state lock poisoned");
+        if !run.active {
+            return Err("session has no active run to interrupt".to_owned());
+        }
+        if !run.interrupted {
+            run.interrupted = true;
+            run.interrupt
+                .as_ref()
+                .expect("active session should have an interrupt signal")
+                .send_replace(());
+        }
+        Ok(())
     }
 
     pub(crate) fn steer(&self, input: String) -> Result<SteeringId, String> {
         let mut run = self.run.lock().expect("session run state lock poisoned");
         if !run.active {
             return Err("session has no active run to steer".to_owned());
+        }
+        if run.interrupted {
+            return Err("session run is being interrupted".to_owned());
         }
         let id = SteeringId(Uuid::now_v7());
         run.steering.push_back(Steering {
@@ -344,22 +389,24 @@ impl SessionState {
         Ok(())
     }
 
-    pub(crate) fn take_steering(&self) -> Vec<Steering> {
-        self.run
-            .lock()
-            .expect("session run state lock poisoned")
-            .steering
-            .drain(..)
-            .collect()
-    }
-
-    pub(crate) fn finish_or_take_steering(&self) -> Option<Vec<Steering>> {
+    pub(crate) fn take_steering(&self) -> Option<Vec<Steering>> {
         let mut run = self.run.lock().expect("session run state lock poisoned");
-        if run.steering.is_empty() {
-            run.active = false;
+        if run.interrupted {
             None
         } else {
             Some(run.steering.drain(..).collect())
+        }
+    }
+
+    pub(crate) fn finish_or_take_steering(&self) -> RunBoundary {
+        let mut run = self.run.lock().expect("session run state lock poisoned");
+        if run.interrupted {
+            RunBoundary::Interrupted
+        } else if run.steering.is_empty() {
+            run.active = false;
+            RunBoundary::Complete
+        } else {
+            RunBoundary::ApplySteering(run.steering.drain(..).collect())
         }
     }
 
@@ -367,6 +414,8 @@ impl SessionState {
         let discarded = {
             let mut run = self.run.lock().expect("session run state lock poisoned");
             run.active = false;
+            run.interrupted = false;
+            run.interrupt = None;
             run.steering.drain(..).collect::<Vec<_>>()
         };
         for steering in discarded {
@@ -380,6 +429,13 @@ impl SessionState {
 
 pub(crate) struct ActiveRun<'a> {
     session: &'a SessionState,
+    interrupt: watch::Receiver<()>,
+}
+
+impl ActiveRun<'_> {
+    pub(crate) async fn interrupted(&mut self) {
+        let _ = self.interrupt.changed().await;
+    }
 }
 
 impl Drop for ActiveRun<'_> {
@@ -433,6 +489,10 @@ mod tests {
         assert_eq!(
             session.steer("too early"),
             Err("session has no active run to steer".to_owned())
+        );
+        assert_eq!(
+            session.interrupt(),
+            Err("session has no active run to interrupt".to_owned())
         );
 
         let run = state.start_run();
