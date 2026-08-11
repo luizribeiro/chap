@@ -1,7 +1,7 @@
 package sage:agent@0.1.0;
 
 interface settings {
-  get: async func(key: string) -> option<string>;
+  get-json: async func() -> result<string, string>;
 }
 
 interface tools {

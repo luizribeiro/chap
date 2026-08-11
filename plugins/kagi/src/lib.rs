@@ -41,10 +41,10 @@ impl Guest for Kagi {
             WEB_SEARCH => {
                 let arguments: SearchArguments = parse_arguments(WEB_SEARCH, &arguments)?;
                 arguments.validate()?;
-                let token = required_setting("api-key").await?;
+                let settings = load_settings().await?;
                 let body = post_json(
                     "/search",
-                    &token,
+                    &settings.api_key,
                     &SearchRequest {
                         query: &arguments.query,
                         workflow: "search",
@@ -58,10 +58,10 @@ impl Guest for Kagi {
             WEB_FETCH => {
                 let arguments: FetchArguments = parse_arguments(WEB_FETCH, &arguments)?;
                 arguments.validate()?;
-                let token = required_setting("api-key").await?;
+                let settings = load_settings().await?;
                 let body = post_json(
                     "/extract",
-                    &token,
+                    &settings.api_key,
                     &ExtractRequest {
                         pages: arguments.urls.iter().map(|url| PageInput { url }).collect(),
                         format: "json",
@@ -111,11 +111,26 @@ fn parse_arguments<T: for<'de> Deserialize<'de>>(tool: &str, arguments: &str) ->
     serde_json::from_str(arguments).map_err(|error| format!("invalid `{tool}` arguments: {error}"))
 }
 
-async fn required_setting(key: &str) -> Result<String, String> {
-    settings::get(key.to_owned())
-        .await
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("Kagi setting `{key}` is required"))
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+struct Settings {
+    api_key: String,
+}
+
+impl Settings {
+    fn from_json(json: &str) -> Result<Self, String> {
+        let settings: Self = serde_json::from_str(json)
+            .map_err(|error| format!("invalid Kagi settings: {error}"))?;
+        if settings.api_key.trim().is_empty() {
+            return Err("Kagi setting `api-key` is required".to_owned());
+        }
+        Ok(settings)
+    }
+}
+
+async fn load_settings() -> Result<Settings, String> {
+    let json = settings::get_json().await?;
+    Settings::from_json(&json)
 }
 
 #[derive(Deserialize)]
@@ -401,6 +416,24 @@ fn api_error(status: u16, body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deserializes_typed_settings() {
+        let settings = Settings::from_json(r#"{"api-key":"key"}"#).unwrap();
+
+        assert!(!settings.api_key.is_empty());
+    }
+
+    #[test]
+    fn rejects_invalid_settings() {
+        for json in [
+            "{}",
+            r#"{"api-key":42}"#,
+            r#"{"api-key":"key","extra":true}"#,
+        ] {
+            assert!(Settings::from_json(json).is_err());
+        }
+    }
 
     #[test]
     fn exposes_search_and_fetch_tools() {

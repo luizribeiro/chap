@@ -27,10 +27,9 @@ struct OpenAiCompatible;
 
 impl Guest for OpenAiCompatible {
     async fn complete(request: CompletionRequest) -> Result<Completion, String> {
-        let base_url = required_setting("base-url").await?;
-        let model = required_setting("model").await?;
+        let settings = load_settings().await?;
         let request = serde_json::to_string(&Request {
-            model,
+            model: settings.model,
             messages: request
                 .messages
                 .into_iter()
@@ -44,12 +43,12 @@ impl Guest for OpenAiCompatible {
             stream: false,
         })
         .map_err(|error| format!("failed to encode OpenAI-compatible request: {error}"))?;
-        let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/chat/completions",
+            settings.base_url.trim_end_matches('/')
+        );
         let mut headers = vec![("content-type".to_owned(), "application/json".to_owned())];
-        if let Some(api_key) = settings::get("api-key".to_owned())
-            .await
-            .filter(|key| !key.is_empty())
-        {
+        if let Some(api_key) = settings.api_key.filter(|key| !key.is_empty()) {
             headers.push(("authorization".to_owned(), format!("Bearer {api_key}")));
         }
         let (status, body) = post(&url, &headers, request.as_bytes()).await?;
@@ -57,11 +56,32 @@ impl Guest for OpenAiCompatible {
     }
 }
 
-async fn required_setting(key: &str) -> Result<String, String> {
-    settings::get(key.to_owned())
-        .await
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("provider setting `{key}` is required"))
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+struct Settings {
+    base_url: String,
+    model: String,
+    #[serde(default)]
+    api_key: Option<String>,
+}
+
+impl Settings {
+    fn from_json(json: &str) -> Result<Self, String> {
+        let settings: Self = serde_json::from_str(json)
+            .map_err(|error| format!("invalid OpenAI-compatible settings: {error}"))?;
+        if settings.base_url.trim().is_empty() {
+            return Err("provider setting `base-url` is required".to_owned());
+        }
+        if settings.model.trim().is_empty() {
+            return Err("provider setting `model` is required".to_owned());
+        }
+        Ok(settings)
+    }
+}
+
+async fn load_settings() -> Result<Settings, String> {
+    let json = settings::get_json().await?;
+    Settings::from_json(&json)
 }
 
 async fn post(
@@ -322,6 +342,29 @@ struct ErrorBody {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deserializes_typed_settings() {
+        let settings = Settings::from_json(
+            r#"{"base-url":"https://example.com/v1","model":"example","api-key":"key"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.base_url, "https://example.com/v1");
+        assert_eq!(settings.model, "example");
+        assert!(settings.api_key.is_some());
+    }
+
+    #[test]
+    fn rejects_invalid_settings() {
+        for json in [
+            r#"{"base-url":"https://example.com/v1"}"#,
+            r#"{"base-url":42,"model":"example"}"#,
+            r#"{"base-url":"https://example.com/v1","model":"example","extra":true}"#,
+        ] {
+            assert!(Settings::from_json(json).is_err());
+        }
+    }
 
     #[test]
     fn extracts_the_first_completion() {
