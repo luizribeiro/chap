@@ -1,7 +1,7 @@
 lockgate::bindings! {
     path: "../../wit",
     worlds: {
-        ProviderPlugin: "provider-plugin",
-        ToolPlugin: "tool-plugin",
+        ProviderPlugin: "provider-role",
+        ToolPlugin: "tool-role",
     },
 }

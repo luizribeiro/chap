@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 http = "1.5.0"
 http-body-util = "0.1.3"
 lockgate-plugin.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 wasi-fetch = "0.2.0"

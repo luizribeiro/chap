@@ -11,10 +11,14 @@ mod bindings {
     });
 }
 
-use bindings::exports::sage::agent::tools::{Guest, ToolDefinition};
+use bindings::exports::sage::agent::{
+    configuration::Guest as ConfigurationGuest,
+    tools::{Guest, ToolDefinition},
+};
 use bindings::sage::agent::settings;
 use http::{HeaderMap, HeaderValue, header};
 use http_body_util::BodyExt;
+use schemars::{JsonSchema, generate::SchemaSettings};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use wasi_fetch::Client;
@@ -30,6 +34,12 @@ const MIN_MAX_CHARS: usize = 1_000;
 const MAX_MAX_CHARS: usize = 100_000;
 
 struct Kagi;
+
+impl ConfigurationGuest for Kagi {
+    async fn settings_schema() -> Result<String, String> {
+        settings_schema()
+    }
+}
 
 impl Guest for Kagi {
     async fn definitions() -> Result<Vec<ToolDefinition>, String> {
@@ -111,10 +121,19 @@ fn parse_arguments<T: for<'de> Deserialize<'de>>(tool: &str, arguments: &str) ->
     serde_json::from_str(arguments).map_err(|error| format!("invalid `{tool}` arguments: {error}"))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct Settings {
+    #[schemars(regex(pattern = r"\S"))]
     api_key: String,
+}
+
+fn settings_schema() -> Result<String, String> {
+    let schema = SchemaSettings::draft2020_12()
+        .into_generator()
+        .into_root_schema_for::<Settings>();
+    serde_json::to_string(&schema)
+        .map_err(|error| format!("failed to encode Kagi settings schema: {error}"))
 }
 
 impl Settings {
@@ -433,6 +452,23 @@ mod tests {
         ] {
             assert!(Settings::from_json(json).is_err());
         }
+    }
+
+    #[test]
+    fn publishes_the_settings_object_schema() {
+        let schema: serde_json::Value = serde_json::from_str(&settings_schema().unwrap()).unwrap();
+
+        assert_eq!(
+            schema["$schema"],
+            "https://json-schema.org/draft/2020-12/schema"
+        );
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["properties"].as_object().unwrap().len(), 1);
+        assert_eq!(schema["properties"]["api-key"]["type"], "string");
+        assert_eq!(schema["properties"]["api-key"]["pattern"], r"\S");
+        assert!(schema["properties"].get("settings").is_none());
+        assert_eq!(schema["required"], serde_json::json!(["api-key"]));
     }
 
     #[test]

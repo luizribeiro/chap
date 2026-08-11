@@ -11,6 +11,7 @@ mod bindings {
     });
 }
 
+use bindings::exports::sage::agent::configuration::Guest as ConfigurationGuest;
 use bindings::exports::sage::agent::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Guest,
     Message as ProviderMessage, ToolCall as ProviderToolCall, ToolDefinition as ProviderTool,
@@ -18,12 +19,19 @@ use bindings::exports::sage::agent::provider::{
 use bindings::sage::agent::settings;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use http_body_util::BodyExt;
+use schemars::{JsonSchema, generate::SchemaSettings};
 use serde::{Deserialize, Serialize};
 use wasi_fetch::Client;
 
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 struct OpenAiCompatible;
+
+impl ConfigurationGuest for OpenAiCompatible {
+    async fn settings_schema() -> Result<String, String> {
+        settings_schema()
+    }
+}
 
 impl Guest for OpenAiCompatible {
     async fn complete(request: CompletionRequest) -> Result<Completion, String> {
@@ -56,13 +64,23 @@ impl Guest for OpenAiCompatible {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct Settings {
+    #[schemars(regex(pattern = r"\S"))]
     base_url: String,
+    #[schemars(regex(pattern = r"\S"))]
     model: String,
     #[serde(default)]
     api_key: Option<String>,
+}
+
+fn settings_schema() -> Result<String, String> {
+    let schema = SchemaSettings::draft2020_12()
+        .into_generator()
+        .into_root_schema_for::<Settings>();
+    serde_json::to_string(&schema)
+        .map_err(|error| format!("failed to encode OpenAI-compatible settings schema: {error}"))
 }
 
 impl Settings {
@@ -342,6 +360,7 @@ struct ErrorBody {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn deserializes_typed_settings() {
@@ -364,6 +383,33 @@ mod tests {
         ] {
             assert!(Settings::from_json(json).is_err());
         }
+    }
+
+    #[test]
+    fn publishes_the_settings_object_schema() {
+        let schema: serde_json::Value = serde_json::from_str(&settings_schema().unwrap()).unwrap();
+
+        assert_eq!(
+            schema["$schema"],
+            "https://json-schema.org/draft/2020-12/schema"
+        );
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["properties"].as_object().unwrap().len(), 3);
+        assert_eq!(schema["properties"]["base-url"]["type"], "string");
+        assert_eq!(schema["properties"]["model"]["type"], "string");
+        assert_eq!(schema["properties"]["base-url"]["pattern"], r"\S");
+        assert_eq!(schema["properties"]["model"]["pattern"], r"\S");
+        assert!(schema["properties"]["api-key"].get("pattern").is_none());
+        assert!(schema["properties"].get("settings").is_none());
+
+        let required = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|name| name.as_str().unwrap())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(required, BTreeSet::from(["base-url", "model"]));
     }
 
     #[test]
