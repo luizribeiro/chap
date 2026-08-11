@@ -9,7 +9,7 @@ interface settings {
 /// The schema uses JSON Schema Draft 2020-12 and describes only the JSON
 /// object converted from `[plugins.<id>.settings]`, not the outer plugin entry.
 interface configuration {
-  settings-schema: async func() -> result<string, string>;
+  settings-schema: func() -> result<string, string>;
 }
 
 interface tools {

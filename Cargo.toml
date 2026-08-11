@@ -17,8 +17,8 @@ publish = false
 clap = { version = "4.6.6", features = ["derive"] }
 iocraft = { git = "https://github.com/luizribeiro/iocraft.git", rev = "619ee083dd84dc0070758221dee6a3936c7897de" }
 jsonschema = { version = "0.49.9", default-features = false }
-lockgate = { git = "https://github.com/luizribeiro/lockgate.git", rev = "1acf5a8f89addb2f49cf0df459725df6c5580a54" }
-lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", rev = "1acf5a8f89addb2f49cf0df459725df6c5580a54" }
+lockgate = { git = "https://github.com/luizribeiro/lockgate.git", rev = "85ca0c05af8c5261a7556adfc87ba53fd3290259" }
+lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", rev = "85ca0c05af8c5261a7556adfc87ba53fd3290259" }
 pulldown-cmark = "0.13.4"
 schemars = "1.2.2"
 serde = { version = "1.0.228", features = ["derive"] }

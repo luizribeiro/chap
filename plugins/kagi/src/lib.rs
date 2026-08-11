@@ -36,7 +36,7 @@ const MAX_MAX_CHARS: usize = 100_000;
 struct Kagi;
 
 impl ConfigurationGuest for Kagi {
-    async fn settings_schema() -> Result<String, String> {
+    fn settings_schema() -> Result<String, String> {
         let schema = SchemaSettings::draft2020_12()
             .into_generator()
             .into_root_schema_for::<Settings>();
@@ -446,11 +446,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn publishes_the_settings_object_schema() {
-        let schema = <Kagi as ConfigurationGuest>::settings_schema()
-            .await
-            .unwrap();
+    #[test]
+    fn publishes_the_settings_object_schema() {
+        let schema = <Kagi as ConfigurationGuest>::settings_schema().unwrap();
         let schema: serde_json::Value = serde_json::from_str(&schema).unwrap();
 
         assert_eq!(
