@@ -2185,6 +2185,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "tokio",
  "url",
  "wasi-fetch",
 ]
@@ -2199,6 +2200,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "tokio",
  "wasi-fetch",
 ]
 

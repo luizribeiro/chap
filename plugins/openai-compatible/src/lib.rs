@@ -29,7 +29,11 @@ struct OpenAiCompatible;
 
 impl ConfigurationGuest for OpenAiCompatible {
     async fn settings_schema() -> Result<String, String> {
-        settings_schema()
+        let schema = SchemaSettings::draft2020_12()
+            .into_generator()
+            .into_root_schema_for::<Settings>();
+        serde_json::to_string(&schema)
+            .map_err(|error| format!("failed to encode OpenAI-compatible settings schema: {error}"))
     }
 }
 
@@ -73,14 +77,6 @@ struct Settings {
     model: String,
     #[serde(default)]
     api_key: Option<String>,
-}
-
-fn settings_schema() -> Result<String, String> {
-    let schema = SchemaSettings::draft2020_12()
-        .into_generator()
-        .into_root_schema_for::<Settings>();
-    serde_json::to_string(&schema)
-        .map_err(|error| format!("failed to encode OpenAI-compatible settings schema: {error}"))
 }
 
 impl Settings {
@@ -385,9 +381,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn publishes_the_settings_object_schema() {
-        let schema: serde_json::Value = serde_json::from_str(&settings_schema().unwrap()).unwrap();
+    #[tokio::test]
+    async fn publishes_the_settings_object_schema() {
+        let schema = <OpenAiCompatible as ConfigurationGuest>::settings_schema()
+            .await
+            .unwrap();
+        let schema: serde_json::Value = serde_json::from_str(&schema).unwrap();
 
         assert_eq!(
             schema["$schema"],

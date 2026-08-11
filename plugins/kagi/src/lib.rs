@@ -37,13 +37,45 @@ struct Kagi;
 
 impl ConfigurationGuest for Kagi {
     async fn settings_schema() -> Result<String, String> {
-        settings_schema()
+        let schema = SchemaSettings::draft2020_12()
+            .into_generator()
+            .into_root_schema_for::<Settings>();
+        serde_json::to_string(&schema)
+            .map_err(|error| format!("failed to encode Kagi settings schema: {error}"))
     }
 }
 
 impl Guest for Kagi {
     async fn definitions() -> Result<Vec<ToolDefinition>, String> {
-        Ok(tool_definitions())
+        Ok(vec![
+            ToolDefinition {
+                name: WEB_SEARCH.to_owned(),
+                description: "Search the web with Kagi and return ranked titles, URLs, snippets, and publication dates."
+                    .to_owned(),
+                parameters: r#"{
+                    "type":"object",
+                    "properties":{
+                        "query":{"type":"string","description":"The web search query."},
+                        "limit":{"type":"integer","minimum":1,"maximum":20,"default":10,"description":"Maximum number of results to return."}
+                    },
+                    "required":["query"],
+                    "additionalProperties":false
+                }"#.to_owned(),
+            },
+            ToolDefinition {
+                name: WEB_FETCH.to_owned(),
+                description: "Extract clean Markdown content from up to 10 HTTPS web pages with Kagi.".to_owned(),
+                parameters: r#"{
+                    "type":"object",
+                    "properties":{
+                        "urls":{"type":"array","items":{"type":"string","format":"uri"},"minItems":1,"maxItems":10,"description":"HTTPS URLs to extract."},
+                        "max_chars_per_page":{"type":"integer","minimum":1000,"maximum":100000,"default":30000,"description":"Maximum characters returned for each page."}
+                    },
+                    "required":["urls"],
+                    "additionalProperties":false
+                }"#.to_owned(),
+            },
+        ])
     }
 
     async fn execute(name: String, arguments: String) -> Result<String, String> {
@@ -85,38 +117,6 @@ impl Guest for Kagi {
     }
 }
 
-fn tool_definitions() -> Vec<ToolDefinition> {
-    vec![
-        ToolDefinition {
-            name: WEB_SEARCH.to_owned(),
-            description: "Search the web with Kagi and return ranked titles, URLs, snippets, and publication dates."
-                .to_owned(),
-            parameters: r#"{
-                "type":"object",
-                "properties":{
-                    "query":{"type":"string","description":"The web search query."},
-                    "limit":{"type":"integer","minimum":1,"maximum":20,"default":10,"description":"Maximum number of results to return."}
-                },
-                "required":["query"],
-                "additionalProperties":false
-            }"#.to_owned(),
-        },
-        ToolDefinition {
-            name: WEB_FETCH.to_owned(),
-            description: "Extract clean Markdown content from up to 10 HTTPS web pages with Kagi.".to_owned(),
-            parameters: r#"{
-                "type":"object",
-                "properties":{
-                    "urls":{"type":"array","items":{"type":"string","format":"uri"},"minItems":1,"maxItems":10,"description":"HTTPS URLs to extract."},
-                    "max_chars_per_page":{"type":"integer","minimum":1000,"maximum":100000,"default":30000,"description":"Maximum characters returned for each page."}
-                },
-                "required":["urls"],
-                "additionalProperties":false
-            }"#.to_owned(),
-        },
-    ]
-}
-
 fn parse_arguments<T: for<'de> Deserialize<'de>>(tool: &str, arguments: &str) -> Result<T, String> {
     serde_json::from_str(arguments).map_err(|error| format!("invalid `{tool}` arguments: {error}"))
 }
@@ -126,14 +126,6 @@ fn parse_arguments<T: for<'de> Deserialize<'de>>(tool: &str, arguments: &str) ->
 struct Settings {
     #[schemars(regex(pattern = r"\S"))]
     api_key: String,
-}
-
-fn settings_schema() -> Result<String, String> {
-    let schema = SchemaSettings::draft2020_12()
-        .into_generator()
-        .into_root_schema_for::<Settings>();
-    serde_json::to_string(&schema)
-        .map_err(|error| format!("failed to encode Kagi settings schema: {error}"))
 }
 
 impl Settings {
@@ -454,9 +446,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn publishes_the_settings_object_schema() {
-        let schema: serde_json::Value = serde_json::from_str(&settings_schema().unwrap()).unwrap();
+    #[tokio::test]
+    async fn publishes_the_settings_object_schema() {
+        let schema = <Kagi as ConfigurationGuest>::settings_schema()
+            .await
+            .unwrap();
+        let schema: serde_json::Value = serde_json::from_str(&schema).unwrap();
 
         assert_eq!(
             schema["$schema"],
@@ -471,9 +466,9 @@ mod tests {
         assert_eq!(schema["required"], serde_json::json!(["api-key"]));
     }
 
-    #[test]
-    fn exposes_search_and_fetch_tools() {
-        let definitions = tool_definitions();
+    #[tokio::test]
+    async fn exposes_search_and_fetch_tools() {
+        let definitions = <Kagi as Guest>::definitions().await.unwrap();
 
         assert_eq!(
             definitions
