@@ -25,7 +25,14 @@ use wit_parser::{ManglingAndAbi, Resolve};
 async fn loads_a_configured_provider() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
-    fs::write(&component, provider_component("example.provider")).unwrap();
+    fs::write(
+        &component,
+        provider_component_with_schema(
+            "example.provider",
+            r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"model":{"type":"string"}},"required":["model"],"additionalProperties":false}"#,
+        ),
+    )
+    .unwrap();
     let config_path = directory.join("sage.toml");
     fs::write(
         &config_path,
@@ -47,6 +54,140 @@ model = "example-model"
         ["provider"]
     );
     builder.start().await.unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn rejects_missing_required_settings_with_the_toml_path() {
+    let directory = test_directory();
+    let component = directory.join("provider.wasm");
+    fs::write(
+        &component,
+        provider_component_with_schema(
+            "example.provider",
+            r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"model":{"type":"string"}},"required":["model"],"additionalProperties":false}"#,
+        ),
+    )
+    .unwrap();
+    let config_path = directory.join("sage.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins."example.provider"]
+component = "provider.wasm"
+"#,
+    )
+    .unwrap();
+
+    let error = match AgentBuilder::load(&config_path).unwrap().start().await {
+        Ok(_) => panic!("missing required settings should be rejected"),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        error,
+        format!(
+            "{}: plugins.\"example.provider\".settings.model: required setting is missing",
+            config_path.display()
+        )
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn validates_settings_before_loading_tool_definitions() {
+    let directory = test_directory();
+    let component = directory.join("tools.wasm");
+    fs::write(
+        &component,
+        tool_component_with_schema(
+            "example.tools",
+            r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["api-key"]}"#,
+        ),
+    )
+    .unwrap();
+    let config_path = directory.join("sage.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins."example.tools"]
+component = "tools.wasm"
+"#,
+    )
+    .unwrap();
+
+    let error = match AgentBuilder::load(&config_path).unwrap().start().await {
+        Ok(_) => panic!("invalid tool settings should be rejected"),
+        Err(error) => error,
+    };
+
+    assert!(error.contains("settings.api-key: required setting is missing"));
+    assert!(!error.contains("tool plugin"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn distinguishes_schema_transport_and_plugin_errors() {
+    let directory = test_directory();
+    let config_path = directory.join("sage.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins.example]
+component = "provider.wasm"
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        directory.join("provider.wasm"),
+        plugin_component("example", "provider-plugin", None),
+    )
+    .unwrap();
+    let transport = match AgentBuilder::load(&config_path).unwrap().start().await {
+        Ok(_) => panic!("a trapping schema export should be rejected"),
+        Err(error) => error,
+    };
+    assert!(transport.contains("failed while publishing its settings schema"));
+
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component_with_schema_error("example", "schema unavailable"),
+    )
+    .unwrap();
+    let plugin = match AgentBuilder::load(&config_path).unwrap().start().await {
+        Ok(_) => panic!("a plugin schema error should be rejected"),
+        Err(error) => error,
+    };
+    assert!(plugin.contains("returned an error while publishing its settings schema"));
+    assert!(!plugin.contains("schema unavailable"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn rejects_role_plugins_without_a_configuration_export() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        plugin_component("example", "provider-role", None),
+    )
+    .unwrap();
+    let config_path = directory.join("sage.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins.example]
+component = "provider.wasm"
+"#,
+    )
+    .unwrap();
+
+    let error = match AgentBuilder::load(&config_path).unwrap().start().await {
+        Ok(_) => panic!("a provider without a schema export should be rejected"),
+        Err(error) => error,
+    };
+
+    assert!(error.contains("does not export the required settings schema"));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -599,19 +740,20 @@ impl Tool for EchoTool {
 }
 
 fn provider_component(id: &str) -> Vec<u8> {
-    plugin_component(id, "provider-plugin")
+    plugin_component(id, "provider-plugin", Some(permissive_schema()))
 }
 
-fn tool_component(id: &str) -> Vec<u8> {
-    plugin_component(id, "tool-plugin")
+fn provider_component_with_schema(id: &str, schema: &str) -> Vec<u8> {
+    plugin_component(id, "provider-plugin", Some(schema))
 }
 
-fn plugin_component(id: &str, world_name: &str) -> Vec<u8> {
+fn provider_component_with_schema_error(id: &str, error: &str) -> Vec<u8> {
     let mut resolve = Resolve::new();
     let wit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../wit");
     let package = resolve.push_path(wit).unwrap().0;
-    let world = resolve.packages[package].worlds[world_name];
+    let world = resolve.packages[package].worlds["provider-plugin"];
     let mut module = dummy_module(&resolve, world, ManglingAndAbi::Standard32);
+    module = module_with_schema(&module, error, true);
     embed_component_metadata(&mut module, &resolve, world, StringEncoding::UTF8).unwrap();
     let bytes = ComponentEncoder::default()
         .module(&module)
@@ -619,6 +761,61 @@ fn plugin_component(id: &str, world_name: &str) -> Vec<u8> {
         .encode()
         .unwrap();
     with_plugin_metadata(bytes, id)
+}
+
+fn tool_component(id: &str) -> Vec<u8> {
+    plugin_component(id, "tool-plugin", Some(permissive_schema()))
+}
+
+fn tool_component_with_schema(id: &str, schema: &str) -> Vec<u8> {
+    plugin_component(id, "tool-plugin", Some(schema))
+}
+
+fn plugin_component(id: &str, world_name: &str, schema: Option<&str>) -> Vec<u8> {
+    let mut resolve = Resolve::new();
+    let wit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../wit");
+    let package = resolve.push_path(wit).unwrap().0;
+    let world = resolve.packages[package].worlds[world_name];
+    let mut module = dummy_module(&resolve, world, ManglingAndAbi::Standard32);
+    if let Some(schema) = schema {
+        module = module_with_schema(&module, schema, false);
+    }
+    embed_component_metadata(&mut module, &resolve, world, StringEncoding::UTF8).unwrap();
+    let bytes = ComponentEncoder::default()
+        .module(&module)
+        .unwrap()
+        .encode()
+        .unwrap();
+    with_plugin_metadata(bytes, id)
+}
+
+fn module_with_schema(module: &[u8], schema: &str, is_error: bool) -> Vec<u8> {
+    assert!(schema.len() <= 65_536 - 16);
+    let mut wat = wasmprinter::print_bytes(module).unwrap();
+    wat = wat.replacen("(memory (;0;) 0)", "(memory (;0;) 1)", 1);
+    wat = wat.replacen(
+        "(func (;1;) (type 1) (result i32)\n    unreachable\n  )",
+        "(func (;1;) (type 1) (result i32)\n    i32.const 0\n  )",
+        1,
+    );
+    let mut result = vec![u8::from(is_error), 0, 0, 0, 16, 0, 0, 0];
+    result.extend_from_slice(&(schema.len() as u32).to_le_bytes());
+    let data = format!(
+        "(data (i32.const 0) \"{}\")\n(data (i32.const 16) \"{}\")\n)",
+        wat_bytes(&result),
+        wat_bytes(schema.as_bytes())
+    );
+    wat.truncate(wat.strip_suffix(")\n").unwrap().len());
+    wat.push_str(&data);
+    wat::parse_str(wat).unwrap()
+}
+
+fn wat_bytes(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("\\{byte:02x}")).collect()
+}
+
+fn permissive_schema() -> &'static str {
+    r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}"#
 }
 
 fn with_plugin_metadata(mut bytes: Vec<u8>, id: &str) -> Vec<u8> {

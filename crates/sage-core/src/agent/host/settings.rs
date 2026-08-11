@@ -3,10 +3,17 @@
 use super::AppState;
 use crate::{agent::bindings, config::Config};
 use lockgate::HostContext;
-use std::{collections::BTreeMap, env};
+use serde_json::Value;
+use std::{collections::BTreeMap, env, sync::Arc};
 
-pub(super) struct Settings {
-    values: BTreeMap<String, String>,
+#[derive(Clone)]
+pub(in crate::agent) struct Settings {
+    values: Arc<BTreeMap<String, ResolvedSettings>>,
+}
+
+struct ResolvedSettings {
+    json: String,
+    value: Value,
 }
 
 impl Settings {
@@ -27,18 +34,31 @@ impl Settings {
                     })?;
                     settings.insert("api-key".to_owned(), toml::Value::String(api_key));
                 }
-                let json = serde_json::to_string(&settings)
-                    .map_err(|error| format!("failed to encode settings for plugin `{id}`: {error}"))?;
-                Ok((id.to_owned(), json))
+                let json = serde_json::to_string(&settings).map_err(|error| {
+                    format!("failed to encode settings for plugin `{id}`: {error}")
+                })?;
+                let value = serde_json::from_str(&json).map_err(|error| {
+                    format!("failed to decode settings for plugin `{id}`: {error}")
+                })?;
+                Ok((id.to_owned(), ResolvedSettings { json, value }))
             })
             .collect::<Result<_, String>>()?;
-        Ok(Self { values })
+        Ok(Self {
+            values: Arc::new(values),
+        })
     }
 
     pub(super) fn get_json(&self, plugin_id: &str) -> Result<String, String> {
         self.values
             .get(plugin_id)
-            .cloned()
+            .map(|settings| settings.json.clone())
+            .ok_or_else(|| format!("settings are unavailable for plugin `{plugin_id}`"))
+    }
+
+    pub(in crate::agent) fn value(&self, plugin_id: &str) -> Result<&Value, String> {
+        self.values
+            .get(plugin_id)
+            .map(|settings| &settings.value)
             .ok_or_else(|| format!("settings are unavailable for plugin `{plugin_id}`"))
     }
 }

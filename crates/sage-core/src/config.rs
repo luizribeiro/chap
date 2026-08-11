@@ -12,6 +12,8 @@ pub struct Config {
     plugins: BTreeMap<String, Plugin>,
     #[serde(skip)]
     directory: PathBuf,
+    #[serde(skip)]
+    source: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
@@ -31,6 +33,7 @@ impl Config {
         let mut config: Self = toml::from_str(&source)
             .map_err(|error| format!("failed to parse `{}`: {error}", path.display()))?;
         config.directory = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
+        config.source = path.to_path_buf();
         Ok(config)
     }
 
@@ -46,6 +49,10 @@ impl Config {
 
     pub(crate) fn component_path(&self, plugin: &Plugin) -> PathBuf {
         self.directory.join(&plugin.component)
+    }
+
+    pub(crate) fn source(&self) -> &Path {
+        &self.source
     }
 }
 

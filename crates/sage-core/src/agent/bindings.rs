@@ -3,5 +3,6 @@ lockgate::bindings! {
     worlds: {
         ProviderPlugin: "provider-role",
         ToolPlugin: "tool-role",
+        ConfigurationPlugin: "configuration-role",
     },
 }

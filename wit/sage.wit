@@ -86,6 +86,11 @@ world tool-role {
   export tools;
 }
 
+world configuration-role {
+  import settings;
+  export configuration;
+}
+
 world provider-plugin {
   import settings;
   export configuration;

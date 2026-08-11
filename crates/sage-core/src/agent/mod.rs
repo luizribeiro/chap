@@ -10,6 +10,7 @@ use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 use turn::run_agent_loop;
 
 mod bindings;
+mod configuration;
 mod host;
 mod plugin_tool;
 mod provider;
@@ -20,11 +21,13 @@ const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
 type InnerApplication = lockgate::Application<AppState>;
 type InnerRuntime = lockgate::Runtime<AppState>;
+type ConfigurationComponent = Component<bindings::ConfigurationPlugin>;
 type ProviderComponent = Component<bindings::ProviderPlugin>;
 type ToolComponent = Component<bindings::ToolPlugin>;
 
 #[derive(Clone, Copy)]
 struct LoadedPlugin {
+    configuration: ConfigurationComponent,
     provider: Option<ProviderComponent>,
     tools: Option<ToolComponent>,
 }
@@ -91,7 +94,9 @@ impl AgentBuilder {
     }
 
     pub async fn start(self) -> Result<Agent, String> {
-        let mut lockgate = self.lockgate()?;
+        let state = AppState::from_config(&self.config)?;
+        let settings = state.settings().clone();
+        let mut lockgate = Self::lockgate_with_state(state)?;
         let plugins = Self::load_plugins(&mut lockgate, &self.config)?;
         let lockgate = Self::apply_policy(lockgate, &self.config, &plugins)?;
         let lockgate = Arc::new(
@@ -100,6 +105,16 @@ impl AgentBuilder {
                 .await
                 .map_err(|error| format!("failed to start plugin runtime: {error}"))?,
         );
+        for (id, plugin) in &plugins {
+            configuration::validate(
+                &lockgate,
+                id,
+                plugin.configuration,
+                &settings,
+                self.config.source(),
+            )
+            .await?;
+        }
         let mut tools = self.tools;
         for (id, plugin) in &plugins {
             let Some(component) = plugin.tools else {
@@ -120,7 +135,11 @@ impl AgentBuilder {
     }
 
     fn lockgate(&self) -> Result<InnerApplication, String> {
-        lockgate::Application::new(AppState::from_config(&self.config)?)
+        Self::lockgate_with_state(AppState::from_config(&self.config)?)
+    }
+
+    fn lockgate_with_state(state: AppState) -> Result<InnerApplication, String> {
+        lockgate::Application::new(state)
             .map_err(|error| format!("failed to create Lockgate application: {error}"))
             .map(|lockgate| lockgate.fuel_per_call(PLUGIN_FUEL_PER_CALL))
     }
@@ -153,32 +172,50 @@ impl AgentBuilder {
         let tools = lockgate
             .supports::<bindings::ToolPlugin>(&bytes)
             .map_err(|error| format!("failed to inspect plugin `{id}`: {error}"))?;
+        let configuration = lockgate
+            .supports::<bindings::ConfigurationPlugin>(&bytes)
+            .map_err(|error| format!("failed to inspect plugin `{id}`: {error}"))?;
+        if (provider || tools) && !configuration {
+            return Err(format!(
+                "plugin `{id}` from `{}` does not export the required settings schema",
+                path.display()
+            ));
+        }
         let loaded = match (provider, tools) {
             (true, true) => {
-                let (provider, tools) = lockgate
-                    .add::<(bindings::ProviderPlugin, bindings::ToolPlugin)>(bytes)
+                let (provider, tools, configuration) = lockgate
+                    .add::<(
+                        bindings::ProviderPlugin,
+                        bindings::ToolPlugin,
+                        bindings::ConfigurationPlugin,
+                    )>(bytes)
                     .map_err(|error| Self::load_error(id, &path, error))?;
                 LoadedPlugin {
+                    configuration,
                     provider: Some(provider),
                     tools: Some(tools),
                 }
             }
-            (true, false) => LoadedPlugin {
-                provider: Some(
-                    lockgate
-                        .add::<bindings::ProviderPlugin>(bytes)
-                        .map_err(|error| Self::load_error(id, &path, error))?,
-                ),
-                tools: None,
-            },
-            (false, true) => LoadedPlugin {
-                provider: None,
-                tools: Some(
-                    lockgate
-                        .add::<bindings::ToolPlugin>(bytes)
-                        .map_err(|error| Self::load_error(id, &path, error))?,
-                ),
-            },
+            (true, false) => {
+                let (provider, configuration) = lockgate
+                    .add::<(bindings::ProviderPlugin, bindings::ConfigurationPlugin)>(bytes)
+                    .map_err(|error| Self::load_error(id, &path, error))?;
+                LoadedPlugin {
+                    configuration,
+                    provider: Some(provider),
+                    tools: None,
+                }
+            }
+            (false, true) => {
+                let (tools, configuration) = lockgate
+                    .add::<(bindings::ToolPlugin, bindings::ConfigurationPlugin)>(bytes)
+                    .map_err(|error| Self::load_error(id, &path, error))?;
+                LoadedPlugin {
+                    configuration,
+                    provider: None,
+                    tools: Some(tools),
+                }
+            }
             (false, false) => {
                 return Err(format!(
                     "plugin `{id}` from `{}` does not implement a supported role",
@@ -187,11 +224,7 @@ impl AgentBuilder {
             }
         };
 
-        if let Some(component) = loaded.provider {
-            Self::validate_plugin_id(lockgate, component, id, &path)?;
-        } else if let Some(component) = loaded.tools {
-            Self::validate_plugin_id(lockgate, component, id, &path)?;
-        }
+        Self::validate_plugin_id(lockgate, loaded.configuration, id, &path)?;
         Ok(loaded)
     }
 
@@ -240,13 +273,8 @@ impl AgentBuilder {
             let configured = config
                 .plugin(id)
                 .expect("loaded plugins come from the configuration");
-            lockgate = if let Some(component) = plugin.provider {
-                Self::apply_component_policy(lockgate, configured, id, component)?
-            } else if let Some(component) = plugin.tools {
-                Self::apply_component_policy(lockgate, configured, id, component)?
-            } else {
-                unreachable!("loaded plugins always implement at least one role")
-            };
+            lockgate =
+                Self::apply_component_policy(lockgate, configured, id, plugin.configuration)?;
         }
 
         Ok(lockgate)
