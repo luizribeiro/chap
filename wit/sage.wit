@@ -7,7 +7,7 @@ interface tools {
     parameters: string,
   }
 
-  definitions: async func() -> result<list<tool-definition>, string>;
+  definitions: func() -> result<list<tool-definition>, string>;
   execute: async func(name: string, arguments: string) -> result<string, string>;
 }
 

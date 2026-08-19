@@ -41,7 +41,7 @@ impl Plugin for Kagi {
 }
 
 impl Guest for Kagi {
-    async fn definitions() -> Result<Vec<ToolDefinition>, String> {
+    fn definitions() -> Result<Vec<ToolDefinition>, String> {
         Ok(vec![
             ToolDefinition {
                 name: WEB_SEARCH.to_owned(),
