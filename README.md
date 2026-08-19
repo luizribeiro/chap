@@ -43,103 +43,83 @@ cargo run -- plugins check
 ```
 
 The repository includes an OpenAI-compatible Chat Completions provider that uses
-WASI HTTP. From the Nix development shell, build it from its
-source directory before checking configured plugins:
+WASI HTTP. Build it with the system Cargo before checking configured plugins:
 
 ```console
-cd plugins/openai-compatible
-cargo build --release -Z build-std=std,panic_abort --target wasm32-wasip2
-cd ../..
+cargo build -p sage-openai-compatible --release --target wasm32-wasip2
 cargo run -- plugins check
 ```
 
-Each plugin is keyed by its stable id and maps directly to its component and
-settings. The key must match the stable plugin id embedded in the component:
+Each plugin is keyed by an operator-assigned instance id and maps directly to
+its component and settings:
 
 ```toml
 [plugins.openai]
 component = "./target/wasm32-wasip2/release/sage_openai_compatible.wasm"
-outbound-http = ["http://127.0.0.1:8080"]
 
 [plugins.openai.settings]
 base-url = "http://127.0.0.1:8080/v1"
+egress-origin = "http://127.0.0.1:8080"
 model = "example-model"
 # Optional: the host reads this environment variable without storing its value
 # in sage.toml.
 api-key-env = "OPENAI_API_KEY"
 ```
 
-`outbound-http` is an allowlist of exact origins. The scheme and effective port are part of the
-policy: `https://api.example.com` allows port 443 only, while a local service on another port must
-be written explicitly, such as `http://127.0.0.1:8080`. Omitting the field denies outbound HTTP.
+The OpenAI-compatible plugin declares network egress through Lockgate and
+resolves its exact origin from `egress-origin`. The scheme and effective port
+are part of the origin. Kagi declares the literal origin `https://kagi.com` and
+therefore needs no configurable origin.
 
 ### Typed plugin settings
 
-Configuration has a deliberate ownership boundary. SAGE parses and validates
-fields it understands, including `component` and `outbound-http`. A plugin owns
-only its `[plugins.<id>.settings]` table, and the JSON Schema it publishes uses
-that settings object as its root; it does not describe the surrounding plugin
-entry. If a field is eventually shared by every plugin in a role, it belongs in
-SAGE-owned typed configuration and/or that role's WIT interface rather than in
-each plugin's private schema.
+Configuration has a deliberate ownership boundary. SAGE owns `component`; a
+plugin owns its `[plugins.<id>.settings]` table. The framework-generated JSON
+Schema uses that settings object as its root and does not describe the
+surrounding plugin entry.
 
 At startup, the host converts the complete settings table to one JSON object.
 Strings, numbers, booleans, arrays, and nested tables retain their corresponding
 JSON types. `api-key-env` is host-managed: SAGE removes it from the delivered
 object and, when `api-key` is not already present, reads the selected environment
-variable and inserts its value as `api-key`. The plugin obtains the resulting
-object from `settings.get-json` and should deserialize it once into a strict,
-typed settings structure.
+variable and inserts its value as `api-key`. Lockgate validates that object at
+prepare time against the schema derived from the plugin's `type Settings`. The
+plugin then reads the validated typed value through `Self::settings()`.
 
-Provider and tool plugins must export `configuration.settings-schema`. It
-returns a JSON Schema Draft 2020-12 document for the same resolved JSON object
-the plugin receives. Rust plugins can derive the schema from the type they
-deserialize, as the built-in
-[OpenAI-compatible provider](plugins/openai-compatible/src/lib.rs) and
-[Kagi tools](plugins/kagi/src/lib.rs) do:
+Rust plugins derive both deserialization and schema behavior from one strict
+settings type, as the built-in [OpenAI-compatible
+provider](plugins/openai-compatible/src/lib.rs) and [Kagi
+tools](plugins/kagi/src/lib.rs) do:
 
 ```rust
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct Settings {
     base_url: String,
+    egress_origin: String,
     model: String,
     #[serde(default)]
     api_key: Option<String>,
 }
-
-let schema = schemars::generate::SchemaSettings::draft2020_12()
-    .into_generator()
-    .into_root_schema_for::<Settings>();
-let schema_json = serde_json::to_string(&schema)?;
 ```
 
-The export should be pure and deterministic: it should not read settings,
-environment variables, clocks, or the network. SAGE starts the sandbox, calls
-the schema export once for each configured plugin, and validates its resolved
-settings before loading tool definitions or using a provider. Invalid settings
-are user configuration errors reported with the configuration filename and a
-logical TOML path, for example:
+Lockgate fetches the framework schema and validates resolved settings before
+admitting the plugin, loading tool definitions, or using a provider. Invalid
+settings are reported as plugin admission errors:
 
 ```text
-sage.toml: plugins.openai.settings.model: required setting is missing
+failed to load plugin `openai`: plugin settings do not satisfy the schema
 ```
 
-A missing configuration export or a malformed schema is instead a plugin
-contract error. `cargo run -- plugins check` exercises this startup path, so it
-validates settings and schemas in addition to component identity and supported
-roles.
-
-The schema is retrieved through the WIT method at runtime; it is not embedded in
-or read from component metadata. See [the WIT contract](wit/sage.wit) for the
-authoritative interface definitions.
+`cargo run -- plugins check` exercises this preparation and admission path. See
+[the WIT contract](wit/sage.wit) for the SAGE-owned role interfaces; Lockgate
+adds its settings and schema interfaces automatically.
 
 ## Development
 
-Enter the Nix development shell and run the project:
+Run the project with the system Cargo:
 
 ```console
-nix develop
 cargo run -- --help
 ```
 

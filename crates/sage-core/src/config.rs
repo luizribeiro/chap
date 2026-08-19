@@ -1,7 +1,8 @@
 use serde::Deserialize;
+use serde_json::Value;
 use std::{
     collections::BTreeMap,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -12,16 +13,12 @@ pub struct Config {
     plugins: BTreeMap<String, Plugin>,
     #[serde(skip)]
     directory: PathBuf,
-    #[serde(skip)]
-    source: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Plugin {
     component: PathBuf,
-    #[serde(default, rename = "outbound-http")]
-    outbound_http: Vec<String>,
     #[serde(default)]
     settings: toml::Table,
 }
@@ -33,7 +30,6 @@ impl Config {
         let mut config: Self = toml::from_str(&source)
             .map_err(|error| format!("failed to parse `{}`: {error}", path.display()))?;
         config.directory = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
-        config.source = path.to_path_buf();
         Ok(config)
     }
 
@@ -50,10 +46,6 @@ impl Config {
     pub(crate) fn component_path(&self, plugin: &Plugin) -> PathBuf {
         self.directory.join(&plugin.component)
     }
-
-    pub(crate) fn source(&self) -> &Path {
-        &self.source
-    }
 }
 
 impl Plugin {
@@ -61,12 +53,24 @@ impl Plugin {
         &self.component
     }
 
-    pub(crate) fn settings(&self) -> &toml::Table {
-        &self.settings
-    }
-
-    pub(crate) fn outbound_http(&self) -> &[String] {
-        &self.outbound_http
+    pub(crate) fn settings(&self, id: &str) -> Result<Value, String> {
+        let mut settings = self.settings.clone();
+        let api_key_env = settings.remove("api-key-env");
+        if !settings.contains_key("api-key")
+            && let Some(variable) = api_key_env
+        {
+            let variable = variable
+                .as_str()
+                .ok_or_else(|| format!("plugin `{id}` setting `api-key-env` must be a string"))?;
+            let api_key = env::var(variable).map_err(|error| {
+                format!(
+                    "failed to read API key for plugin `{id}` from environment variable `{variable}`: {error}"
+                )
+            })?;
+            settings.insert("api-key".to_owned(), toml::Value::String(api_key));
+        }
+        serde_json::to_value(settings)
+            .map_err(|error| format!("failed to encode settings for plugin `{id}`: {error}"))
     }
 }
 
@@ -80,9 +84,10 @@ mod tests {
             r#"
 [plugins.openai]
 component = "./plugins/openai-compatible.wasm"
-outbound-http = ["https://api.example.com"]
 
 [plugins.openai.settings]
+base-url = "https://api.example.com/v1"
+egress-origin = "https://api.example.com"
 model = "example-model"
 "#,
         )
@@ -94,7 +99,9 @@ model = "example-model"
             plugin.component(),
             Path::new("./plugins/openai-compatible.wasm")
         );
-        assert_eq!(plugin.outbound_http(), ["https://api.example.com"]);
-        assert_eq!(plugin.settings()["model"].as_str(), Some("example-model"));
+        let settings = plugin.settings(id).unwrap();
+        assert_eq!(settings["base-url"], "https://api.example.com/v1");
+        assert_eq!(settings["egress-origin"], "https://api.example.com");
+        assert_eq!(settings["model"], "example-model");
     }
 }

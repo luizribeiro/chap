@@ -138,8 +138,7 @@ impl AgentBuilder {
     ) -> Result<PluginHandle, String> {
         let path = config.component_path(plugin);
         let bytes = Self::plugin_bytes(config, id, plugin)?;
-        let settings = serde_json::to_value(plugin.settings())
-            .map_err(|error| format!("failed to encode settings for plugin `{id}`: {error}"))?;
+        let settings = plugin.settings(id)?;
         let prepared = builder
             .prepare(
                 id,
