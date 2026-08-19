@@ -1,40 +1,34 @@
-mod bindings {
-    lockgate_plugin::bindings!({
-        path: "../../wit",
-        world: "provider-plugin",
-        metadata: {
-            id: "openai",
-            name: "OpenAI-compatible provider",
-            version: "0.1.0",
-            description: "Calls an OpenAI-compatible Chat Completions server",
-        },
-    });
-}
+lockgate_plugin::generate!({
+    path: "wit",
+    world: "provider-plugin",
+});
 
-use bindings::exports::sage::agent::configuration::Guest as ConfigurationGuest;
-use bindings::exports::sage::agent::provider::{
+use exports::sage::agent::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Guest,
     Message as ProviderMessage, ToolCall as ProviderToolCall, ToolDefinition as ProviderTool,
 };
-use bindings::sage::agent::settings;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use http_body_util::BodyExt;
-use schemars::{JsonSchema, generate::SchemaSettings};
+use lockgate_plugin::{MetadataSource, Need, Needs, Plugin, ScopeRef, http};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use wasi_fetch::Client;
 
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const REQUIRED: &[Need] = &[http::EGRESS.need(&[ScopeRef::setting("/egress-origin")])];
 
 struct OpenAiCompatible;
 
-impl ConfigurationGuest for OpenAiCompatible {
-    fn settings_schema() -> Result<String, String> {
-        let schema = SchemaSettings::draft2020_12()
-            .into_generator()
-            .into_root_schema_for::<Settings>();
-        serde_json::to_string(&schema)
-            .map_err(|error| format!("failed to encode OpenAI-compatible settings schema: {error}"))
-    }
+impl Plugin for OpenAiCompatible {
+    const ID: &'static str = "openai";
+    const DISPLAY_NAME: MetadataSource = MetadataSource::Explicit("OpenAI-compatible provider");
+    const DESCRIPTION: MetadataSource =
+        MetadataSource::Explicit("Calls an OpenAI-compatible Chat Completions server");
+    const LICENSE: MetadataSource = MetadataSource::Absent;
+    const REPOSITORY: MetadataSource = MetadataSource::Absent;
+    const HOMEPAGE: MetadataSource = MetadataSource::Absent;
+    const NEEDS: Needs = Needs::required(REQUIRED);
+    type Settings = Settings;
 }
 
 impl Guest for OpenAiCompatible {
@@ -74,28 +68,11 @@ struct Settings {
     #[schemars(regex(pattern = r"\S"))]
     base_url: String,
     #[schemars(regex(pattern = r"\S"))]
+    egress_origin: String,
+    #[schemars(regex(pattern = r"\S"))]
     model: String,
     #[serde(default)]
     api_key: Option<String>,
-}
-
-impl Settings {
-    fn from_json(json: &str) -> Result<Self, String> {
-        let settings: Self = serde_json::from_str(json)
-            .map_err(|error| format!("invalid OpenAI-compatible settings: {error}"))?;
-        if settings.base_url.trim().is_empty() {
-            return Err("provider setting `base-url` is required".to_owned());
-        }
-        if settings.model.trim().is_empty() {
-            return Err("provider setting `model` is required".to_owned());
-        }
-        Ok(settings)
-    }
-}
-
-async fn load_settings() -> Result<Settings, String> {
-    let json = settings::get_json().await?;
-    Settings::from_json(&json)
 }
 
 async fn post(
@@ -356,16 +333,16 @@ struct ErrorBody {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
 
     #[test]
     fn deserializes_typed_settings() {
-        let settings = Settings::from_json(
-            r#"{"base-url":"https://example.com/v1","model":"example","api-key":"key"}"#,
+        let settings: Settings = serde_json::from_str(
+            r#"{"base-url":"https://example.com/v1","egress-origin":"https://example.com","model":"example","api-key":"key"}"#,
         )
         .unwrap();
 
         assert_eq!(settings.base_url, "https://example.com/v1");
+        assert_eq!(settings.egress_origin, "https://example.com");
         assert_eq!(settings.model, "example");
         assert!(settings.api_key.is_some());
     }
@@ -374,39 +351,11 @@ mod tests {
     fn rejects_invalid_settings() {
         for json in [
             r#"{"base-url":"https://example.com/v1"}"#,
-            r#"{"base-url":42,"model":"example"}"#,
-            r#"{"base-url":"https://example.com/v1","model":"example","extra":true}"#,
+            r#"{"base-url":42,"egress-origin":"https://example.com","model":"example"}"#,
+            r#"{"base-url":"https://example.com/v1","egress-origin":"https://example.com","model":"example","extra":true}"#,
         ] {
-            assert!(Settings::from_json(json).is_err());
+            assert!(serde_json::from_str::<Settings>(json).is_err());
         }
-    }
-
-    #[test]
-    fn publishes_the_settings_object_schema() {
-        let schema = <OpenAiCompatible as ConfigurationGuest>::settings_schema().unwrap();
-        let schema: serde_json::Value = serde_json::from_str(&schema).unwrap();
-
-        assert_eq!(
-            schema["$schema"],
-            "https://json-schema.org/draft/2020-12/schema"
-        );
-        assert_eq!(schema["type"], "object");
-        assert_eq!(schema["additionalProperties"], false);
-        assert_eq!(schema["properties"].as_object().unwrap().len(), 3);
-        assert_eq!(schema["properties"]["base-url"]["type"], "string");
-        assert_eq!(schema["properties"]["model"]["type"], "string");
-        assert_eq!(schema["properties"]["base-url"]["pattern"], r"\S");
-        assert_eq!(schema["properties"]["model"]["pattern"], r"\S");
-        assert!(schema["properties"]["api-key"].get("pattern").is_none());
-        assert!(schema["properties"].get("settings").is_none());
-
-        let required = schema["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|name| name.as_str().unwrap())
-            .collect::<BTreeSet<_>>();
-        assert_eq!(required, BTreeSet::from(["base-url", "model"]));
     }
 
     #[test]
@@ -466,7 +415,7 @@ mod tests {
                 name: "weather".to_owned(),
                 arguments: r#"{"city":"Paris"}"#.to_owned(),
             })]),
-            ProviderMessage::ToolResult(bindings::exports::sage::agent::provider::ToolResult {
+            ProviderMessage::ToolResult(exports::sage::agent::provider::ToolResult {
                 call_id: "call-1".to_owned(),
                 name: "weather".to_owned(),
                 output: "sunny".to_owned(),
@@ -507,4 +456,4 @@ mod tests {
     }
 }
 
-bindings::export!(OpenAiCompatible with_types_in bindings);
+lockgate_plugin::export!(OpenAiCompatible);
