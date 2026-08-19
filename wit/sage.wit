@@ -1,17 +1,5 @@
 package sage:agent@0.1.0;
 
-interface settings {
-  get-json: async func() -> result<string, string>;
-}
-
-/// Publishes the schema for the plugin-owned settings object.
-///
-/// The schema uses JSON Schema Draft 2020-12 and describes only the JSON
-/// object converted from `[plugins.<id>.settings]`, not the outer plugin entry.
-interface configuration {
-  settings-schema: func() -> result<string, string>;
-}
-
 interface tools {
   record tool-definition {
     name: string,
@@ -75,30 +63,10 @@ interface provider {
   complete: async func(request: completion-request) -> result<completion, string>;
 }
 
-// Narrow host admission worlds keep each Lockgate role scoped to one export.
-world provider-role {
-  import settings;
-  export provider;
-}
-
-world tool-role {
-  import settings;
-  export tools;
-}
-
-world configuration-role {
-  import settings;
-  export configuration;
-}
-
 world provider-plugin {
-  import settings;
-  export configuration;
   export provider;
 }
 
 world tool-plugin {
-  import settings;
-  export configuration;
   export tools;
 }
