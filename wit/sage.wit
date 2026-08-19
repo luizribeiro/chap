@@ -70,3 +70,8 @@ world provider-plugin {
 world tool-plugin {
   export tools;
 }
+
+world host {
+  export provider;
+  export tools;
+}

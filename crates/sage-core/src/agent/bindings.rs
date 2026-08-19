@@ -1,8 +1,4 @@
-lockgate::bindings! {
+lockgate::host_bindings!({
     path: "../../wit",
-    worlds: {
-        ProviderPlugin: "provider-role",
-        ToolPlugin: "tool-role",
-        ConfigurationPlugin: "configuration-role",
-    },
-}
+    world: "host",
+});
