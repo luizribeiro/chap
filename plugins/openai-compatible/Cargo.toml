@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 http = "1.5.0"
 http-body-util = "0.1.3"
-lockgate-plugin.workspace = true
+lockgate-plugin = { workspace = true, default-features = false }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
