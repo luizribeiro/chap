@@ -8,7 +8,6 @@ use exports::lockgate::config::schema::Guest as ConfigurationGuest;
 use exports::sage::agent::tools::{Guest, ToolDefinition};
 use http::{HeaderMap, HeaderValue, header};
 use http_body_util::BodyExt;
-use lockgate::config::settings;
 use lockgate_plugin::{MetadataSource, Needs, Plugin, ScopeRef, net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -78,7 +77,7 @@ impl Guest for Kagi {
             WEB_SEARCH => {
                 let arguments: SearchArguments = parse_arguments(WEB_SEARCH, &arguments)?;
                 arguments.validate()?;
-                let settings = load_settings().await?;
+                let settings = Self::settings();
                 let body = post_json(
                     "/search",
                     &settings.api_key,
@@ -95,7 +94,7 @@ impl Guest for Kagi {
             WEB_FETCH => {
                 let arguments: FetchArguments = parse_arguments(WEB_FETCH, &arguments)?;
                 arguments.validate()?;
-                let settings = load_settings().await?;
+                let settings = Self::settings();
                 let body = post_json(
                     "/extract",
                     &settings.api_key,
@@ -121,23 +120,6 @@ fn parse_arguments<T: for<'de> Deserialize<'de>>(tool: &str, arguments: &str) ->
 struct Settings {
     #[schemars(regex(pattern = r"\S"))]
     api_key: String,
-}
-
-impl Settings {
-    fn from_json(json: &str) -> Result<Self, String> {
-        let settings: Self = serde_json::from_str(json)
-            .map_err(|error| format!("invalid Kagi settings: {error}"))?;
-        if settings.api_key.trim().is_empty() {
-            return Err("Kagi setting `api-key` is required".to_owned());
-        }
-        Ok(settings)
-    }
-}
-
-async fn load_settings() -> Result<Settings, String> {
-    let json =
-        settings::get_json().map_err(|error| format!("failed to read Kagi settings: {error:?}"))?;
-    Settings::from_json(&json)
 }
 
 #[derive(Deserialize)]
