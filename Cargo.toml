@@ -4,7 +4,6 @@ members = [
     "crates/sage-core",
     "plugins/kagi",
     "plugins/openai-compatible",
-    "spikes/openai-compatible-host",
 ]
 default-members = ["crates/sage-cli"]
 resolver = "3"
