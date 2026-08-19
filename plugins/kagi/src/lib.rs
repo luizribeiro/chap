@@ -1,24 +1,16 @@
-mod bindings {
-    lockgate_plugin::bindings!({
-        path: "../../wit",
-        world: "tool-plugin",
-        metadata: {
-            id: "kagi",
-            name: "Kagi web tools",
-            version: "0.1.0",
-            description: "Searches the web and extracts readable page content with Kagi",
-        },
-    });
-}
+lockgate_plugin::generate!({
+    path: "../../wit",
+    world: "tool-plugin",
+});
 
-use bindings::exports::sage::agent::{
-    configuration::Guest as ConfigurationGuest,
-    tools::{Guest, ToolDefinition},
-};
-use bindings::sage::agent::settings;
+#[cfg(test)]
+use exports::lockgate::config::schema::Guest as ConfigurationGuest;
+use exports::sage::agent::tools::{Guest, ToolDefinition};
 use http::{HeaderMap, HeaderValue, header};
 use http_body_util::BodyExt;
-use schemars::{JsonSchema, generate::SchemaSettings};
+use lockgate::config::settings;
+use lockgate_plugin::{MetadataSource, Needs, Plugin, ScopeRef, net};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use wasi_fetch::Client;
@@ -35,14 +27,17 @@ const MAX_MAX_CHARS: usize = 100_000;
 
 struct Kagi;
 
-impl ConfigurationGuest for Kagi {
-    fn settings_schema() -> Result<String, String> {
-        let schema = SchemaSettings::draft2020_12()
-            .into_generator()
-            .into_root_schema_for::<Settings>();
-        serde_json::to_string(&schema)
-            .map_err(|error| format!("failed to encode Kagi settings schema: {error}"))
-    }
+impl Plugin for Kagi {
+    const ID: &'static str = "kagi";
+    const DISPLAY_NAME: MetadataSource = MetadataSource::Explicit("Kagi web tools");
+    const DESCRIPTION: MetadataSource =
+        MetadataSource::Explicit("Searches the web and extracts readable page content with Kagi");
+    const LICENSE: MetadataSource = MetadataSource::Absent;
+    const REPOSITORY: MetadataSource = MetadataSource::Absent;
+    const HOMEPAGE: MetadataSource = MetadataSource::Absent;
+    const NEEDS: Needs =
+        Needs::required(&[net::EGRESS.need(&[ScopeRef::literal("https://kagi.com")])]);
+    type Settings = Settings;
 }
 
 impl Guest for Kagi {
@@ -140,7 +135,8 @@ impl Settings {
 }
 
 async fn load_settings() -> Result<Settings, String> {
-    let json = settings::get_json().await?;
+    let json =
+        settings::get_json().map_err(|error| format!("failed to read Kagi settings: {error:?}"))?;
     Settings::from_json(&json)
 }
 
@@ -589,4 +585,4 @@ mod tests {
     }
 }
 
-bindings::export!(Kagi with_types_in bindings);
+lockgate_plugin::export!(Kagi);
