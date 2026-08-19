@@ -49,7 +49,7 @@ interface provider {
     finish-reason: finish-reason,
   }
 
-  complete: func(request: completion-request) -> result<completion, string>;
+  complete: async func(request: completion-request) -> result<completion, string>;
 }
 
 world provider-plugin {

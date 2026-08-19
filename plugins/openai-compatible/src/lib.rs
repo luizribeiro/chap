@@ -32,7 +32,7 @@ impl Plugin for OpenAiCompatible {
 }
 
 impl Guest for OpenAiCompatible {
-    fn complete(request: CompletionRequest) -> Result<Completion, String> {
+    async fn complete(request: CompletionRequest) -> Result<Completion, String> {
         let settings = Self::settings();
         let _ = &settings.egress_origin;
         let request = serde_json::to_string(&Request {
@@ -58,7 +58,7 @@ impl Guest for OpenAiCompatible {
         if let Some(api_key) = settings.api_key.filter(|key| !key.is_empty()) {
             headers.push(("authorization".to_owned(), format!("Bearer {api_key}")));
         }
-        let (status, body) = wit_bindgen::block_on(post(&url, &headers, request.as_bytes()))?;
+        let (status, body) = post(&url, &headers, request.as_bytes()).await?;
         parse_response(status, &body)
     }
 }
