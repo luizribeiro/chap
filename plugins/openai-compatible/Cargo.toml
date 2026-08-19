@@ -15,3 +15,4 @@ schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 wasi-fetch = "0.2.0"
+wit-bindgen = { version = "0.57", default-features = false, features = ["async"] }

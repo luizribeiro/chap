@@ -2209,6 +2209,7 @@ dependencies = [
  "serde",
  "serde_json",
  "wasi-fetch",
+ "wit-bindgen",
 ]
 
 [[package]]

@@ -9,13 +9,13 @@ use exports::sage::agent::provider::{
 };
 use http::{HeaderMap, HeaderName, HeaderValue};
 use http_body_util::BodyExt;
-use lockgate_plugin::{MetadataSource, Need, Needs, Plugin, ScopeRef, http};
+use lockgate_plugin::{MetadataSource, Need, Needs, Plugin, ScopeRef, http as http_permission};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use wasi_fetch::Client;
 
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
-const REQUIRED: &[Need] = &[http::EGRESS.need(&[ScopeRef::setting("/egress-origin")])];
+const REQUIRED: &[Need] = &[http_permission::EGRESS.need(&[ScopeRef::setting("/egress-origin")])];
 
 struct OpenAiCompatible;
 
@@ -32,8 +32,9 @@ impl Plugin for OpenAiCompatible {
 }
 
 impl Guest for OpenAiCompatible {
-    async fn complete(request: CompletionRequest) -> Result<Completion, String> {
-        let settings = load_settings().await?;
+    fn complete(request: CompletionRequest) -> Result<Completion, String> {
+        let settings = Self::settings();
+        let _ = &settings.egress_origin;
         let request = serde_json::to_string(&Request {
             model: settings.model,
             messages: request
@@ -57,7 +58,7 @@ impl Guest for OpenAiCompatible {
         if let Some(api_key) = settings.api_key.filter(|key| !key.is_empty()) {
             headers.push(("authorization".to_owned(), format!("Bearer {api_key}")));
         }
-        let (status, body) = post(&url, &headers, request.as_bytes()).await?;
+        let (status, body) = wit_bindgen::block_on(post(&url, &headers, request.as_bytes()))?;
         parse_response(status, &body)
     }
 }
