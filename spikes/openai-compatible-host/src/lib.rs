@@ -6,7 +6,7 @@ const STARTUP_FUEL: u64 = 1_000_000;
 const CALL_FUEL: u64 = 100_000_000;
 
 lockgate::host_bindings!({
-    path: "../../plugins/openai-compatible/wit",
+    path: "../../wit",
     world: "provider-plugin",
 });
 
