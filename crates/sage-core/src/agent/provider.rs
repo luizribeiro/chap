@@ -1,9 +1,10 @@
-use super::{AgentInner, bindings};
+use super::{AgentInner, PLUGIN_FUEL_PER_CALL, bindings};
 use crate::{
     ToolDefinition,
     session::{AssistantContent, Message, ToolCall},
 };
-use bindings::__lockgate_world_0::exports::sage::agent::provider as provider_bindings;
+use bindings::provider as provider_bindings;
+use lockgate::InvocationCtx;
 use std::{future::Future, pin::Pin};
 
 pub(super) type CompletionFuture<'a> =
@@ -39,19 +40,23 @@ impl AgentInner {
         let plugin = self
             .plugins
             .get(provider)
-            .and_then(|plugin| plugin.provider)
+            .filter(|plugin| plugin.provider)
             .ok_or_else(|| format!("provider plugin `{provider}` is not configured"))?;
         self.lockgate
-            .component(plugin)
-            .complete(provider_bindings::CompletionRequest {
-                messages: messages.into_iter().map(Into::into).collect(),
-                tools: self
-                    .tools
-                    .definitions()
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-            })
+            .client::<provider_bindings::Role>(&plugin.handle)
+            .map_err(|error| format!("provider plugin `{provider}` failed: {error}"))?
+            .complete(
+                InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL),
+                provider_bindings::CompletionRequest {
+                    messages: messages.into_iter().map(Into::into).collect(),
+                    tools: self
+                        .tools
+                        .definitions()
+                        .into_iter()
+                        .map(Into::into)
+                        .collect(),
+                },
+            )
             .await
             .map_err(|error| format!("provider plugin `{provider}` failed: {error}"))?
             .map_err(|error| format!("provider plugin `{provider}`: {error}"))
