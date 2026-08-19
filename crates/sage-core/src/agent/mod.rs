@@ -1,9 +1,10 @@
-use crate::config::{Config, Plugin as PluginConfig};
+use crate::config::{Config, Plugin as ConfiguredPlugin};
 use crate::session::{Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions};
 use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition};
-use host::{AppState, SETTINGS_INTERFACE};
-use lockgate::Component;
+use lockgate::{
+    Host, HostBuilder, InvocationCtx, PluginConfig, PluginHandle, Role, RoleError, RuntimeLimits,
+};
 use plugin_tool::PluginTool;
 use provider::PluginBackend;
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
@@ -19,17 +20,13 @@ mod turn;
 const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
-type InnerApplication = lockgate::Application<AppState>;
-type InnerRuntime = lockgate::Runtime<AppState>;
-type ConfigurationComponent = Component<bindings::ConfigurationPlugin>;
-type ProviderComponent = Component<bindings::ProviderPlugin>;
-type ToolComponent = Component<bindings::ToolPlugin>;
+type InnerHost = Host<()>;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct LoadedPlugin {
-    configuration: ConfigurationComponent,
-    provider: Option<ProviderComponent>,
-    tools: Option<ToolComponent>,
+    handle: PluginHandle,
+    provider: bool,
+    tools: bool,
 }
 
 pub struct AgentBuilder {
@@ -42,7 +39,7 @@ pub struct Agent {
 }
 
 pub(crate) struct AgentInner {
-    lockgate: Arc<InnerRuntime>,
+    lockgate: Arc<InnerHost>,
     plugins: BTreeMap<String, LoadedPlugin>,
     sessions: SessionManager,
     tools: ToolRegistry,
@@ -67,18 +64,21 @@ impl AgentBuilder {
             .config
             .plugin(id)
             .ok_or_else(|| format!("plugin `{id}` is not configured"))?;
-        let lockgate = self.lockgate()?;
         let bytes = Self::plugin_bytes(&self.config, id, plugin)?;
+        let inspection = lockgate::inspect(&bytes)
+            .map_err(|error| format!("failed to inspect plugin `{id}`: {error}"))?;
         let mut roles = Vec::new();
-        if lockgate
-            .supports::<bindings::ProviderPlugin>(&bytes)
-            .map_err(|error| format!("failed to inspect plugin `{id}`: {error}"))?
+        if inspection
+            .exported_interfaces()
+            .iter()
+            .any(|interface| interface == <bindings::provider::Role as Role>::INTERFACE)
         {
             roles.push("provider");
         }
-        if lockgate
-            .supports::<bindings::ToolPlugin>(&bytes)
-            .map_err(|error| format!("failed to inspect plugin `{id}`: {error}"))?
+        if inspection
+            .exported_interfaces()
+            .iter()
+            .any(|interface| interface == <bindings::tools::Role as Role>::INTERFACE)
         {
             roles.push("tool");
         }
@@ -94,33 +94,17 @@ impl AgentBuilder {
     }
 
     pub async fn start(self) -> Result<Agent, String> {
-        let state = AppState::from_config(&self.config)?;
-        let settings = state.settings().clone();
-        let mut lockgate = Self::lockgate_with_state(state)?;
-        let plugins = Self::load_plugins(&mut lockgate, &self.config)?;
-        let lockgate = Self::apply_policy(lockgate, &self.config, &plugins)?;
-        let lockgate = Arc::new(
-            lockgate
-                .run()
-                .await
-                .map_err(|error| format!("failed to start plugin runtime: {error}"))?,
-        );
-        for (id, plugin) in &plugins {
-            configuration::validate(
-                &lockgate,
-                id,
-                plugin.configuration,
-                &settings,
-                self.config.source(),
-            )
-            .await?;
-        }
+        let mut builder = HostBuilder::new(())
+            .map_err(|error| format!("failed to create Lockgate host: {error}"))?;
+        let handles = Self::load_plugins(&mut builder, &self.config).await?;
+        let lockgate = Arc::new(builder.finish());
+        let plugins = Self::classify_plugins(&lockgate, handles)?;
         let mut tools = self.tools;
         for (id, plugin) in &plugins {
-            let Some(component) = plugin.tools else {
+            if !plugin.tools {
                 continue;
-            };
-            for tool in PluginTool::load(id, Arc::clone(&lockgate), component).await? {
+            }
+            for tool in PluginTool::load(id, Arc::clone(&lockgate), plugin.handle.clone()).await? {
                 tools.register(tool)?;
             }
         }
@@ -134,98 +118,51 @@ impl AgentBuilder {
         })
     }
 
-    fn lockgate(&self) -> Result<InnerApplication, String> {
-        Self::lockgate_with_state(AppState::from_config(&self.config)?)
-    }
-
-    fn lockgate_with_state(state: AppState) -> Result<InnerApplication, String> {
-        lockgate::Application::new(state)
-            .map_err(|error| format!("failed to create Lockgate application: {error}"))
-            .map(|lockgate| lockgate.fuel_per_call(PLUGIN_FUEL_PER_CALL))
-    }
-
-    fn load_plugins(
-        lockgate: &mut InnerApplication,
+    async fn load_plugins(
+        builder: &mut HostBuilder<()>,
         config: &Config,
-    ) -> Result<BTreeMap<String, LoadedPlugin>, String> {
+    ) -> Result<BTreeMap<String, PluginHandle>, String> {
         let mut plugins = BTreeMap::new();
 
         for (id, plugin) in config.plugins() {
-            let loaded = Self::load_plugin(lockgate, config, id, plugin)?;
-            plugins.insert(id.to_owned(), loaded);
+            let handle = Self::load_plugin(builder, config, id, plugin).await?;
+            plugins.insert(id.to_owned(), handle);
         }
 
         Ok(plugins)
     }
 
-    fn load_plugin(
-        lockgate: &mut InnerApplication,
+    async fn load_plugin(
+        builder: &mut HostBuilder<()>,
         config: &Config,
         id: &str,
-        plugin: &PluginConfig,
-    ) -> Result<LoadedPlugin, String> {
+        plugin: &ConfiguredPlugin,
+    ) -> Result<PluginHandle, String> {
         let path = config.component_path(plugin);
         let bytes = Self::plugin_bytes(config, id, plugin)?;
-        let provider = lockgate
-            .supports::<bindings::ProviderPlugin>(&bytes)
-            .map_err(|error| format!("failed to inspect plugin `{id}`: {error}"))?;
-        let tools = lockgate
-            .supports::<bindings::ToolPlugin>(&bytes)
-            .map_err(|error| format!("failed to inspect plugin `{id}`: {error}"))?;
-        let configuration = lockgate
-            .supports::<bindings::ConfigurationPlugin>(&bytes)
-            .map_err(|error| format!("failed to inspect plugin `{id}`: {error}"))?;
-        if (provider || tools) && !configuration {
-            return Err(format!(
-                "plugin `{id}` from `{}` does not export the required settings schema",
-                path.display()
-            ));
-        }
-        let loaded = match (provider, tools) {
-            (true, true) => {
-                let (provider, tools, configuration) = lockgate
-                    .add::<(
-                        bindings::ProviderPlugin,
-                        bindings::ToolPlugin,
-                        bindings::ConfigurationPlugin,
-                    )>(bytes)
-                    .map_err(|error| Self::load_error(id, &path, error))?;
-                LoadedPlugin {
-                    configuration,
-                    provider: Some(provider),
-                    tools: Some(tools),
-                }
-            }
-            (true, false) => {
-                let (provider, configuration) = lockgate
-                    .add::<(bindings::ProviderPlugin, bindings::ConfigurationPlugin)>(bytes)
-                    .map_err(|error| Self::load_error(id, &path, error))?;
-                LoadedPlugin {
-                    configuration,
-                    provider: Some(provider),
-                    tools: None,
-                }
-            }
-            (false, true) => {
-                let (tools, configuration) = lockgate
-                    .add::<(bindings::ToolPlugin, bindings::ConfigurationPlugin)>(bytes)
-                    .map_err(|error| Self::load_error(id, &path, error))?;
-                LoadedPlugin {
-                    configuration,
-                    provider: None,
-                    tools: Some(tools),
-                }
-            }
-            (false, false) => {
-                return Err(format!(
-                    "plugin `{id}` from `{}` does not implement a supported role",
-                    path.display()
-                ));
-            }
-        };
-
-        Self::validate_plugin_id(lockgate, loaded.configuration, id, &path)?;
-        Ok(loaded)
+        let settings = serde_json::to_value(plugin.settings())
+            .map_err(|error| format!("failed to encode settings for plugin `{id}`: {error}"))?;
+        let prepared = builder
+            .prepare(
+                id,
+                &bytes,
+                PluginConfig {
+                    settings: Some(settings),
+                    ..PluginConfig::default()
+                },
+            )
+            .await
+            .map_err(|error| Self::load_error(id, &path, error))?;
+        let acceptance = prepared.accept_all();
+        builder
+            .admit(
+                prepared,
+                acceptance,
+                RuntimeLimits::default(),
+                InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL),
+            )
+            .await
+            .map_err(|error| Self::load_error(id, &path, error))
     }
 
     fn load_error(id: &str, path: &Path, error: impl std::fmt::Display) -> String {
@@ -235,7 +172,11 @@ impl AgentBuilder {
         )
     }
 
-    fn plugin_bytes(config: &Config, id: &str, plugin: &PluginConfig) -> Result<Vec<u8>, String> {
+    fn plugin_bytes(
+        config: &Config,
+        id: &str,
+        plugin: &ConfiguredPlugin,
+    ) -> Result<Vec<u8>, String> {
         let path = config.component_path(plugin);
         fs::read(&path).map_err(|error| {
             format!(
@@ -245,56 +186,42 @@ impl AgentBuilder {
         })
     }
 
-    fn validate_plugin_id<B>(
-        lockgate: &InnerApplication,
-        plugin: Component<B>,
-        id: &str,
-        path: &Path,
-    ) -> Result<(), String> {
-        let embedded_id = lockgate
-            .metadata(plugin)
-            .map_err(|error| format!("failed to inspect plugin `{id}`: {error}"))?
-            .id();
-        if embedded_id != id {
-            return Err(format!(
-                "plugin `{id}` declares embedded id `{embedded_id}` in `{}`",
-                path.display()
-            ));
-        }
-        Ok(())
+    fn classify_plugins(
+        host: &InnerHost,
+        handles: BTreeMap<String, PluginHandle>,
+    ) -> Result<BTreeMap<String, LoadedPlugin>, String> {
+        handles
+            .into_iter()
+            .map(|(id, handle)| {
+                let provider = Self::exports_role::<bindings::provider::Role>(host, &handle, &id)?;
+                let tools = Self::exports_role::<bindings::tools::Role>(host, &handle, &id)?;
+                if !provider && !tools {
+                    return Err(format!("plugin `{id}` does not implement a supported role"));
+                }
+                Ok((
+                    id,
+                    LoadedPlugin {
+                        handle,
+                        provider,
+                        tools,
+                    },
+                ))
+            })
+            .collect()
     }
 
-    fn apply_policy(
-        mut lockgate: InnerApplication,
-        config: &Config,
-        plugins: &BTreeMap<String, LoadedPlugin>,
-    ) -> Result<InnerApplication, String> {
-        for (id, plugin) in plugins {
-            let configured = config
-                .plugin(id)
-                .expect("loaded plugins come from the configuration");
-            lockgate =
-                Self::apply_component_policy(lockgate, configured, id, plugin.configuration)?;
-        }
-
-        Ok(lockgate)
-    }
-
-    fn apply_component_policy<B>(
-        mut lockgate: InnerApplication,
-        configured: &PluginConfig,
+    fn exports_role<R: Role>(
+        host: &InnerHost,
+        handle: &PluginHandle,
         id: &str,
-        component: Component<B>,
-    ) -> Result<InnerApplication, String> {
-        if !configured.outbound_http().is_empty() {
-            lockgate = lockgate
-                .allow_outbound_http(component, configured.outbound_http())
-                .map_err(|error| format!("failed to configure plugin `{id}`: {error}"))?;
+    ) -> Result<bool, String> {
+        match host.client::<R>(handle) {
+            Ok(_) => Ok(true),
+            Err(RoleError::RoleNotExported { .. }) => Ok(false),
+            Err(error) => Err(format!(
+                "failed to inspect roles for plugin `{id}`: {error}"
+            )),
         }
-        lockgate = lockgate
-            .allow_host_import(component, SETTINGS_INTERFACE)
-            .map_err(|error| format!("failed to configure plugin `{id}`: {error}"))?;
-        Ok(lockgate)
     }
 }
 
@@ -308,7 +235,7 @@ impl Agent {
             .inner
             .plugins
             .get(&options.provider)
-            .is_some_and(|plugin| plugin.provider.is_some())
+            .is_some_and(|plugin| plugin.provider)
         {
             return Err(format!(
                 "provider plugin `{}` is not configured",
