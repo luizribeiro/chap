@@ -1,5 +1,5 @@
 lockgate_plugin::generate!({
-    path: "wit",
+    path: "../../wit",
     world: "provider-plugin",
 });
 
@@ -9,13 +9,13 @@ use exports::sage::agent::provider::{
 };
 use http::{HeaderMap, HeaderName, HeaderValue};
 use http_body_util::BodyExt;
-use lockgate_plugin::{MetadataSource, Need, Needs, Plugin, ScopeRef, http as http_permission};
+use lockgate_plugin::{MetadataSource, Need, Needs, Plugin, ScopeRef, net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use wasi_fetch::Client;
 
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
-const REQUIRED: &[Need] = &[http_permission::EGRESS.need(&[ScopeRef::setting("/egress-origin")])];
+const REQUIRED: &[Need] = &[net::EGRESS.need(&[ScopeRef::setting("/egress-origin")])];
 
 struct OpenAiCompatible;
 
