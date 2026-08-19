@@ -17,7 +17,6 @@ publish = false
 [workspace.dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
 iocraft = { git = "https://github.com/luizribeiro/iocraft.git", rev = "619ee083dd84dc0070758221dee6a3936c7897de" }
-jsonschema = { version = "0.49.9", default-features = false }
 lockgate = { path = "/Users/luiz/lockgate-ng/crates/lockgate" }
 lockgate-plugin = { path = "/Users/luiz/lockgate-ng/crates/lockgate-plugin" }
 pulldown-cmark = "0.13.4"
@@ -32,6 +31,5 @@ two-face = "0.5.1"
 unicode-segmentation = "1.13.3"
 unicode-width = "0.2.2"
 uuid = { version = "1.18.1", features = ["v7"] }
-wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", rev = "45af25f4984d14c65663ed43541d2e641752f66d", features = ["component-model", "component-model-async"] }
 wit-component = { version = "0.255.0", features = ["dummy-module"] }
 wit-parser = "0.255.0"

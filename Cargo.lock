@@ -2156,7 +2156,6 @@ dependencies = [
 name = "sage-core"
 version = "0.1.0"
 dependencies = [
- "jsonschema",
  "lockgate",
  "serde",
  "serde_json",
@@ -2164,7 +2163,6 @@ dependencies = [
  "toml",
  "uuid",
  "wasmprinter 0.255.0",
- "wasmtime",
  "wat",
  "wit-component 0.255.0",
  "wit-parser 0.255.0",
