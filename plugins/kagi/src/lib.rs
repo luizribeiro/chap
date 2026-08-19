@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn deserializes_typed_settings() {
-        let settings = Settings::from_json(r#"{"api-key":"key"}"#).unwrap();
+        let settings: Settings = serde_json::from_str(r#"{"api-key":"key"}"#).unwrap();
 
         assert!(!settings.api_key.is_empty());
     }
@@ -420,13 +420,13 @@ mod tests {
             r#"{"api-key":42}"#,
             r#"{"api-key":"key","extra":true}"#,
         ] {
-            assert!(Settings::from_json(json).is_err());
+            assert!(serde_json::from_str::<Settings>(json).is_err());
         }
     }
 
     #[test]
     fn publishes_the_settings_object_schema() {
-        let schema = <Kagi as ConfigurationGuest>::settings_schema().unwrap();
+        let schema = <Kagi as ConfigurationGuest>::settings_schema();
         let schema: serde_json::Value = serde_json::from_str(&schema).unwrap();
 
         assert_eq!(
@@ -442,9 +442,9 @@ mod tests {
         assert_eq!(schema["required"], serde_json::json!(["api-key"]));
     }
 
-    #[tokio::test]
-    async fn exposes_search_and_fetch_tools() {
-        let definitions = <Kagi as Guest>::definitions().await.unwrap();
+    #[test]
+    fn exposes_search_and_fetch_tools() {
+        let definitions = <Kagi as Guest>::definitions().unwrap();
 
         assert_eq!(
             definitions
