@@ -123,44 +123,46 @@ mod tests {
             .map_err(|error| format!("failed to set mock write timeout: {error}"))?;
 
         let mut request = Vec::new();
-        let (head_end, content_length) = loop {
-            let mut chunk = [0; 4096];
-            let read = stream
-                .read(&mut chunk)
-                .map_err(|error| format!("failed to read mock request: {error}"))?;
-            if read == 0 {
-                return Err("client closed before sending complete HTTP headers".to_owned());
-            }
-            request.extend_from_slice(&chunk[..read]);
-
+        let head_end = loop {
             let Some(head_end) = request.windows(4).position(|window| window == b"\r\n\r\n") else {
+                read_more(
+                    &mut stream,
+                    &mut request,
+                    "client closed before sending complete HTTP headers",
+                )?;
                 continue;
             };
-            let head = std::str::from_utf8(&request[..head_end])
-                .map_err(|error| format!("mock request headers were not UTF-8: {error}"))?;
-            let content_length = head
-                .lines()
-                .filter_map(|line| line.split_once(':'))
-                .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-                .ok_or_else(|| "mock request omitted Content-Length".to_owned())?
-                .1
-                .trim()
-                .parse::<usize>()
-                .map_err(|error| format!("invalid mock request Content-Length: {error}"))?;
-            break (head_end, content_length);
+            break head_end;
         };
 
         let body_start = head_end + 4;
-        while request.len() < body_start + content_length {
-            let mut chunk = [0; 4096];
-            let read = stream
-                .read(&mut chunk)
-                .map_err(|error| format!("failed to read mock request body: {error}"))?;
-            if read == 0 {
-                return Err("client closed before sending the complete request body".to_owned());
+        let head = std::str::from_utf8(&request[..head_end])
+            .map_err(|error| format!("mock request headers were not UTF-8: {error}"))?;
+        let content_length = header_values(head, "content-length")
+            .next()
+            .map(|value| {
+                value
+                    .parse::<usize>()
+                    .map_err(|error| format!("invalid mock request Content-Length: {error}"))
+            })
+            .transpose()?;
+        let is_chunked = header_values(head, "transfer-encoding")
+            .flat_map(|value| value.split(','))
+            .any(|encoding| encoding.trim().eq_ignore_ascii_case("chunked"));
+        let body = if is_chunked {
+            read_chunked_body(&mut stream, &mut request, body_start)?
+        } else if let Some(content_length) = content_length {
+            while request.len() < body_start + content_length {
+                read_more(
+                    &mut stream,
+                    &mut request,
+                    "client closed before sending the complete request body",
+                )?;
             }
-            request.extend_from_slice(&chunk[..read]);
-        }
+            request[body_start..body_start + content_length].to_vec()
+        } else {
+            return Err("mock request used unsupported HTTP body framing".to_owned());
+        };
 
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
@@ -174,8 +176,103 @@ mod tests {
         Ok(ReceivedRequest {
             head: String::from_utf8(request[..head_end].to_vec())
                 .map_err(|error| format!("mock request headers were not UTF-8: {error}"))?,
-            body: request[body_start..body_start + content_length].to_vec(),
+            body,
         })
+    }
+
+    fn header_values<'a>(head: &'a str, name: &'a str) -> impl Iterator<Item = &'a str> {
+        head.lines()
+            .filter_map(|line| line.split_once(':'))
+            .filter(move |(header_name, _)| header_name.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.trim())
+    }
+
+    fn read_chunked_body(
+        stream: &mut TcpStream,
+        request: &mut Vec<u8>,
+        mut cursor: usize,
+    ) -> Result<Vec<u8>, String> {
+        let mut body = Vec::new();
+        loop {
+            let line_end = loop {
+                if let Some(offset) = request[cursor..]
+                    .windows(2)
+                    .position(|window| window == b"\r\n")
+                {
+                    break cursor + offset;
+                }
+                read_more(
+                    stream,
+                    request,
+                    "client closed before sending a complete chunk header",
+                )?;
+            };
+            let size = std::str::from_utf8(&request[cursor..line_end])
+                .map_err(|error| format!("mock request chunk size was not UTF-8: {error}"))?
+                .split(';')
+                .next()
+                .unwrap()
+                .trim();
+            let size = usize::from_str_radix(size, 16)
+                .map_err(|error| format!("invalid mock request chunk size: {error}"))?;
+            cursor = line_end + 2;
+
+            if size == 0 {
+                while request.len() < cursor + 2 {
+                    read_more(
+                        stream,
+                        request,
+                        "client closed before terminating the chunked request body",
+                    )?;
+                }
+                if request[cursor..].starts_with(b"\r\n") {
+                    return Ok(body);
+                }
+                loop {
+                    if request[cursor..]
+                        .windows(4)
+                        .any(|window| window == b"\r\n\r\n")
+                    {
+                        return Ok(body);
+                    }
+                    read_more(
+                        stream,
+                        request,
+                        "client closed before sending complete chunked trailers",
+                    )?;
+                }
+            }
+
+            while request.len() < cursor + size + 2 {
+                read_more(
+                    stream,
+                    request,
+                    "client closed before sending complete chunk data",
+                )?;
+            }
+            body.extend_from_slice(&request[cursor..cursor + size]);
+            cursor += size;
+            if request[cursor..cursor + 2] != *b"\r\n" {
+                return Err("mock request chunk omitted its terminating CRLF".to_owned());
+            }
+            cursor += 2;
+        }
+    }
+
+    fn read_more(
+        stream: &mut TcpStream,
+        request: &mut Vec<u8>,
+        closed_message: &str,
+    ) -> Result<(), String> {
+        let mut chunk = [0; 4096];
+        let read = stream
+            .read(&mut chunk)
+            .map_err(|error| format!("failed to read mock request: {error}"))?;
+        if read == 0 {
+            return Err(closed_message.to_owned());
+        }
+        request.extend_from_slice(&chunk[..read]);
+        Ok(())
     }
 
     #[tokio::test]
