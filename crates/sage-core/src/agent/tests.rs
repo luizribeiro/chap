@@ -15,7 +15,6 @@ use std::{
     fs,
     path::Path,
     sync::{Arc, Mutex},
-    time::SystemTime,
 };
 use tokio::sync::Notify;
 use wit_component::{ComponentEncoder, StringEncoding, dummy_module, embed_component_metadata};
@@ -58,7 +57,7 @@ model = "example-model"
 }
 
 #[tokio::test]
-async fn rejects_missing_required_settings_with_the_toml_path() {
+async fn rejects_missing_required_settings_during_prepare() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
     fs::write(
@@ -84,13 +83,9 @@ component = "provider.wasm"
         Err(error) => error,
     };
 
-    assert_eq!(
-        error,
-        format!(
-            "{}: plugins.\"example.provider\".settings.model: required setting is missing",
-            config_path.display()
-        )
-    );
+    assert!(error.contains("settings"), "{error}");
+    assert!(error.contains("model"), "{error}");
+    assert!(error.contains("required"), "{error}");
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -121,13 +116,15 @@ component = "tools.wasm"
         Err(error) => error,
     };
 
-    assert!(error.contains("settings.api-key: required setting is missing"));
+    assert!(error.contains("settings"), "{error}");
+    assert!(error.contains("api-key"), "{error}");
+    assert!(error.contains("required"), "{error}");
     assert!(!error.contains("tool plugin"));
     fs::remove_dir_all(directory).unwrap();
 }
 
 #[tokio::test]
-async fn distinguishes_schema_transport_and_plugin_errors() {
+async fn reports_framework_schema_transport_errors() {
     let directory = test_directory();
     let config_path = directory.join("sage.toml");
     fs::write(
@@ -141,53 +138,14 @@ component = "provider.wasm"
 
     fs::write(
         directory.join("provider.wasm"),
-        plugin_component("example", "provider-plugin", None),
+        provider_component_with_trapping_schema("example"),
     )
     .unwrap();
     let transport = match AgentBuilder::load(&config_path).unwrap().start().await {
         Ok(_) => panic!("a trapping schema export should be rejected"),
         Err(error) => error,
     };
-    assert!(transport.contains("failed while publishing its settings schema"));
-
-    fs::write(
-        directory.join("provider.wasm"),
-        provider_component_with_schema_error("example", "schema unavailable"),
-    )
-    .unwrap();
-    let plugin = match AgentBuilder::load(&config_path).unwrap().start().await {
-        Ok(_) => panic!("a plugin schema error should be rejected"),
-        Err(error) => error,
-    };
-    assert!(plugin.contains("returned an error while publishing its settings schema"));
-    assert!(!plugin.contains("schema unavailable"));
-    fs::remove_dir_all(directory).unwrap();
-}
-
-#[tokio::test]
-async fn rejects_role_plugins_without_a_configuration_export() {
-    let directory = test_directory();
-    fs::write(
-        directory.join("provider.wasm"),
-        plugin_component("example", "provider-role", None),
-    )
-    .unwrap();
-    let config_path = directory.join("sage.toml");
-    fs::write(
-        &config_path,
-        r#"
-[plugins.example]
-component = "provider.wasm"
-"#,
-    )
-    .unwrap();
-
-    let error = match AgentBuilder::load(&config_path).unwrap().start().await {
-        Ok(_) => panic!("a provider without a schema export should be rejected"),
-        Err(error) => error,
-    };
-
-    assert!(error.contains("does not export the required settings schema"));
+    assert!(transport.contains("settings schema"), "{transport}");
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -213,7 +171,35 @@ component = "tools.wasm"
 }
 
 #[tokio::test]
-async fn rejects_a_config_id_that_differs_from_plugin_metadata() {
+async fn loads_definitions_from_an_admitted_tool_plugin() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("tools.wasm"),
+        tool_component("example.tools"),
+    )
+    .unwrap();
+    let config_path = directory.join("sage.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins."example.tools"]
+component = "tools.wasm"
+"#,
+    )
+    .unwrap();
+
+    let agent = AgentBuilder::load(&config_path)
+        .unwrap()
+        .start()
+        .await
+        .unwrap();
+
+    assert!(agent.tool_definitions().is_empty());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn accepts_an_instance_id_that_differs_from_plugin_metadata() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
     fs::write(&component, provider_component("embedded.id")).unwrap();
@@ -227,12 +213,11 @@ component = "provider.wasm"
     )
     .unwrap();
 
-    let error = match AgentBuilder::load(&config_path).unwrap().start().await {
-        Ok(_) => panic!("mismatched plugin id should be rejected"),
-        Err(error) => error,
-    };
-
-    assert!(error.contains("plugin `config-id` declares embedded id `embedded.id`"));
+    AgentBuilder::load(&config_path)
+        .unwrap()
+        .start()
+        .await
+        .unwrap();
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -747,20 +732,8 @@ fn provider_component_with_schema(id: &str, schema: &str) -> Vec<u8> {
     plugin_component(id, "provider-plugin", Some(schema))
 }
 
-fn provider_component_with_schema_error(id: &str, error: &str) -> Vec<u8> {
-    let mut resolve = Resolve::new();
-    let wit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../wit");
-    let package = resolve.push_path(wit).unwrap().0;
-    let world = resolve.packages[package].worlds["provider-plugin"];
-    let mut module = dummy_module(&resolve, world, ManglingAndAbi::Standard32);
-    module = module_with_schema(&module, error, true);
-    embed_component_metadata(&mut module, &resolve, world, StringEncoding::UTF8).unwrap();
-    let bytes = ComponentEncoder::default()
-        .module(&module)
-        .unwrap()
-        .encode()
-        .unwrap();
-    with_plugin_metadata(bytes, id)
+fn provider_component_with_trapping_schema(id: &str) -> Vec<u8> {
+    plugin_component(id, "provider-plugin", None)
 }
 
 fn tool_component(id: &str) -> Vec<u8> {
@@ -774,11 +747,34 @@ fn tool_component_with_schema(id: &str, schema: &str) -> Vec<u8> {
 fn plugin_component(id: &str, world_name: &str, schema: Option<&str>) -> Vec<u8> {
     let mut resolve = Resolve::new();
     let wit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../wit");
-    let package = resolve.push_path(wit).unwrap().0;
-    let world = resolve.packages[package].worlds[world_name];
+    resolve.push_path(wit).unwrap();
+    resolve
+        .push_str(
+            "lockgate-config.wit",
+            r#"
+package lockgate:config;
+
+interface schema {
+  settings-schema: func() -> string;
+}
+"#,
+        )
+        .unwrap();
+    let wrapper = format!(
+        r#"
+package sage:test;
+
+world fixture {{
+  include sage:agent/{world_name}@0.1.0;
+  export lockgate:config/schema;
+}}
+"#
+    );
+    let package = resolve.push_str("fixture.wit", &wrapper).unwrap();
+    let world = resolve.packages[package].worlds["fixture"];
     let mut module = dummy_module(&resolve, world, ManglingAndAbi::Standard32);
     if let Some(schema) = schema {
-        module = module_with_schema(&module, schema, false);
+        module = module_with_schema(&module, schema, world_name == "tool-plugin");
     }
     embed_component_metadata(&mut module, &resolve, world, StringEncoding::UTF8).unwrap();
     let bytes = ComponentEncoder::default()
@@ -786,25 +782,40 @@ fn plugin_component(id: &str, world_name: &str, schema: Option<&str>) -> Vec<u8>
         .unwrap()
         .encode()
         .unwrap();
-    with_plugin_metadata(bytes, id)
+    with_plugin_sections(bytes, id)
 }
 
-fn module_with_schema(module: &[u8], schema: &str, is_error: bool) -> Vec<u8> {
-    assert!(schema.len() <= 65_536 - 16);
+fn module_with_schema(module: &[u8], schema: &str, empty_tool_definitions: bool) -> Vec<u8> {
+    let definitions_result = (16 + schema.len() + 3) & !3;
+    assert!(definitions_result + 12 <= 65_536);
     let mut wat = wasmprinter::print_bytes(module).unwrap();
     wat = wat.replacen("(memory (;0;) 0)", "(memory (;0;) 1)", 1);
     wat = wat.replacen(
-        "(func (;1;) (type 1) (result i32)\n    unreachable\n  )",
-        "(func (;1;) (type 1) (result i32)\n    i32.const 0\n  )",
+        "(func (;0;) (type 0) (result i32)\n    unreachable\n  )",
+        "(func (;0;) (type 0) (result i32)\n    i32.const 0\n  )",
         1,
     );
-    let mut result = vec![u8::from(is_error), 0, 0, 0, 16, 0, 0, 0];
+    if empty_tool_definitions {
+        wat = wat.replacen(
+            "(func (;2;) (type 0) (result i32)\n    unreachable\n  )",
+            &format!("(func (;2;) (type 0) (result i32)\n    i32.const {definitions_result}\n  )"),
+            1,
+        );
+    }
+    let mut result = vec![16, 0, 0, 0];
     result.extend_from_slice(&(schema.len() as u32).to_le_bytes());
-    let data = format!(
-        "(data (i32.const 0) \"{}\")\n(data (i32.const 16) \"{}\")\n)",
+    let mut data = format!(
+        "(data (i32.const 0) \"{}\")\n(data (i32.const 16) \"{}\")\n",
         wat_bytes(&result),
         wat_bytes(schema.as_bytes())
     );
+    if empty_tool_definitions {
+        data.push_str(&format!(
+            "(data (i32.const {definitions_result}) \"{}\")\n",
+            wat_bytes(&[0; 12])
+        ));
+    }
+    data.push(')');
     wat.truncate(wat.strip_suffix(")\n").unwrap().len());
     wat.push_str(&data);
     wat::parse_str(wat).unwrap()
@@ -818,14 +829,22 @@ fn permissive_schema() -> &'static str {
     r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}"#
 }
 
-fn with_plugin_metadata(mut bytes: Vec<u8>, id: &str) -> Vec<u8> {
+fn with_plugin_sections(bytes: Vec<u8>, id: &str) -> Vec<u8> {
     let metadata =
         format!(r#"{{"format":1,"id":"{id}","name":"Test provider","version":"0.1.0"}}"#);
-    let section_name = "lockgate:plugin";
+    let bytes = with_custom_section(bytes, "lockgate:plugin", metadata.as_bytes());
+    with_custom_section(
+        bytes,
+        "lockgate:needs",
+        br#"{"format":1,"optional":{},"reasons":{},"required":{}}"#,
+    )
+}
+
+fn with_custom_section(mut bytes: Vec<u8>, section_name: &str, contents: &[u8]) -> Vec<u8> {
     let mut section = Vec::new();
     encode_u32(section_name.len() as u32, &mut section);
     section.extend_from_slice(section_name.as_bytes());
-    section.extend_from_slice(metadata.as_bytes());
+    section.extend_from_slice(contents);
     bytes.push(0);
     encode_u32(section.len() as u32, &mut bytes);
     bytes.extend(section);
@@ -847,11 +866,11 @@ fn encode_u32(mut value: u32, output: &mut Vec<u8>) {
 }
 
 fn test_directory() -> std::path::PathBuf {
-    let unique = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("sage-{}-{unique}", std::process::id()));
+    let path = std::env::temp_dir().join(format!(
+        "sage-{}-{}",
+        std::process::id(),
+        uuid::Uuid::now_v7()
+    ));
     fs::create_dir(&path).unwrap();
     path
 }

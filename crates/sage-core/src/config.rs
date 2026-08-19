@@ -104,4 +104,91 @@ model = "example-model"
         assert_eq!(settings["egress-origin"], "https://api.example.com");
         assert_eq!(settings["model"], "example-model");
     }
+
+    #[test]
+    fn preserves_toml_types_and_nested_settings() {
+        let config: Config = toml::from_str(
+            r#"
+[plugins.example]
+component = "example.wasm"
+
+[plugins.example.settings]
+string = "value"
+integer = 42
+float = 1.5
+boolean = true
+array = ["one", "two"]
+
+[plugins.example.settings.nested]
+enabled = false
+"#,
+        )
+        .unwrap();
+
+        let settings = config
+            .plugin("example")
+            .unwrap()
+            .settings("example")
+            .unwrap();
+        assert_eq!(
+            settings,
+            serde_json::json!({
+                "string": "value",
+                "integer": 42,
+                "float": 1.5,
+                "boolean": true,
+                "array": ["one", "two"],
+                "nested": {"enabled": false}
+            })
+        );
+    }
+
+    #[test]
+    fn resolves_api_key_env_and_removes_the_selector() {
+        let config: Config = toml::from_str(
+            r#"
+[plugins.example]
+component = "example.wasm"
+
+[plugins.example.settings]
+api-key-env = "PATH"
+"#,
+        )
+        .unwrap();
+
+        let settings = config
+            .plugin("example")
+            .unwrap()
+            .settings("example")
+            .unwrap();
+        assert!(
+            settings["api-key"]
+                .as_str()
+                .is_some_and(|key| !key.is_empty())
+        );
+        assert!(settings.get("api-key-env").is_none());
+    }
+
+    #[test]
+    fn explicit_api_key_precedes_and_removes_the_selector() {
+        let config: Config = toml::from_str(
+            r#"
+[plugins.example]
+component = "example.wasm"
+
+[plugins.example.settings]
+api-key = "configured"
+api-key-env = 42
+"#,
+        )
+        .unwrap();
+
+        let settings = config
+            .plugin("example")
+            .unwrap()
+            .settings("example")
+            .unwrap();
+        assert_eq!(settings["api-key"], "configured");
+        assert!(settings.get("api-key-env").is_none());
+    }
 }
