@@ -12,9 +12,9 @@ use exports::sage::agent::types::{
 };
 use http::{HeaderMap, HeaderName, HeaderValue};
 use http_body_util::BodyExt;
+use sage_plugin as sage;
 use sage_plugin::__lockgate::Plugin;
 use sage_plugin::{MetadataSource, Need, Needs, ScopeRef, net};
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use wasi_fetch::Client;
 
@@ -67,16 +67,12 @@ impl Guest for OpenAiCompatible {
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[derive(sage::Settings)]
 struct Settings {
-    #[schemars(regex(pattern = r"\S"))]
     base_url: String,
-    #[schemars(regex(pattern = r"\S"))]
     egress_origin: String,
-    #[schemars(regex(pattern = r"\S"))]
     model: String,
-    #[serde(default)]
+    #[settings(optional)]
     api_key: Option<String>,
 }
 
