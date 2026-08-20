@@ -1,5 +1,6 @@
 use chap_core::{
-    AgentBuilder, ConsentRecord, ConsentStore, DriftKind, SessionEventKind, SessionOptions,
+    AgentBuilder, ConsentRecord, ConsentStore, DriftKind, SessionEvent, SessionEventKind,
+    SessionOptions,
 };
 use std::{
     io::{Read, Write},
@@ -81,26 +82,11 @@ async fn completes_through_the_chap_host_against_an_allowed_local_server() {
     let config_path = directory.path().join("chap.toml");
     write_openai_config(&config_path, &component, &mock.origin);
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
-    builder.approve_plugin("openai").await.unwrap();
-    let agent = builder.start().await.unwrap();
-    assert!(agent.plugin_errors().next().is_none());
-    let session = agent.session(SessionOptions::new("openai")).unwrap();
-    let mut events = session.subscribe();
-    let completion = tokio::time::timeout(INVOCATION_TIMEOUT, session.send("hello"))
-        .await
-        .expect("provider invocation timed out")
-        .expect("provider invocation failed");
-    let events = tokio::time::timeout(INVOCATION_TIMEOUT, async {
-        let mut observed = Vec::new();
-        for _ in 0..3 {
-            observed.push(events.recv().await.unwrap().unwrap());
-        }
-        observed
-    })
-    .await
-    .expect("agent loop events timed out");
-    let received = mock.finish();
+    let HostCompletion {
+        completion,
+        events,
+        received,
+    } = complete_through_the_host(mock, &config_path).await;
 
     assert_eq!(completion, "mocked response");
     assert_eq!(events[0].sequence, 1);
@@ -134,10 +120,39 @@ async fn completes_through_the_chap_host_against_an_allowed_local_server() {
     assert_eq!(body["messages"][0]["role"], "user");
     assert_eq!(body["messages"][0]["content"], "hello");
     assert_eq!(body["stream"], false);
+}
 
-    tokio::task::spawn_blocking(move || drop((session, agent)))
-        .await
-        .unwrap();
+#[tokio::test]
+async fn completes_without_an_authorization_header_when_no_api_key_is_configured() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let component = build_openai_component(&workspace);
+    let mock = MockServer::start();
+    let directory = tempfile::tempdir().unwrap();
+    let config_path = directory.path().join("chap.toml");
+    write_openai_config_without_an_api_key(&config_path, &component, &mock.origin);
+
+    let HostCompletion {
+        completion,
+        received,
+        ..
+    } = complete_through_the_host(mock, &config_path).await;
+
+    assert_eq!(completion, "mocked response");
+    assert!(
+        received
+            .head
+            .starts_with("POST /v1/chat/completions HTTP/1.1\r\n")
+    );
+    assert!(
+        !received
+            .head
+            .to_ascii_lowercase()
+            .contains("authorization:"),
+        "{}",
+        received.head
+    );
+    let body: serde_json::Value = serde_json::from_slice(&received.body).unwrap();
+    assert_eq!(body["messages"][0]["content"], "hello");
 }
 
 #[tokio::test]
@@ -266,6 +281,45 @@ async fn admission_with_a_matching_digest_does_not_rewrite_the_store() {
         .unwrap();
 }
 
+struct HostCompletion {
+    completion: String,
+    events: Vec<SessionEvent>,
+    received: ReceivedRequest,
+}
+
+async fn complete_through_the_host(mock: MockServer, config_path: &Path) -> HostCompletion {
+    let builder = AgentBuilder::load(config_path).unwrap();
+    builder.approve_plugin("openai").await.unwrap();
+    let agent = builder.start().await.unwrap();
+    assert!(agent.plugin_errors().next().is_none());
+    let session = agent.session(SessionOptions::new("openai")).unwrap();
+    let mut events = session.subscribe();
+    let completion = tokio::time::timeout(INVOCATION_TIMEOUT, session.send("hello"))
+        .await
+        .expect("provider invocation timed out")
+        .expect("provider invocation failed");
+    let events = tokio::time::timeout(INVOCATION_TIMEOUT, async {
+        let mut observed = Vec::new();
+        for _ in 0..3 {
+            observed.push(events.recv().await.unwrap().unwrap());
+        }
+        observed
+    })
+    .await
+    .expect("agent loop events timed out");
+    let received = mock.finish();
+
+    tokio::task::spawn_blocking(move || drop((session, agent)))
+        .await
+        .unwrap();
+
+    HostCompletion {
+        completion,
+        events,
+        received,
+    }
+}
+
 fn with_different_fingerprint(record: ConsentRecord) -> ConsentRecord {
     let mut value = serde_json::to_value(&record).unwrap();
     let replacement = format!("sha256:{}", "0".repeat(64));
@@ -278,6 +332,17 @@ fn with_different_fingerprint(record: ConsentRecord) -> ConsentRecord {
 }
 
 fn write_openai_config(path: &Path, component: &Path, origin: &str) {
+    write_config(path, component, origin, Some("CHAP_TEST_OPENAI_API_KEY"));
+}
+
+fn write_openai_config_without_an_api_key(path: &Path, component: &Path, origin: &str) {
+    write_config(path, component, origin, None);
+}
+
+fn write_config(path: &Path, component: &Path, origin: &str, api_key_env: Option<&str>) {
+    let api_key_setting = api_key_env
+        .map(|name| format!("api-key-env = \"{name}\"\n"))
+        .unwrap_or_default();
     std::fs::write(
         path,
         format!(
@@ -288,8 +353,7 @@ component = {component:?}
 [plugins.openai.settings]
 base-url = "{origin}/v1"
 model = "mock-model"
-api-key-env = "CHAP_TEST_OPENAI_API_KEY"
-"#,
+{api_key_setting}"#,
             component = component.display().to_string(),
         ),
     )

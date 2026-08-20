@@ -18,10 +18,8 @@ impl Plugin for OpenAiCompatible {
     const LICENSE: MetadataSource = MetadataSource::Absent;
     const REPOSITORY: MetadataSource = MetadataSource::Absent;
     const HOMEPAGE: MetadataSource = MetadataSource::Absent;
-    const NEEDS: Needs = Needs::required(&[
-        net::EGRESS.need(&[ScopeRef::setting("/base-url")]),
-        env::READ.need(&[ScopeRef::setting("/api-key-env")]),
-    ]);
+    const NEEDS: Needs = Needs::required(&[net::EGRESS.need(&[ScopeRef::setting("/base-url")])])
+        .optional(&[env::READ.need(&[ScopeRef::setting("/api-key-env")])]);
     type Settings = Settings;
 
     fn new(settings: Self::Settings) -> Self {
@@ -33,7 +31,7 @@ impl Plugin for OpenAiCompatible {
 struct Settings {
     base_url: String,
     model: String,
-    api_key_env: String,
+    api_key_env: Option<String>,
 }
 
 impl Provider for OpenAiCompatible {
@@ -44,17 +42,16 @@ impl Provider for OpenAiCompatible {
             "{}/chat/completions",
             settings.base_url.trim_end_matches('/')
         );
-        let api_key = std::env::var(&settings.api_key_env).map_err(|_| {
-            format!(
-                "environment variable `{}` is not available to the plugin",
-                settings.api_key_env
-            )
-        })?;
+        let api_key = settings
+            .api_key_env
+            .as_deref()
+            .map(read_environment_variable)
+            .transpose()?;
         let response = chap::http::Client::new()
             .post(&url)
             .header("content-type", "application/json")
             .map_err(|error| error.to_string())?
-            .bearer(Some(api_key.as_str()).filter(|api_key| !api_key.is_empty()))
+            .bearer(api_key.as_deref().filter(|api_key| !api_key.is_empty()))
             .body(request.into_bytes())
             .send()
             .await
@@ -63,4 +60,9 @@ impl Provider for OpenAiCompatible {
         let body = response.text().map_err(|error| error.to_string())?;
         chat_completions::parse_response(status, &body)
     }
+}
+
+fn read_environment_variable(name: &str) -> Result<String, String> {
+    std::env::var(name)
+        .map_err(|_| format!("environment variable `{name}` is not available to the plugin"))
 }
