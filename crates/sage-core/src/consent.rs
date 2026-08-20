@@ -99,3 +99,49 @@ impl ConsentStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consent_record_round_trips_through_json_storage() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("consent.json");
+        let store = ConsentStore::new(&path);
+        let record: ConsentRecord = serde_json::from_value(serde_json::json!({
+            "instance_id": "example",
+            "fingerprint": format!("sha256:{}", "0".repeat(64)),
+            "grants": [{
+                "capability": "http",
+                "permission": "egress",
+                "scopes": ["https://example.com"],
+                "optional": false,
+                "reason": "Call the configured service"
+            }],
+            "approved_at": "2026-08-19T14:30:00Z"
+        }))
+        .unwrap();
+
+        store.save(record.clone()).unwrap();
+
+        assert_eq!(store.load("example"), Some(record.clone()));
+        let persisted: BTreeMap<String, ConsentRecord> =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(persisted.get("example"), Some(&record));
+        store.remove("example").unwrap();
+        assert_eq!(store.load("example"), None);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn missing_or_unreadable_storage_has_no_approvals() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("consent.json");
+        let store = ConsentStore::new(&path);
+
+        assert_eq!(store.load("example"), None);
+        fs::write(path, b"not JSON").unwrap();
+        assert_eq!(store.load("example"), None);
+    }
+}

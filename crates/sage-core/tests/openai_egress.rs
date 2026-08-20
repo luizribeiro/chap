@@ -4,7 +4,10 @@ use std::{
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::Command,
-    sync::mpsc::{self, Receiver},
+    sync::{
+        OnceLock,
+        mpsc::{self, Receiver},
+    },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
@@ -74,30 +77,12 @@ async fn completes_through_the_sage_host_against_an_allowed_local_server() {
     let mock = MockServer::start();
     let directory = tempfile::tempdir().unwrap();
     let config_path = directory.path().join("sage.toml");
-    std::fs::write(
-        &config_path,
-        format!(
-            r#"
-[plugins.openai]
-component = {component:?}
+    write_openai_config(&config_path, &component, &mock.origin);
 
-[plugins.openai.settings]
-base-url = "{origin}/v1"
-egress-origin = "{origin}"
-model = "mock-model"
-api-key = "mock-key"
-"#,
-            component = component.display().to_string(),
-            origin = mock.origin,
-        ),
-    )
-    .unwrap();
-
-    let agent = AgentBuilder::load(&config_path)
-        .unwrap()
-        .start()
-        .await
-        .unwrap();
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    builder.approve_plugin("openai").await.unwrap();
+    let agent = builder.start().await.unwrap();
+    assert!(agent.plugin_errors().next().is_none());
     let session = agent.session(SessionOptions::new("openai")).unwrap();
     let completion = tokio::time::timeout(INVOCATION_TIMEOUT, session.send("hello"))
         .await
@@ -128,7 +113,77 @@ api-key = "mock-key"
         .unwrap();
 }
 
+#[tokio::test]
+async fn refuses_an_expanded_egress_manifest_until_reapproved() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let component = build_openai_component(&workspace);
+    let directory = tempfile::tempdir().unwrap();
+    let config_path = directory.path().join("sage.toml");
+    write_openai_config(&config_path, &component, "http://127.0.0.1:41001");
+
+    AgentBuilder::load(&config_path)
+        .unwrap()
+        .approve_plugin("openai")
+        .await
+        .unwrap();
+    write_openai_config(&config_path, &component, "http://127.0.0.1:41002");
+    let agent = AgentBuilder::load(&config_path)
+        .unwrap()
+        .start()
+        .await
+        .unwrap();
+    let errors = agent.plugin_errors().collect::<Vec<_>>();
+
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].0, "openai");
+    assert!(
+        errors[0].1.contains("expanded its permission manifest"),
+        "{}",
+        errors[0].1
+    );
+    assert!(
+        errors[0].1.contains("sage grants review openai"),
+        "{}",
+        errors[0].1
+    );
+    assert_eq!(
+        agent.session(SessionOptions::new("openai")).err().unwrap(),
+        errors[0].1
+    );
+
+    tokio::task::spawn_blocking(move || drop(agent))
+        .await
+        .unwrap();
+}
+
+fn write_openai_config(path: &Path, component: &Path, origin: &str) {
+    std::fs::write(
+        path,
+        format!(
+            r#"
+[plugins.openai]
+component = {component:?}
+
+[plugins.openai.settings]
+base-url = "{origin}/v1"
+egress-origin = "{origin}"
+model = "mock-model"
+api-key = "mock-key"
+"#,
+            component = component.display().to_string(),
+        ),
+    )
+    .unwrap();
+}
+
 fn build_openai_component(workspace: &Path) -> PathBuf {
+    static COMPONENT: OnceLock<PathBuf> = OnceLock::new();
+    COMPONENT
+        .get_or_init(|| build_openai_component_once(workspace))
+        .clone()
+}
+
+fn build_openai_component_once(workspace: &Path) -> PathBuf {
     let output = Command::new(env!("CARGO"))
         .current_dir(workspace)
         .args([

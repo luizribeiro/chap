@@ -21,7 +21,7 @@ use wit_component::{ComponentEncoder, StringEncoding, dummy_module, embed_compon
 use wit_parser::{ManglingAndAbi, Resolve};
 
 #[tokio::test]
-async fn loads_a_configured_provider() {
+async fn approved_matching_manifest_admits_a_configured_provider() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
     fs::write(
@@ -52,7 +52,63 @@ model = "example-model"
         builder.plugin_roles("example.provider").unwrap(),
         ["provider"]
     );
-    builder.start().await.unwrap();
+    let record = builder.approve_plugin("example.provider").await.unwrap();
+    assert!(
+        time::OffsetDateTime::parse(
+            &record.approved_at,
+            &time::format_description::well_known::Rfc3339
+        )
+        .is_ok()
+    );
+    let agent = builder.start().await.unwrap();
+    assert!(agent.plugin_errors().next().is_none());
+    assert!(agent.inner.plugins.contains_key("example.provider"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn first_run_refuses_only_the_unapproved_plugin() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component("example.provider"),
+    )
+    .unwrap();
+    let config_path = directory.join("sage.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins.approved]
+component = "provider.wasm"
+
+[plugins.unapproved]
+component = "provider.wasm"
+"#,
+    )
+    .unwrap();
+
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    builder.approve_plugin("approved").await.unwrap();
+    let agent = builder.start().await.unwrap();
+    let errors = agent.plugin_errors().collect::<Vec<_>>();
+
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].0, "unapproved");
+    assert!(errors[0].1.contains("requires approval"), "{}", errors[0].1);
+    assert!(
+        errors[0].1.contains("sage grants review unapproved"),
+        "{}",
+        errors[0].1
+    );
+    assert!(agent.inner.plugins.contains_key("approved"));
+    assert!(!agent.inner.plugins.contains_key("unapproved"));
+    assert_eq!(
+        agent
+            .session(SessionOptions::new("unapproved"))
+            .err()
+            .unwrap(),
+        errors[0].1
+    );
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -188,12 +244,11 @@ component = "tools.wasm"
     )
     .unwrap();
 
-    let agent = AgentBuilder::load(&config_path)
-        .unwrap()
-        .start()
-        .await
-        .unwrap();
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    builder.approve_plugin("example.tools").await.unwrap();
+    let agent = builder.start().await.unwrap();
 
+    assert!(agent.plugin_errors().next().is_none());
     assert!(agent.tool_definitions().is_empty());
     fs::remove_dir_all(directory).unwrap();
 }
@@ -213,11 +268,10 @@ component = "provider.wasm"
     )
     .unwrap();
 
-    AgentBuilder::load(&config_path)
-        .unwrap()
-        .start()
-        .await
-        .unwrap();
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    builder.approve_plugin("config-id").await.unwrap();
+    let agent = builder.start().await.unwrap();
+    assert!(agent.plugin_errors().next().is_none());
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -247,6 +301,7 @@ component = "missing.wasm"
         .unwrap()
         .tool(DropProbe { dropped })
         .unwrap();
+    builder.approve_plugin("a-provider").await.unwrap();
 
     let error = match builder.start().await {
         Ok(_) => panic!("the missing second plugin should fail admission"),
@@ -273,7 +328,9 @@ component = "unsupported.wasm"
     )
     .unwrap();
 
-    let error = match AgentBuilder::load(&config_path).unwrap().start().await {
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    builder.approve_plugin("example").await.unwrap();
+    let error = match builder.start().await {
         Ok(_) => panic!("a plugin without a supported role should be rejected"),
         Err(error) => error,
     };
