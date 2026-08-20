@@ -1,9 +1,88 @@
-use lockgate::ConsentRecord;
+use lockgate::{ConsentManifest, ConsentRecord, DriftChange, DriftKind, DriftReport, GrantReview};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
 };
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginConsentReview {
+    pub manifest: ConsentManifest,
+    pub prior: Option<ConsentRecord>,
+    pub drift: Option<DriftReport>,
+}
+
+pub(crate) fn consent_drift(before: &[GrantReview], after: &[GrantReview]) -> DriftReport {
+    let before = indexed(before);
+    let after = indexed(after);
+    let keys = before
+        .keys()
+        .chain(after.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let changes = keys
+        .into_iter()
+        .filter_map(|(capability, permission)| {
+            let before = before
+                .get(&(capability.clone(), permission.clone()))
+                .copied();
+            let after = after
+                .get(&(capability.clone(), permission.clone()))
+                .copied();
+            let kind = match (before, after) {
+                (None, Some(_)) => DriftKind::NewGrant,
+                (Some(_), None) => DriftKind::RemovedGrant,
+                (Some(before), Some(after)) if before.optional && !after.optional => {
+                    DriftKind::BecameRequired
+                }
+                (Some(before), Some(after)) => match scope_change(before, after) {
+                    Some(DriftKind::ScopeWidened) => DriftKind::ScopeWidened,
+                    _ if before.optional != after.optional => DriftKind::BecameOptional,
+                    Some(DriftKind::ScopeNarrowed) => DriftKind::ScopeNarrowed,
+                    None => return None,
+                    Some(_) => unreachable!("scope changes only have scope drift kinds"),
+                },
+                (None, None) => return None,
+            };
+            Some(DriftChange {
+                capability,
+                permission,
+                kind,
+                before: before.map(|grant| grant.scopes.clone()),
+                after: after.map(|grant| grant.scopes.clone()),
+            })
+        })
+        .collect::<Vec<_>>();
+    let blocks_admission = changes.iter().any(|change| {
+        matches!(
+            change.kind,
+            DriftKind::NewGrant | DriftKind::ScopeWidened | DriftKind::BecameRequired
+        )
+    });
+    DriftReport {
+        changes,
+        blocks_admission,
+    }
+}
+
+fn indexed(grants: &[GrantReview]) -> BTreeMap<(String, String), &GrantReview> {
+    grants
+        .iter()
+        .map(|grant| ((grant.capability.clone(), grant.permission.clone()), grant))
+        .collect()
+}
+
+fn scope_change(before: &GrantReview, after: &GrantReview) -> Option<DriftKind> {
+    let before = before.scopes.iter().collect::<BTreeSet<_>>();
+    let after = after.scopes.iter().collect::<BTreeSet<_>>();
+    if before == after {
+        None
+    } else if after.difference(&before).next().is_some() {
+        Some(DriftKind::ScopeWidened)
+    } else {
+        Some(DriftKind::ScopeNarrowed)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct ConsentStore {

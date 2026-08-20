@@ -1,5 +1,5 @@
 use crate::config::{Config, Plugin as ConfiguredPlugin};
-use crate::consent::ConsentStore;
+use crate::consent::{ConsentStore, PluginConsentReview, consent_drift};
 use crate::session::{Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions};
 use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition};
@@ -147,6 +147,37 @@ impl AgentBuilder {
     }
 
     pub async fn approve_plugin(&self, id: &str) -> Result<ConsentRecord, String> {
+        let (prepared, resources) = self.prepare_configured_plugin(id).await?;
+        let record = prepared.approve(now_rfc3339());
+        let save_result = self.consent.save(record.clone());
+        let cleanup_result = Self::cleanup_prepared_plugin(id, prepared, resources).await;
+
+        save_result?;
+        cleanup_result?;
+        Ok(record)
+    }
+
+    pub async fn review_plugin(&self, id: &str) -> Result<PluginConsentReview, String> {
+        let (prepared, resources) = self.prepare_configured_plugin(id).await?;
+        let manifest = prepared.review();
+        let prior = self.consent.load(id);
+        let drift = prior
+            .as_ref()
+            .filter(|prior| prior.fingerprint != manifest.fingerprint)
+            .map(|prior| consent_drift(&prior.grants, &manifest.grants));
+        let review = PluginConsentReview {
+            manifest,
+            prior,
+            drift,
+        };
+        Self::cleanup_prepared_plugin(id, prepared, resources).await?;
+        Ok(review)
+    }
+
+    async fn prepare_configured_plugin(
+        &self,
+        id: &str,
+    ) -> Result<(Prepared, StartResources), String> {
         let plugin = self
             .config
             .plugin(id)
@@ -170,17 +201,22 @@ impl AgentBuilder {
                 };
             }
         };
-        let record = prepared.approve(now_rfc3339());
-        let save_result = self.consent.save(record.clone());
+        Ok((prepared, resources))
+    }
+
+    async fn cleanup_prepared_plugin(
+        id: &str,
+        prepared: Prepared,
+        resources: StartResources,
+    ) -> Result<(), String> {
         let prepared_cleanup = tokio::task::spawn_blocking(move || drop(prepared))
             .await
             .map_err(|error| format!("failed to clean up prepared plugin `{id}`: {error}"));
         let resource_cleanup = resources.cleanup().await;
 
-        save_result?;
         prepared_cleanup?;
         resource_cleanup?;
-        Ok(record)
+        Ok(())
     }
 
     pub async fn start(self) -> Result<Agent, String> {

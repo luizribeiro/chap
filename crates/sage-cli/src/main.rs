@@ -1,8 +1,8 @@
 mod tui;
 
 use clap::{Args, Parser, Subcommand};
-use sage_core::AgentBuilder;
-use std::{path::PathBuf, process::ExitCode};
+use sage_core::{AgentBuilder, DriftChange, DriftKind, PluginConsentReview};
+use std::{collections::BTreeSet, path::PathBuf, process::ExitCode};
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Parser)]
@@ -18,8 +18,25 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Review and manage plugin permission grants.
+    Grants(Grants),
     /// Inspect configured plugins.
     Plugins(Plugins),
+}
+
+#[derive(Debug, Args)]
+struct Grants {
+    #[command(subcommand)]
+    command: GrantsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum GrantsCommand {
+    /// Review resolved permission requests without approving them.
+    Review {
+        /// Plugin instance to review; omit to review every configured plugin.
+        instance_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -73,8 +90,137 @@ async fn run(cli: Cli) -> Result<(), String> {
         Some(Command::Plugins(Plugins {
             command: PluginsCommand::List,
         })) => print!("{}", plugin_list(&builder)?),
+        Some(Command::Grants(Grants {
+            command: GrantsCommand::Review { instance_id },
+        })) => print!("{}", grants_review(&builder, instance_id.as_deref()).await?),
     }
     Ok(())
+}
+
+async fn grants_review(
+    builder: &AgentBuilder,
+    instance_id: Option<&str>,
+) -> Result<String, String> {
+    let ids = match instance_id {
+        Some(id) => vec![id.to_owned()],
+        None => builder
+            .plugins()
+            .map(|(id, _)| id.to_owned())
+            .collect::<Vec<_>>(),
+    };
+    if ids.is_empty() {
+        return Ok("No plugins are configured.\n".to_owned());
+    }
+
+    let mut output = String::from(
+        "Concrete scopes come from sage.toml; approval grants this exact resolved manifest.\n",
+    );
+    for (index, id) in ids.iter().enumerate() {
+        if index > 0 {
+            output.push('\n');
+        }
+        output.push_str(&render_grant_review(&builder.review_plugin(id).await?));
+    }
+    Ok(output)
+}
+
+fn render_grant_review(review: &PluginConsentReview) -> String {
+    let mut output = format!(
+        "Instance: {}\nPlugin: {}\n",
+        review.manifest.instance_id, review.manifest.plugin_label
+    );
+    match (&review.prior, &review.drift) {
+        (None, _) => output.push_str("Status: NEEDS APPROVAL (first run)\n"),
+        (Some(prior), None) => {
+            output.push_str(&format!("Status: APPROVED at {}\n", prior.approved_at));
+        }
+        (Some(_), Some(drift)) if drift.blocks_admission => {
+            output.push_str("Status: NEEDS APPROVAL (blocking permission expansion)\n");
+        }
+        (Some(_), Some(_)) => {
+            output.push_str("Status: CHANGED (non-blocking; prior approval remains valid)\n");
+        }
+    }
+    output.push_str("Grants:\n");
+    if review.manifest.grants.is_empty() {
+        output.push_str("  (none)\n");
+    }
+    for grant in &review.manifest.grants {
+        output.push_str(&format!(
+            "  - {}.{}\n    scopes: {}\n    optional: {}\n    reason: {}\n",
+            grant.capability,
+            grant.permission,
+            render_scopes(&grant.scopes),
+            if grant.optional { "yes" } else { "no" },
+            grant.reason.as_deref().unwrap_or("(none)")
+        ));
+    }
+    if let Some(drift) = &review.drift {
+        output.push_str(if drift.blocks_admission {
+            "Drift since approval (BLOCKING):\n"
+        } else {
+            "Drift since approval (non-blocking):\n"
+        });
+        for change in &drift.changes {
+            output.push_str("  - ");
+            output.push_str(&render_drift_change(change));
+            output.push('\n');
+        }
+    }
+    output
+}
+
+fn render_drift_change(change: &DriftChange) -> String {
+    let permission = format!("{}.{}", change.capability, change.permission);
+    match change.kind {
+        DriftKind::NewGrant => format!(
+            "now ALSO requests: {permission} → {} (NEW, BLOCKING)",
+            render_optional_scopes(change.after.as_deref())
+        ),
+        DriftKind::ScopeWidened => {
+            let before = change
+                .before
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .collect::<BTreeSet<_>>();
+            let added = change
+                .after
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .filter(|scope| !before.contains(scope))
+                .cloned()
+                .collect::<Vec<_>>();
+            format!(
+                "now ALSO requests: {permission} → {} (WIDENED, BLOCKING)",
+                render_scopes(&added)
+            )
+        }
+        DriftKind::BecameRequired => {
+            format!("now requires: {permission} (WAS OPTIONAL, BLOCKING)")
+        }
+        DriftKind::RemovedGrant => format!("no longer requests: {permission} (REMOVED)"),
+        DriftKind::ScopeNarrowed => format!(
+            "now requests fewer scopes: {permission} → {} (NARROWED)",
+            render_optional_scopes(change.after.as_deref())
+        ),
+        DriftKind::BecameOptional => format!("now treats as optional: {permission} (OPTIONAL)"),
+    }
+}
+
+fn render_optional_scopes(scopes: Option<&[String]>) -> String {
+    scopes
+        .map(render_scopes)
+        .unwrap_or_else(|| "(none)".to_owned())
+}
+
+fn render_scopes(scopes: &[String]) -> String {
+    if scopes.is_empty() {
+        "(unscoped)".to_owned()
+    } else {
+        scopes.join(", ")
+    }
 }
 
 fn plugin_list(builder: &AgentBuilder) -> Result<String, String> {
