@@ -317,7 +317,16 @@ impl AgentBuilder {
                 return Ok(PluginLoad::Refused(error));
             }
         };
-        builder
+        let refreshed_record = record.as_ref().and_then(|prior| {
+            let manifest = prepared.review();
+            (prior.fingerprint != manifest.fingerprint).then(|| ConsentRecord {
+                instance_id: manifest.instance_id,
+                fingerprint: manifest.fingerprint,
+                grants: manifest.grants,
+                approved_at: prior.approved_at.clone(),
+            })
+        });
+        let handle = builder
             .admit(
                 prepared,
                 acceptance,
@@ -325,8 +334,11 @@ impl AgentBuilder {
                 InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL),
             )
             .await
-            .map(PluginLoad::Admitted)
-            .map_err(|error| Self::load_error(id, &path, error))
+            .map_err(|error| Self::load_error(id, &path, error))?;
+        if let Some(record) = refreshed_record {
+            consent.save(record)?;
+        }
+        Ok(PluginLoad::Admitted(handle))
     }
 
     async fn prepare_plugin(

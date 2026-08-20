@@ -1,4 +1,6 @@
-use chap_core::{AgentBuilder, DriftKind, SessionEventKind, SessionOptions};
+use chap_core::{
+    AgentBuilder, ConsentRecord, ConsentStore, DriftKind, SessionEventKind, SessionOptions,
+};
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -151,6 +153,8 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
         .approve_plugin("openai")
         .await
         .unwrap();
+    let consent_path = directory.path().join("consent.json");
+    let stored_before = std::fs::read(&consent_path).unwrap();
     write_openai_config(&config_path, &component, "http://127.0.0.1:41002");
     let builder = AgentBuilder::load(&config_path).unwrap();
     let review = builder.review_plugin("openai").await.unwrap();
@@ -181,10 +185,91 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
         agent.session(SessionOptions::new("openai")).err().unwrap(),
         errors[0].1
     );
+    assert_eq!(std::fs::read(consent_path).unwrap(), stored_before);
 
     tokio::task::spawn_blocking(move || drop(agent))
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn admission_after_narrowed_egress_refreshes_the_stored_record() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let component = build_openai_component(&workspace);
+    let directory = tempfile::tempdir().unwrap();
+    let config_path = directory.path().join("chap.toml");
+    let origin = "http://127.0.0.1:41001";
+    write_openai_config(&config_path, &component, origin);
+
+    let approved = AgentBuilder::load(&config_path)
+        .unwrap()
+        .approve_plugin("openai")
+        .await
+        .unwrap();
+    let consent = ConsentStore::new(directory.path().join("consent.json"));
+    let mut prior = with_different_fingerprint(approved.clone());
+    prior.grants[0]
+        .scopes
+        .push("http://127.0.0.1:41002".to_owned());
+    prior.approved_at = "2026-08-01T12:00:00Z".to_owned();
+    consent.save(prior.clone()).unwrap();
+
+    let agent = AgentBuilder::load(&config_path)
+        .unwrap()
+        .start()
+        .await
+        .unwrap();
+    assert!(agent.plugin_errors().next().is_none());
+    let refreshed = consent.load("openai").unwrap();
+
+    assert_eq!(refreshed.fingerprint, approved.fingerprint);
+    assert_eq!(refreshed.grants, approved.grants);
+    assert_eq!(refreshed.approved_at, prior.approved_at);
+
+    tokio::task::spawn_blocking(move || drop(agent))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn admission_with_a_matching_digest_does_not_rewrite_the_store() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let component = build_openai_component(&workspace);
+    let directory = tempfile::tempdir().unwrap();
+    let config_path = directory.path().join("chap.toml");
+    write_openai_config(&config_path, &component, "http://127.0.0.1:41001");
+
+    let approved = AgentBuilder::load(&config_path)
+        .unwrap()
+        .approve_plugin("openai")
+        .await
+        .unwrap();
+    let consent_path = directory.path().join("consent.json");
+    let compact = serde_json::to_vec(&serde_json::json!({ "openai": approved })).unwrap();
+    std::fs::write(&consent_path, &compact).unwrap();
+
+    let agent = AgentBuilder::load(&config_path)
+        .unwrap()
+        .start()
+        .await
+        .unwrap();
+    assert!(agent.plugin_errors().next().is_none());
+    assert_eq!(std::fs::read(consent_path).unwrap(), compact);
+
+    tokio::task::spawn_blocking(move || drop(agent))
+        .await
+        .unwrap();
+}
+
+fn with_different_fingerprint(record: ConsentRecord) -> ConsentRecord {
+    let mut value = serde_json::to_value(&record).unwrap();
+    let replacement = format!("sha256:{}", "0".repeat(64));
+    if value["fingerprint"] == replacement {
+        value["fingerprint"] = format!("sha256:{}", "1".repeat(64)).into();
+    } else {
+        value["fingerprint"] = replacement.into();
+    }
+    serde_json::from_value(value).unwrap()
 }
 
 fn write_openai_config(path: &Path, component: &Path, origin: &str) {
