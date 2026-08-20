@@ -11,9 +11,9 @@ use exports::sage::agent::tools::Guest;
 use exports::sage::agent::types::ToolDefinition;
 use http::{HeaderMap, HeaderValue, header};
 use http_body_util::BodyExt;
+use sage_plugin as sage;
 use sage_plugin::__lockgate::Plugin;
 use sage_plugin::{MetadataSource, Needs, ScopeRef, net};
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use wasi_fetch::Client;
@@ -119,10 +119,8 @@ fn parse_arguments<T: for<'de> Deserialize<'de>>(tool: &str, arguments: &str) ->
     serde_json::from_str(arguments).map_err(|error| format!("invalid `{tool}` arguments: {error}"))
 }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[derive(sage::Settings)]
 struct Settings {
-    #[schemars(regex(pattern = r"\S"))]
     api_key: String,
 }
 
