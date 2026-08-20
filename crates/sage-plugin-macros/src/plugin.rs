@@ -35,9 +35,16 @@ pub(crate) fn expand(input: PluginInput) -> syn::Result<TokenStream> {
             roles::resolve(name)
         })
         .collect::<syn::Result<Vec<_>>>()?;
-    let _plugin = input.plugin;
+    if roles.len() != 1 {
+        return Err(syn::Error::new(
+            input.plugin.span(),
+            "multi-role SAGE plugins are not enabled yet",
+        ));
+    }
+    let plugin = input.plugin;
     let inline = LitStr::new(&compose::world(&roles), proc_macro2::Span::call_site());
     let world = LitStr::new(compose::WORLD, proc_macro2::Span::call_site());
+    let bridges = roles.iter().map(|role| (role.bridge)(&plugin));
 
     Ok(quote! {
         ::sage_plugin::generate!({
@@ -48,5 +55,33 @@ pub(crate) fn expand(input: PluginInput) -> syn::Result<TokenStream> {
                 "sage:agent/types@0.2.0": ::sage_plugin::types,
             },
         });
+
+        #[automatically_derived]
+        impl ::sage_plugin::__lockgate::Plugin for #plugin {
+            const ID: &'static str = <Self as ::sage_plugin::Plugin>::ID;
+            const DISPLAY_NAME: ::sage_plugin::MetadataSource =
+                <Self as ::sage_plugin::Plugin>::DISPLAY_NAME;
+            const VERSION: ::sage_plugin::MetadataSource =
+                <Self as ::sage_plugin::Plugin>::VERSION;
+            const DESCRIPTION: ::sage_plugin::MetadataSource =
+                <Self as ::sage_plugin::Plugin>::DESCRIPTION;
+            const LICENSE: ::sage_plugin::MetadataSource =
+                <Self as ::sage_plugin::Plugin>::LICENSE;
+            const REPOSITORY: ::sage_plugin::MetadataSource =
+                <Self as ::sage_plugin::Plugin>::REPOSITORY;
+            const HOMEPAGE: ::sage_plugin::MetadataSource =
+                <Self as ::sage_plugin::Plugin>::HOMEPAGE;
+            const NEEDS: ::sage_plugin::Needs = <Self as ::sage_plugin::Plugin>::NEEDS;
+            const SETTINGS_POLICY: ::sage_plugin::SettingsPolicy =
+                <Self as ::sage_plugin::Plugin>::SETTINGS_POLICY;
+            type Settings = <Self as ::sage_plugin::Plugin>::Settings;
+        }
+
+        #(#bridges)*
+
+        ::sage_plugin::__lockgate::export!(
+            #plugin;
+            facade = ::sage_plugin::__lockgate
+        );
     })
 }

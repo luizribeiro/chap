@@ -1,11 +1,15 @@
 use sage::provider::{AssistantContent, Completion, CompletionRequest, FinishReason, Message};
-use sage::{Needs, NoSettings, Plugin, Provider};
+use sage::{MetadataSource, Needs, NoSettings, Plugin, Provider};
 use sage_plugin as sage;
 
 struct SingleRole;
 
 impl Plugin for SingleRole {
     const ID: &'static str = "single-role";
+    const DESCRIPTION: MetadataSource = MetadataSource::Absent;
+    const LICENSE: MetadataSource = MetadataSource::Absent;
+    const REPOSITORY: MetadataSource = MetadataSource::Absent;
+    const HOMEPAGE: MetadataSource = MetadataSource::Absent;
     const NEEDS: Needs = Needs::NOTHING;
     type Settings = NoSettings;
 
@@ -31,12 +35,6 @@ impl Provider for SingleRole {
 }
 
 sage::plugin!(SingleRole: Provider);
-
-impl exports::sage::agent::provider::Guest for SingleRole {
-    async fn complete(request: CompletionRequest) -> Result<Completion, String> {
-        <Self as Provider>::complete(&Self, request).await
-    }
-}
 
 #[test]
 fn generated_guest_reuses_sdk_types() {}
