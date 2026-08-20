@@ -35,12 +35,6 @@ pub(crate) fn expand(input: PluginInput) -> syn::Result<TokenStream> {
             roles::resolve(name)
         })
         .collect::<syn::Result<Vec<_>>>()?;
-    if roles.len() != 1 {
-        return Err(syn::Error::new(
-            input.plugin.span(),
-            "multi-role SAGE plugins are not enabled yet",
-        ));
-    }
     let plugin = input.plugin;
     let inline = LitStr::new(&compose::world(&roles), proc_macro2::Span::call_site());
     let world = LitStr::new(compose::WORLD, proc_macro2::Span::call_site());
