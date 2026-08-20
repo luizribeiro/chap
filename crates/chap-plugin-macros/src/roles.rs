@@ -34,7 +34,7 @@ pub(crate) fn resolve(name: &Ident) -> syn::Result<&'static Role> {
     ROLES
         .iter()
         .find(|role| name == role.rust_name)
-        .ok_or_else(|| syn::Error::new(name.span(), format!("unknown SAGE plugin role `{name}`")))
+        .ok_or_else(|| syn::Error::new(name.span(), format!("unknown CHAP plugin role `{name}`")))
 }
 
 fn provider_bridge(plugin: &Ident) -> TokenStream {

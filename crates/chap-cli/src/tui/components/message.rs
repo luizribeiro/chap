@@ -14,12 +14,12 @@ pub struct MessageViewProps {
 pub fn MessageView(props: &MessageViewProps) -> impl Into<AnyElement<'static>> {
     let (label, color) = match props.role {
         MessageRole::User => ("you", Color::Blue),
-        MessageRole::Sage => ("sage", Color::Green),
+        MessageRole::Chap => ("chap", Color::Green),
         MessageRole::Error => ("error", Color::Red),
     };
 
     match props.role {
-        MessageRole::Sage => element! {
+        MessageRole::Chap => element! {
             View(flex_direction: FlexDirection::Column) {
                 Text(content: label, color, weight: Weight::Bold)
                 Markdown(content: Arc::clone(&props.content))

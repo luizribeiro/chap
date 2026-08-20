@@ -64,7 +64,7 @@ impl Drop for StartResources {
             drop(runtime.spawn_blocking(move || drop(resources)));
         } else {
             let _ = std::thread::Builder::new()
-                .name("sage-lockgate-drop".to_owned())
+                .name("chap-lockgate-drop".to_owned())
                 .spawn(move || drop(resources));
         }
     }

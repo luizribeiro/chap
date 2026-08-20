@@ -1,5 +1,5 @@
 # Build these component paths with:
-# cargo build -p sage-openai-compatible -p sage-kagi --release --target wasm32-wasip2
+# cargo build -p chap-openai-compatible -p chap-kagi --release --target wasm32-wasip2
 #
 # Lockgate v2 derives network access from each plugin's egress declaration.
 # Review and approve the exact resolved grants before first admission:
@@ -9,7 +9,7 @@
 # The old settings-host and outbound-http application interfaces are not used.
 
 [plugins.openai]
-component = "./target/wasm32-wasip2/release/sage_openai_compatible.wasm"
+component = "./target/wasm32-wasip2/release/chap_openai_compatible.wasm"
 
 [plugins.openai.settings]
 base-url = "http://127.0.0.1:8080/v1"
@@ -17,7 +17,7 @@ egress-origin = "http://127.0.0.1:8080"
 model = "Inkling-Small-mxfp4-mtp4"
 
 [plugins.kagi]
-component = "./target/wasm32-wasip2/release/sage_kagi.wasm"
+component = "./target/wasm32-wasip2/release/chap_kagi.wasm"
 
 [plugins.kagi.settings]
 api-key-env = "KAGI_API_KEY"

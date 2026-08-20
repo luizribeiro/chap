@@ -1,6 +1,6 @@
-use chap_plugin as sage;
+use chap::tools::ToolDefinition;
+use chap_plugin as chap;
 use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, Tools, net};
-use sage::tools::ToolDefinition;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -103,7 +103,7 @@ impl Tools for Kagi {
             _ => return Err(format!("tool `{name}` is not provided by the Kagi plugin")),
         };
         let url = format!("{API_BASE_URL}{path}");
-        let response = sage::http::Client::with_max_response_bytes(8 * 1024 * 1024)
+        let response = chap::http::Client::with_max_response_bytes(8 * 1024 * 1024)
             .post(&url)
             .header("accept", "application/json")
             .map_err(|error| error.to_string())?
@@ -114,23 +114,23 @@ impl Tools for Kagi {
             .send()
             .await
             .map_err(|error| match error {
-                sage::http::Error::InvalidHeaderValue(_) => {
+                chap::http::Error::InvalidHeaderValue(_) => {
                     "Kagi API key contains invalid header characters".to_owned()
                 }
-                sage::http::Error::Request(error) => {
+                chap::http::Error::Request(error) => {
                     format!("Kagi HTTP request failed: {error}")
                 }
-                sage::http::Error::Body(error) => {
+                chap::http::Error::Body(error) => {
                     format!("failed to read Kagi response: {error}")
                 }
-                sage::http::Error::ResponseTooLarge { limit } => {
+                chap::http::Error::ResponseTooLarge { limit } => {
                     format!("Kagi response exceeded the {limit}-byte limit")
                 }
                 error => error.to_string(),
             })?;
         let status = response.status();
         let body = response.text().map_err(|error| match error {
-            sage::http::Error::Utf8(error) => {
+            chap::http::Error::Utf8(error) => {
                 format!("Kagi response was not valid UTF-8: {error}")
             }
             error => error.to_string(),
@@ -149,7 +149,7 @@ fn parse_arguments<T: for<'de> Deserialize<'de>>(tool: &str, arguments: &str) ->
     serde_json::from_str(arguments).map_err(|error| format!("invalid `{tool}` arguments: {error}"))
 }
 
-#[derive(sage::Settings)]
+#[derive(chap::Settings)]
 struct Settings {
     api_key: String,
 }
@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn publishes_the_settings_object_schema() {
-        let schema = sage::__private::settings_schema::<Kagi>();
+        let schema = chap::__private::settings_schema::<Kagi>();
         let schema: serde_json::Value = serde_json::from_str(&schema).unwrap();
 
         assert_eq!(
@@ -554,4 +554,4 @@ mod tests {
     }
 }
 
-sage::plugin!(Kagi: Tools);
+chap::plugin!(Kagi: Tools);

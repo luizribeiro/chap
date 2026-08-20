@@ -10,7 +10,7 @@ mod status;
 mod tool;
 mod transcript;
 
-pub(super) use app::Sage;
+pub(super) use app::Chap;
 use footer::Footer;
 use header::Header;
 use markdown::Markdown;

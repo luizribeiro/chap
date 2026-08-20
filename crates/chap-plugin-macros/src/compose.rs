@@ -2,7 +2,7 @@ use crate::roles::Role;
 
 const TYPES_WIT: &str = include_str!("../../chap-plugin/wit/types.wit");
 const PACKAGE: &str = "package chap:agent@0.2.0;";
-pub(crate) const WORLD: &str = "sage-plugin";
+pub(crate) const WORLD: &str = "chap-plugin";
 
 pub(crate) fn world(roles: &[&Role]) -> String {
     let mut wit = String::from(PACKAGE);

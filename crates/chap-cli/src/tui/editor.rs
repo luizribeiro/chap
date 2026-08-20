@@ -14,7 +14,7 @@ fn edit_with(editor: &str, draft: &str) -> Result<String, String> {
     }
 
     let mut file = Builder::new()
-        .prefix("sage-")
+        .prefix("chap-")
         .suffix(".md")
         .tempfile()
         .map_err(|error| format!("failed to create editor file: {error}"))?;

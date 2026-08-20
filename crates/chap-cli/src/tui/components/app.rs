@@ -6,7 +6,7 @@ use crate::tui::{
 use iocraft::prelude::*;
 
 #[component]
-pub fn Sage(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+pub fn Chap(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let session = hooks.use_context::<TuiContext>().session.clone();
     let provider = session.provider().to_owned();
     let mut system = hooks.use_context_mut::<SystemContext>();

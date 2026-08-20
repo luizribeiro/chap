@@ -31,7 +31,7 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 
     let sdk = sdk_path(input.ident.span())?;
     let settings_name = input.ident;
-    let proxy_name = format_ident!("__SageSettingsProxyFor{settings_name}");
+    let proxy_name = format_ident!("__ChapSettingsProxyFor{settings_name}");
 
     let proxy_fields = fields
         .iter()
@@ -43,28 +43,28 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 
     Ok(quote! {
         const _: () = {
-            use #sdk as __sage;
+            use #sdk as __chap;
 
-            #[derive(__sage::serde::Deserialize, __sage::schemars::JsonSchema)]
+            #[derive(__chap::serde::Deserialize, __chap::schemars::JsonSchema)]
             #[serde(
-                crate = "__sage::serde",
+                crate = "__chap::serde",
                 rename_all = "kebab-case",
                 deny_unknown_fields
             )]
-            #[schemars(crate = "__sage::schemars", rename_all = "kebab-case")]
+            #[schemars(crate = "__chap::schemars", rename_all = "kebab-case")]
             struct #proxy_name {
                 #(#proxy_fields)*
             }
 
             #[automatically_derived]
-            impl<'__sage_de> __sage::serde::Deserialize<'__sage_de> for #settings_name {
-                fn deserialize<__SageDeserializer>(
-                    deserializer: __SageDeserializer,
-                ) -> ::core::result::Result<Self, __SageDeserializer::Error>
+            impl<'__chap_de> __chap::serde::Deserialize<'__chap_de> for #settings_name {
+                fn deserialize<__ChapDeserializer>(
+                    deserializer: __ChapDeserializer,
+                ) -> ::core::result::Result<Self, __ChapDeserializer::Error>
                 where
-                    __SageDeserializer: __sage::serde::Deserializer<'__sage_de>,
+                    __ChapDeserializer: __chap::serde::Deserializer<'__chap_de>,
                 {
-                    let proxy = <#proxy_name as __sage::serde::Deserialize>::deserialize(
+                    let proxy = <#proxy_name as __chap::serde::Deserialize>::deserialize(
                         deserializer,
                     )?;
                     ::core::result::Result::Ok(Self {
@@ -74,23 +74,23 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
             }
 
             #[automatically_derived]
-            impl __sage::schemars::JsonSchema for #settings_name {
+            impl __chap::schemars::JsonSchema for #settings_name {
                 fn inline_schema() -> bool {
-                    <#proxy_name as __sage::schemars::JsonSchema>::inline_schema()
+                    <#proxy_name as __chap::schemars::JsonSchema>::inline_schema()
                 }
 
-                fn schema_name() -> __sage::alloc::borrow::Cow<'static, str> {
+                fn schema_name() -> __chap::alloc::borrow::Cow<'static, str> {
                     stringify!(#settings_name).into()
                 }
 
-                fn schema_id() -> __sage::alloc::borrow::Cow<'static, str> {
+                fn schema_id() -> __chap::alloc::borrow::Cow<'static, str> {
                     concat!(module_path!(), "::", stringify!(#settings_name)).into()
                 }
 
                 fn json_schema(
-                    generator: &mut __sage::schemars::SchemaGenerator,
-                ) -> __sage::schemars::Schema {
-                    <#proxy_name as __sage::schemars::JsonSchema>::json_schema(generator)
+                    generator: &mut __chap::schemars::SchemaGenerator,
+                ) -> __chap::schemars::Schema {
+                    <#proxy_name as __chap::schemars::JsonSchema>::json_schema(generator)
                 }
             }
         };

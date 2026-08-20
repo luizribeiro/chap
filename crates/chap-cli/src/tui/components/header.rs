@@ -16,7 +16,7 @@ pub fn Header(props: &HeaderProps) -> impl Into<AnyElement<'static>> {
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::SpaceBetween,
         ) {
-            Text(content: "SAGE", color: Color::Cyan, weight: Weight::Bold)
+            Text(content: "CHAP", color: Color::Cyan, weight: Weight::Bold)
             Text(
                 content: format!("provider: {}", props.provider),
                 color: Color::DarkGrey,

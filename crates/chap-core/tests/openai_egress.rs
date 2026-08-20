@@ -71,7 +71,7 @@ impl MockServer {
 }
 
 #[tokio::test]
-async fn completes_through_the_sage_host_against_an_allowed_local_server() {
+async fn completes_through_the_chap_host_against_an_allowed_local_server() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let component = build_openai_component(&workspace);
     let mock = MockServer::start();

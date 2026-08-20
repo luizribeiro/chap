@@ -1,7 +1,7 @@
-use chap_plugin as sage;
-use sage::provider::{AssistantContent, Completion, CompletionRequest, FinishReason, Message};
-use sage::tools::ToolDefinition;
-use sage::{MetadataSource, Needs, NoSettings, Plugin, Provider, Tools};
+use chap::provider::{AssistantContent, Completion, CompletionRequest, FinishReason, Message};
+use chap::tools::ToolDefinition;
+use chap::{MetadataSource, Needs, NoSettings, Plugin, Provider, Tools};
+use chap_plugin as chap;
 
 struct MultiRole;
 
@@ -52,7 +52,7 @@ impl Tools for MultiRole {
     }
 }
 
-sage::plugin!(MultiRole: Provider + Tools);
+chap::plugin!(MultiRole: Provider + Tools);
 
 #[test]
 fn plugin_macro_supports_multi_role_tests() {}

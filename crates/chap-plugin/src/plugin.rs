@@ -1,6 +1,6 @@
 use crate::{MetadataSource, Needs, SettingsPolicy, schemars, serde};
 
-/// Common authoring contract for every SAGE plugin.
+/// Common authoring contract for every CHAP plugin.
 pub trait Plugin: Sized {
     /// Stable plugin identity.
     const ID: &'static str;

@@ -1005,7 +1005,7 @@ interface schema {
         .push_str(
             "fixture.wit",
             r#"
-package sage:test;
+package chap:test;
 
 world fixture {
   export lockgate:config/schema;
@@ -1043,7 +1043,7 @@ interface schema {
         .unwrap();
     let wrapper = format!(
         r#"
-package sage:test;
+package chap:test;
 
 world fixture {{
   include chap:agent/{world_name}@0.2.0;
@@ -1148,7 +1148,7 @@ fn encode_u32(mut value: u32, output: &mut Vec<u8>) {
 
 fn test_directory() -> std::path::PathBuf {
     let path = std::env::temp_dir().join(format!(
-        "sage-{}-{}",
+        "chap-{}-{}",
         std::process::id(),
         uuid::Uuid::now_v7()
     ));

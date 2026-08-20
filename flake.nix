@@ -1,5 +1,5 @@
 {
-  description = "SAGE coding agent";
+  description = "CHAP coding agent";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

@@ -27,7 +27,7 @@ pub enum ChatMessage {
 pub enum MessageRole {
     User,
     #[default]
-    Sage,
+    Chap,
     Error,
 }
 
@@ -56,9 +56,9 @@ impl ChatMessage {
         }
     }
 
-    pub(super) fn sage(content: String) -> Self {
+    pub(super) fn chap(content: String) -> Self {
         Self::Text {
-            role: MessageRole::Sage,
+            role: MessageRole::Chap,
             content: content.into(),
         }
     }
@@ -109,7 +109,7 @@ pub(super) fn apply_event(
             None
         }
         SessionEventKind::AssistantMessage { text } => {
-            transcript.messages.push(ChatMessage::sage(text));
+            transcript.messages.push(ChatMessage::chap(text));
             None
         }
         SessionEventKind::ToolRequested {
@@ -270,7 +270,7 @@ mod tests {
                     r#"{"message":"hello"}"#.to_owned(),
                     ToolState::Finished(Ok(Arc::from("hello"))),
                 ),
-                ChatMessage::sage("done".to_owned()),
+                ChatMessage::chap("done".to_owned()),
             ]
         );
         assert_eq!(

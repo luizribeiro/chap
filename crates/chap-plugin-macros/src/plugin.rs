@@ -29,7 +29,7 @@ pub(crate) fn expand(input: PluginInput) -> syn::Result<TokenStream> {
             if !seen.insert(name.to_string()) {
                 return Err(syn::Error::new(
                     name.span(),
-                    format!("duplicate SAGE plugin role `{name}`"),
+                    format!("duplicate CHAP plugin role `{name}`"),
                 ));
             }
             roles::resolve(name)

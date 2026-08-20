@@ -1,9 +1,9 @@
-use chap_plugin as sage;
-use chap_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, net};
-use sage::provider::{
+use chap::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message as ProviderMessage,
     ToolCall as ProviderToolCall, ToolDefinition as ProviderTool,
 };
+use chap_plugin as chap;
+use chap_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, net};
 use serde::{Deserialize, Serialize};
 
 struct OpenAiCompatible {
@@ -50,7 +50,7 @@ impl Provider for OpenAiCompatible {
             "{}/chat/completions",
             settings.base_url.trim_end_matches('/')
         );
-        let response = sage::http::Client::new()
+        let response = chap::http::Client::new()
             .post(&url)
             .header("content-type", "application/json")
             .map_err(|error| error.to_string())?
@@ -70,7 +70,7 @@ impl Provider for OpenAiCompatible {
     }
 }
 
-#[derive(sage::Settings)]
+#[derive(chap::Settings)]
 struct Settings {
     base_url: String,
     egress_origin: String,
@@ -376,7 +376,7 @@ mod tests {
                 name: "weather".to_owned(),
                 arguments: r#"{"city":"Paris"}"#.to_owned(),
             })]),
-            ProviderMessage::ToolResult(sage::types::ToolResult {
+            ProviderMessage::ToolResult(chap::types::ToolResult {
                 call_id: "call-1".to_owned(),
                 name: "weather".to_owned(),
                 output: "sunny".to_owned(),
@@ -417,4 +417,4 @@ mod tests {
     }
 }
 
-sage::plugin!(OpenAiCompatible: Provider);
+chap::plugin!(OpenAiCompatible: Provider);

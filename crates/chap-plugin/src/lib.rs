@@ -1,4 +1,4 @@
-//! Guest authoring facade for SAGE plugins.
+//! Guest authoring facade for CHAP plugins.
 //!
 //! The shared `chap:agent` WIT package lives in this crate's `wit` directory.
 //! Built-in plugins reference it as `../../crates/chap-plugin/wit` and select

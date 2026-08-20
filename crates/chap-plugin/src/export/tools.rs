@@ -2,7 +2,7 @@
 
 pub use crate::types::ToolDefinition;
 
-/// Supplies tools that a SAGE agent can discover and execute.
+/// Supplies tools that a CHAP agent can discover and execute.
 #[allow(async_fn_in_trait)]
 pub trait Tools {
     /// Lists the tools provided by this plugin.

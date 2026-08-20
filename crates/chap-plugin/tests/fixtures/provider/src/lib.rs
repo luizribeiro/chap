@@ -1,8 +1,8 @@
-use chap_plugin as sage;
-use sage::provider::{AssistantContent, Completion, CompletionRequest, FinishReason, Message};
-use sage::{MetadataSource, Needs, Plugin, Provider};
+use chap::provider::{AssistantContent, Completion, CompletionRequest, FinishReason, Message};
+use chap::{MetadataSource, Needs, Plugin, Provider};
+use chap_plugin as chap;
 
-#[derive(sage::Settings)]
+#[derive(chap::Settings)]
 struct Settings {
     prefix: String,
 }
@@ -45,4 +45,4 @@ impl Provider for ProviderFixture {
     }
 }
 
-sage::plugin!(ProviderFixture: Provider);
+chap::plugin!(ProviderFixture: Provider);

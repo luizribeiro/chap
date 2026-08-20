@@ -1,11 +1,11 @@
-use chap_plugin as sage;
-use sage::provider::{
+use chap::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message, ToolCall,
 };
-use sage::tools::ToolDefinition;
-use sage::{MetadataSource, Needs, Plugin, Provider, Tools};
+use chap::tools::ToolDefinition;
+use chap::{MetadataSource, Needs, Plugin, Provider, Tools};
+use chap_plugin as chap;
 
-#[derive(sage::Settings)]
+#[derive(chap::Settings)]
 struct Settings {
     prefix: String,
 }
@@ -77,4 +77,4 @@ impl Tools for MultiRoleFixture {
     }
 }
 
-sage::plugin!(MultiRoleFixture: Provider + Tools);
+chap::plugin!(MultiRoleFixture: Provider + Tools);

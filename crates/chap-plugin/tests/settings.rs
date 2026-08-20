@@ -1,6 +1,6 @@
-use chap_plugin as sage;
+use chap_plugin as chap;
 
-#[derive(Debug, PartialEq, sage::Settings)]
+#[derive(Debug, PartialEq, chap::Settings)]
 struct Settings {
     base_url: String,
     egress_origin: String,
@@ -11,9 +11,9 @@ struct Settings {
 
 struct TestPlugin;
 
-impl sage::Plugin for TestPlugin {
+impl chap::Plugin for TestPlugin {
     const ID: &'static str = "settings-test";
-    const NEEDS: sage::Needs = sage::Needs::NOTHING;
+    const NEEDS: chap::Needs = chap::Needs::NOTHING;
     type Settings = Settings;
 
     fn new(_settings: Self::Settings) -> Self {
@@ -21,10 +21,10 @@ impl sage::Plugin for TestPlugin {
     }
 }
 
-impl sage::__lockgate::Plugin for TestPlugin {
-    const ID: &'static str = <Self as sage::Plugin>::ID;
-    const NEEDS: sage::Needs = <Self as sage::Plugin>::NEEDS;
-    type Settings = <Self as sage::Plugin>::Settings;
+impl chap::__lockgate::Plugin for TestPlugin {
+    const ID: &'static str = <Self as chap::Plugin>::ID;
+    const NEEDS: chap::Needs = <Self as chap::Plugin>::NEEDS;
+    type Settings = <Self as chap::Plugin>::Settings;
 }
 
 #[test]
@@ -70,13 +70,13 @@ fn rejects_snake_case_and_unknown_fields() {
 }
 
 #[test]
-fn lockgate_schema_preserves_sage_settings_conventions() {
-    fn assert_plugin_settings<T: sage::serde::de::DeserializeOwned + sage::schemars::JsonSchema>() {
+fn lockgate_schema_preserves_chap_settings_conventions() {
+    fn assert_plugin_settings<T: chap::serde::de::DeserializeOwned + chap::schemars::JsonSchema>() {
     }
     assert_plugin_settings::<Settings>();
 
     let schema: serde_json::Value =
-        serde_json::from_str(&sage::__private::settings_schema::<TestPlugin>()).unwrap();
+        serde_json::from_str(&chap::__private::settings_schema::<TestPlugin>()).unwrap();
     let required = schema["required"].as_array().unwrap();
     for name in ["base-url", "egress-origin", "model"] {
         assert!(required.iter().any(|value| value == name), "{schema:#}");

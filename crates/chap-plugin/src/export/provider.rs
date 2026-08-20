@@ -5,7 +5,7 @@ pub use crate::types::{
     ToolDefinition, ToolResult,
 };
 
-/// Produces model completions for SAGE agent turns.
+/// Produces model completions for CHAP agent turns.
 #[allow(async_fn_in_trait)]
 pub trait Provider {
     /// Completes one request using this invocation's plugin state.

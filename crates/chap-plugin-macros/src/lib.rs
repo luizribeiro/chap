@@ -1,4 +1,4 @@
-//! Procedural macros for the SAGE plugin SDK.
+//! Procedural macros for the CHAP plugin SDK.
 
 use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
@@ -8,7 +8,7 @@ mod plugin;
 mod roles;
 mod settings;
 
-/// Generates the component bindings for a selected set of SAGE roles.
+/// Generates the component bindings for a selected set of CHAP roles.
 #[proc_macro]
 pub fn plugin(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as plugin::PluginInput);
@@ -17,7 +17,7 @@ pub fn plugin(input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Applies SAGE's deserialization and JSON Schema settings conventions.
+/// Applies CHAP's deserialization and JSON Schema settings conventions.
 #[proc_macro_derive(Settings, attributes(settings))]
 pub fn derive_settings(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

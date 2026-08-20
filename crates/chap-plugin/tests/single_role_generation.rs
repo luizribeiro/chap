@@ -1,6 +1,6 @@
-use chap_plugin as sage;
-use sage::provider::{AssistantContent, Completion, CompletionRequest, FinishReason, Message};
-use sage::{MetadataSource, Needs, NoSettings, Plugin, Provider};
+use chap::provider::{AssistantContent, Completion, CompletionRequest, FinishReason, Message};
+use chap::{MetadataSource, Needs, NoSettings, Plugin, Provider};
+use chap_plugin as chap;
 
 struct SingleRole;
 
@@ -34,7 +34,7 @@ impl Provider for SingleRole {
     }
 }
 
-sage::plugin!(SingleRole: Provider);
+chap::plugin!(SingleRole: Provider);
 
 #[test]
 fn plugin_macro_supports_single_role_tests() {}
