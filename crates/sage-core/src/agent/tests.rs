@@ -1027,7 +1027,7 @@ world fixture {
 
 fn plugin_component(id: &str, world_name: &str, schema: Option<&str>) -> Vec<u8> {
     let mut resolve = Resolve::new();
-    let wit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../wit");
+    let wit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../sage-plugin/wit");
     resolve.push_path(wit).unwrap();
     resolve
         .push_str(

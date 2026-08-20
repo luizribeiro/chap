@@ -1,4 +1,4 @@
 lockgate::host_bindings!({
-    path: "../../wit",
+    path: "../sage-plugin/wit",
     world: "host",
 });
