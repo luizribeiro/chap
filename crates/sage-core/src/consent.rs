@@ -105,7 +105,14 @@ impl ConsentStore {
     }
 
     pub fn save(&self, record: ConsentRecord) -> Result<(), String> {
-        let mut records = self.records().unwrap_or_default();
+        let mut records = match self.read_records() {
+            Ok(records) => records.unwrap_or_default(),
+            Err(read_error) => {
+                self.preserve_unreadable()
+                    .map_err(|preserve_error| format!("{read_error}; {preserve_error}"))?;
+                BTreeMap::new()
+            }
+        };
         records.insert(record.instance_id.clone(), record);
         self.write(&records)
     }
@@ -131,8 +138,49 @@ impl ConsentStore {
     }
 
     fn records(&self) -> Option<BTreeMap<String, ConsentRecord>> {
-        let bytes = fs::read(&self.path).ok()?;
-        serde_json::from_slice(&bytes).ok()
+        self.read_records().ok().flatten()
+    }
+
+    fn read_records(&self) -> Result<Option<BTreeMap<String, ConsentRecord>>, String> {
+        let bytes = match fs::read(&self.path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(format!(
+                    "failed to read consent store `{}`: {error}",
+                    self.path.display()
+                ));
+            }
+        };
+        serde_json::from_slice(&bytes).map(Some).map_err(|error| {
+            format!(
+                "failed to decode consent store `{}`: {error}",
+                self.path.display()
+            )
+        })
+    }
+
+    fn preserve_unreadable(&self) -> Result<PathBuf, String> {
+        let file_name = self
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("consent.json");
+        let base = self.path.with_file_name(format!("{file_name}.corrupt"));
+        let preserved = if base.exists() {
+            self.path
+                .with_file_name(format!("{file_name}.corrupt.{}", uuid::Uuid::now_v7()))
+        } else {
+            base
+        };
+        fs::rename(&self.path, &preserved).map_err(|error| {
+            format!(
+                "failed to preserve unreadable consent store `{}` as `{}`: {error}",
+                self.path.display(),
+                preserved.display()
+            )
+        })?;
+        Ok(preserved)
     }
 
     fn write(&self, records: &BTreeMap<String, ConsentRecord>) -> Result<(), String> {
