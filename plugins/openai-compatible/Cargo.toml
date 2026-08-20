@@ -21,4 +21,4 @@ wit-bindgen = { version = "0.57", default-features = false, features = ["async"]
 # disabled dependency supplies that package-name mapping; generated paths are
 # resolved to `sage-plugin` by the crate alias in lib.rs.
 [target.'cfg(any())'.dependencies]
-sage-plugin-internals = { package = "lockgate-plugin", git = "https://github.com/luizribeiro/lockgate.git", rev = "b4302a3c86205939215670390ca55917aed744bd", default-features = false }
+sage-plugin-internals = { package = "lockgate-plugin", git = "https://github.com/luizribeiro/lockgate.git", branch = "plugin-sdk", default-features = false }

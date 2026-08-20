@@ -61,7 +61,7 @@ impl Drop for StartResources {
             return;
         }
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            let _ = runtime.spawn_blocking(move || drop(resources));
+            drop(runtime.spawn_blocking(move || drop(resources)));
         } else {
             let _ = std::thread::Builder::new()
                 .name("sage-lockgate-drop".to_owned())
@@ -277,7 +277,7 @@ impl AgentBuilder {
             if !plugin.tools {
                 continue;
             }
-            for tool in PluginTool::load(id, Arc::clone(&lockgate), plugin.handle.clone()).await? {
+            for tool in PluginTool::load(id, Arc::clone(lockgate), plugin.handle.clone()).await? {
                 resources
                     .tools
                     .as_mut()
@@ -491,6 +491,7 @@ impl Agent {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum PluginLoad {
     Admitted(PluginHandle),
     Refused(String),
