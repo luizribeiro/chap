@@ -50,9 +50,11 @@ component = "./target/wasm32-wasip2/release/chap_openai_compatible.wasm"
 [plugins.openai.settings]
 base-url = "http://127.0.0.1:8080/v1"
 model = "example-model"
-# Names the environment variable holding the API key. The plugin declares an
-# env.read grant for it, so the access shows up in `chap grants review`; the
-# value itself never appears in chap.toml and is never read by the host.
+# Optional. Names the environment variable holding the API key. The plugin
+# declares an env.read grant for it, so the access shows up in `chap grants
+# review`; the value itself never appears in chap.toml and is never read by the
+# host. Omit it to talk to a server that takes unauthenticated requests: the
+# plugin then requests no environment grant and sends no authorization header.
 api-key-env = "OPENAI_API_KEY"
 ```
 
@@ -111,7 +113,10 @@ JSON types. Secrets stay out of that object entirely: a setting such as
 `api-key-env` carries only the *name* of an environment variable, the plugin
 declares an `env.read` need scoped from it, and Lockgate populates the
 component's environment with just the granted variables at admission. The plugin
-reads the key with `std::env::var`; the host never touches the value. Lockgate
+reads the key with `std::env::var`; the host never touches the value. That need
+is optional: an optional need whose setting is absent drops out of the resolved
+manifest, so a configuration without `api-key-env` is admitted with no
+environment grant and the provider sends no authorization header. Lockgate
 validates the settings object at prepare time against the schema derived from
 the plugin's `type Settings`. The plugin then reads the validated typed value
 through `Self::settings()`.
@@ -126,13 +131,15 @@ tools](plugins/kagi/src/lib.rs) do:
 struct Settings {
     base_url: String,
     model: String,
-    api_key_env: String,
+    api_key_env: Option<String>,
 }
 ```
 
-Lockgate fetches the framework schema and validates resolved settings before
-admitting the plugin, loading tool definitions, or using a provider. Invalid
-settings are reported as plugin admission errors. Closed v2 settings schemas
+An `Option<T>` field is optional in the derived schema, so a settings table that
+omits it still validates. Lockgate fetches the framework schema and validates
+resolved settings before admitting the plugin, loading tool definitions, or
+using a provider. Invalid settings are reported as plugin admission errors.
+Closed v2 settings schemas
 carry `unevaluatedProperties: false`, so properties introduced by composition
 cannot bypass the plugin's declared settings contract:
 
