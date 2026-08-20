@@ -5,4 +5,5 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+lockgate-http = { workspace = true }
 lockgate-plugin = { workspace = true }

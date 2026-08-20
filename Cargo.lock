@@ -1500,6 +1500,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lockgate-http"
+version = "0.1.0"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=plugin-sdk#786709024301226a37c8ec4ea13d175f170b839c"
+dependencies = [
+ "http",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "wasi-fetch",
+ "wit-bindgen",
+]
+
+[[package]]
 name = "lockgate-macros"
 version = "0.1.0"
 source = "git+https://github.com/luizribeiro/lockgate.git?branch=plugin-sdk#786709024301226a37c8ec4ea13d175f170b839c"
@@ -2230,6 +2243,7 @@ dependencies = [
 name = "sage-plugin"
 version = "0.1.0"
 dependencies = [
+ "lockgate-http",
  "lockgate-plugin",
 ]
 
