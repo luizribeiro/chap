@@ -350,7 +350,7 @@ impl AgentBuilder {
     ) -> Result<Prepared, String> {
         let path = config.component_path(plugin);
         let bytes = Self::plugin_bytes(config, id, plugin)?;
-        let settings = plugin.settings(id)?;
+        let settings = plugin.settings();
         let prepared = builder
             .prepare(
                 id,

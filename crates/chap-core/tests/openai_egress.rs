@@ -208,7 +208,11 @@ async fn admission_after_narrowed_egress_refreshes_the_stored_record() {
         .unwrap();
     let consent = ConsentStore::new(directory.path().join("consent.json"));
     let mut prior = with_different_fingerprint(approved.clone());
-    prior.grants[0]
+    prior
+        .grants
+        .iter_mut()
+        .find(|grant| grant.capability == "net" && grant.permission == "egress")
+        .expect("approved record must carry the egress grant")
         .scopes
         .push("http://127.0.0.1:41002".to_owned());
     prior.approved_at = "2026-08-01T12:00:00Z".to_owned();
@@ -285,7 +289,7 @@ component = {component:?}
 base-url = "{origin}/v1"
 egress-origin = "{origin}"
 model = "mock-model"
-api-key = "mock-key"
+api-key-env = "CHAP_TEST_OPENAI_API_KEY"
 "#,
             component = component.display().to_string(),
         ),

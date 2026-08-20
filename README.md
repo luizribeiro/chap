@@ -51,8 +51,9 @@ component = "./target/wasm32-wasip2/release/chap_openai_compatible.wasm"
 base-url = "http://127.0.0.1:8080/v1"
 egress-origin = "http://127.0.0.1:8080"
 model = "example-model"
-# Optional: the host reads this environment variable without storing its value
-# in chap.toml.
+# Names the environment variable holding the API key. The plugin declares an
+# env.read grant for it, so the access shows up in `chap grants review`; the
+# value itself never appears in chap.toml and is never read by the host.
 api-key-env = "OPENAI_API_KEY"
 ```
 
@@ -107,11 +108,14 @@ surrounding plugin entry.
 
 At startup, the host converts the complete settings table to one JSON object.
 Strings, numbers, booleans, arrays, and nested tables retain their corresponding
-JSON types. `api-key-env` is host-managed: CHAP removes it from the delivered
-object and, when `api-key` is not already present, reads the selected environment
-variable and inserts its value as `api-key`. Lockgate validates that object at
-prepare time against the schema derived from the plugin's `type Settings`. The
-plugin then reads the validated typed value through `Self::settings()`.
+JSON types. Secrets stay out of that object entirely: a setting such as
+`api-key-env` carries only the *name* of an environment variable, the plugin
+declares an `env.read` need scoped from it, and Lockgate populates the
+component's environment with just the granted variables at admission. The plugin
+reads the key with `std::env::var`; the host never touches the value. Lockgate
+validates the settings object at prepare time against the schema derived from
+the plugin's `type Settings`. The plugin then reads the validated typed value
+through `Self::settings()`.
 
 Rust plugins derive both deserialization and schema behavior from one strict
 settings type, as the built-in [OpenAI-compatible

@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
-    env, fs,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -57,23 +57,8 @@ impl ConfiguredPlugin {
         &self.component
     }
 
-    pub(crate) fn settings(&self, id: &str) -> Result<Value, String> {
-        let mut settings = self.settings.clone();
-        let api_key_env = settings.remove("api-key-env");
-        if !settings.contains_key("api-key")
-            && let Some(variable) = api_key_env
-        {
-            let variable = variable
-                .as_str()
-                .ok_or_else(|| format!("plugin `{id}` setting `api-key-env` must be a string"))?;
-            let api_key = env::var(variable).map_err(|error| {
-                format!(
-                    "failed to read API key for plugin `{id}` from environment variable `{variable}`: {error}"
-                )
-            })?;
-            settings.insert("api-key".to_owned(), toml::Value::String(api_key));
-        }
-        Ok(toml_to_json(toml::Value::Table(settings)))
+    pub(crate) fn settings(&self) -> Value {
+        toml_to_json(toml::Value::Table(self.settings.clone()))
     }
 }
 
@@ -121,7 +106,7 @@ model = "example-model"
             plugin.component(),
             Path::new("./plugins/openai-compatible.wasm")
         );
-        let settings = plugin.settings(id).unwrap();
+        let settings = plugin.settings();
         assert_eq!(settings["base-url"], "https://api.example.com/v1");
         assert_eq!(settings["egress-origin"], "https://api.example.com");
         assert_eq!(settings["model"], "example-model");
@@ -147,11 +132,7 @@ enabled = false
         )
         .unwrap();
 
-        let settings = config
-            .plugin("example")
-            .unwrap()
-            .settings("example")
-            .unwrap();
+        let settings = config.plugin("example").unwrap().settings();
         assert_eq!(
             settings,
             serde_json::json!({
@@ -184,11 +165,7 @@ dates = [1979-05-27, 1980-05-27]
         )
         .unwrap();
 
-        let settings = config
-            .plugin("example")
-            .unwrap()
-            .settings("example")
-            .unwrap();
+        let settings = config.plugin("example").unwrap().settings();
         assert_eq!(settings["date"], "1979-05-27");
         assert_eq!(settings["time"], "07:32:00");
         assert_eq!(settings["local-date-time"], "1979-05-27T07:32:00");
@@ -202,51 +179,20 @@ dates = [1979-05-27, 1980-05-27]
     }
 
     #[test]
-    fn resolves_api_key_env_and_removes_the_selector() {
+    fn passes_api_key_env_through_untouched() {
         let config: Config = toml::from_str(
             r#"
 [plugins.example]
 component = "example.wasm"
 
 [plugins.example.settings]
-api-key-env = "PATH"
+api-key-env = "EXAMPLE_API_KEY"
 "#,
         )
         .unwrap();
 
-        let settings = config
-            .plugin("example")
-            .unwrap()
-            .settings("example")
-            .unwrap();
-        assert!(
-            settings["api-key"]
-                .as_str()
-                .is_some_and(|key| !key.is_empty())
-        );
-        assert!(settings.get("api-key-env").is_none());
-    }
-
-    #[test]
-    fn explicit_api_key_precedes_and_removes_the_selector() {
-        let config: Config = toml::from_str(
-            r#"
-[plugins.example]
-component = "example.wasm"
-
-[plugins.example.settings]
-api-key = "configured"
-api-key-env = 42
-"#,
-        )
-        .unwrap();
-
-        let settings = config
-            .plugin("example")
-            .unwrap()
-            .settings("example")
-            .unwrap();
-        assert_eq!(settings["api-key"], "configured");
-        assert!(settings.get("api-key-env").is_none());
+        let settings = config.plugin("example").unwrap().settings();
+        assert_eq!(settings["api-key-env"], "EXAMPLE_API_KEY");
+        assert!(settings.get("api-key").is_none());
     }
 }

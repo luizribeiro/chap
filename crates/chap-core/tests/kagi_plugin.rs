@@ -18,7 +18,7 @@ async fn migrated_kagi_component_admits_and_classifies_as_tools_only() {
 component = {component:?}
 
 [plugins.kagi.settings]
-api-key = "test-key"
+api-key-env = "CHAP_TEST_KAGI_API_KEY"
 "#,
             component = component.display().to_string(),
         ),

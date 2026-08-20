@@ -1,2 +1,8 @@
 [alias]
 test-all = "run --quiet -p chap-test-all --"
+
+# Test-only key material for the integration suites; lockgate populates these
+# into component environments via their env.read grants.
+[env]
+CHAP_TEST_OPENAI_API_KEY = "mock-key"
+CHAP_TEST_KAGI_API_KEY = "test-key"

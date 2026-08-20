@@ -1,6 +1,6 @@
 use chap::tools::ToolDefinition;
 use chap_plugin as chap;
-use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, Tools, net};
+use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, Tools, env, net};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -25,8 +25,10 @@ impl Plugin for Kagi {
     const LICENSE: MetadataSource = MetadataSource::Absent;
     const REPOSITORY: MetadataSource = MetadataSource::Absent;
     const HOMEPAGE: MetadataSource = MetadataSource::Absent;
-    const NEEDS: Needs =
-        Needs::required(&[net::EGRESS.need(&[ScopeRef::literal("https://kagi.com")])]);
+    const NEEDS: Needs = Needs::required(&[
+        net::EGRESS.need(&[ScopeRef::literal("https://kagi.com")]),
+        env::READ.need(&[ScopeRef::setting("/api-key-env")]),
+    ]);
     type Settings = Settings;
 
     fn new(settings: Self::Settings) -> Self {
@@ -103,13 +105,19 @@ impl Tools for Kagi {
             _ => return Err(format!("tool `{name}` is not provided by the Kagi plugin")),
         };
         let url = format!("{API_BASE_URL}{path}");
+        let api_key = std::env::var(&self.settings.api_key_env).map_err(|_| {
+            format!(
+                "environment variable `{}` is not available to the Kagi plugin",
+                self.settings.api_key_env
+            )
+        })?;
         let response = chap::http::Client::with_max_response_bytes(8 * 1024 * 1024)
             .post(&url)
             .header("accept", "application/json")
             .map_err(|error| error.to_string())?
             .header("content-type", "application/json")
             .map_err(|error| error.to_string())?
-            .bearer(Some(&self.settings.api_key))
+            .bearer(Some(&api_key))
             .body(request)
             .send()
             .await
@@ -151,7 +159,7 @@ fn parse_arguments<T: for<'de> Deserialize<'de>>(tool: &str, arguments: &str) ->
 
 #[derive(chap::Settings)]
 struct Settings {
-    api_key: String,
+    api_key_env: String,
 }
 
 #[derive(Deserialize)]
@@ -392,17 +400,17 @@ mod tests {
 
     #[test]
     fn deserializes_typed_settings() {
-        let settings: Settings = serde_json::from_str(r#"{"api-key":"key"}"#).unwrap();
+        let settings: Settings = serde_json::from_str(r#"{"api-key-env":"KAGI_API_KEY"}"#).unwrap();
 
-        assert!(!settings.api_key.is_empty());
+        assert_eq!(settings.api_key_env, "KAGI_API_KEY");
     }
 
     #[test]
     fn rejects_invalid_settings() {
         for json in [
             "{}",
-            r#"{"api-key":42}"#,
-            r#"{"api-key":"key","extra":true}"#,
+            r#"{"api-key-env":42}"#,
+            r#"{"api-key-env":"KAGI_API_KEY","extra":true}"#,
         ] {
             assert!(serde_json::from_str::<Settings>(json).is_err());
         }
@@ -420,16 +428,16 @@ mod tests {
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["unevaluatedProperties"], false);
         assert_eq!(schema["properties"].as_object().unwrap().len(), 1);
-        assert_eq!(schema["properties"]["api-key"]["type"], "string");
-        assert_eq!(schema["properties"]["api-key"]["pattern"], r"\S");
+        assert_eq!(schema["properties"]["api-key-env"]["type"], "string");
+        assert_eq!(schema["properties"]["api-key-env"]["pattern"], r"\S");
         assert!(schema["properties"].get("settings").is_none());
-        assert_eq!(schema["required"], serde_json::json!(["api-key"]));
+        assert_eq!(schema["required"], serde_json::json!(["api-key-env"]));
     }
 
     #[test]
     fn exposes_search_and_fetch_tools() {
         let plugin = <Kagi as Plugin>::new(Settings {
-            api_key: "key".to_owned(),
+            api_key_env: "KAGI_API_KEY".to_owned(),
         });
         let definitions = <Kagi as Tools>::definitions(&plugin).unwrap();
 

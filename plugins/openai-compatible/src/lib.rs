@@ -3,7 +3,7 @@ use chap::provider::{
     ToolCall as ProviderToolCall, ToolDefinition as ProviderTool,
 };
 use chap_plugin as chap;
-use chap_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, net};
+use chap_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, env, net};
 use serde::{Deserialize, Serialize};
 
 struct OpenAiCompatible {
@@ -18,8 +18,10 @@ impl Plugin for OpenAiCompatible {
     const LICENSE: MetadataSource = MetadataSource::Absent;
     const REPOSITORY: MetadataSource = MetadataSource::Absent;
     const HOMEPAGE: MetadataSource = MetadataSource::Absent;
-    const NEEDS: Needs =
-        Needs::required(&[net::EGRESS.need(&[ScopeRef::setting("/egress-origin")])]);
+    const NEEDS: Needs = Needs::required(&[
+        net::EGRESS.need(&[ScopeRef::setting("/egress-origin")]),
+        env::READ.need(&[ScopeRef::setting("/api-key-env")]),
+    ]);
     type Settings = Settings;
 
     fn new(settings: Self::Settings) -> Self {
@@ -50,16 +52,17 @@ impl Provider for OpenAiCompatible {
             "{}/chat/completions",
             settings.base_url.trim_end_matches('/')
         );
+        let api_key = std::env::var(&settings.api_key_env).map_err(|_| {
+            format!(
+                "environment variable `{}` is not available to the plugin",
+                settings.api_key_env
+            )
+        })?;
         let response = chap::http::Client::new()
             .post(&url)
             .header("content-type", "application/json")
             .map_err(|error| error.to_string())?
-            .bearer(
-                settings
-                    .api_key
-                    .as_deref()
-                    .filter(|api_key| !api_key.is_empty()),
-            )
+            .bearer(Some(api_key.as_str()).filter(|api_key| !api_key.is_empty()))
             .body(request.into_bytes())
             .send()
             .await
@@ -75,8 +78,7 @@ struct Settings {
     base_url: String,
     egress_origin: String,
     model: String,
-    #[settings(optional)]
-    api_key: Option<String>,
+    api_key_env: String,
 }
 
 fn parse_response(status: u16, body: &str) -> Result<Completion, String> {
@@ -298,14 +300,14 @@ mod tests {
     #[test]
     fn deserializes_typed_settings() {
         let settings: Settings = serde_json::from_str(
-            r#"{"base-url":"https://example.com/v1","egress-origin":"https://example.com","model":"example","api-key":"key"}"#,
+            r#"{"base-url":"https://example.com/v1","egress-origin":"https://example.com","model":"example","api-key-env":"OPENAI_API_KEY"}"#,
         )
         .unwrap();
 
         assert_eq!(settings.base_url, "https://example.com/v1");
         assert_eq!(settings.egress_origin, "https://example.com");
         assert_eq!(settings.model, "example");
-        assert!(settings.api_key.is_some());
+        assert_eq!(settings.api_key_env, "OPENAI_API_KEY");
     }
 
     #[test]
