@@ -120,22 +120,7 @@ impl AgentBuilder {
         let bytes = Self::plugin_bytes(&self.config, id, plugin)?;
         let inspection = lockgate::inspect(&bytes)
             .map_err(|error| format!("failed to inspect plugin `{id}`: {error}"))?;
-        let mut roles = Vec::new();
-        if inspection
-            .exported_interfaces()
-            .iter()
-            .any(|interface| interface == <bindings::provider::Role as Role>::INTERFACE)
-        {
-            roles.push("provider");
-        }
-        if inspection
-            .exported_interfaces()
-            .iter()
-            .any(|interface| interface == <bindings::tools::Role as Role>::INTERFACE)
-        {
-            roles.push("tool");
-        }
-        Ok(roles)
+        Ok(supported_roles(inspection.exported_interfaces()))
     }
 
     pub fn tool<T>(mut self, tool: T) -> Result<Self, String>
@@ -272,7 +257,7 @@ impl AgentBuilder {
         let builder = resources.builder.take().expect("uninitialized host");
         resources.host = Some(Arc::new(builder.finish()));
         let lockgate = resources.host.as_ref().expect("initialized host");
-        let plugins = Self::classify_plugins(lockgate, handles, config)?;
+        let plugins = Self::classify_plugins(lockgate, handles)?;
         for (id, plugin) in &plugins {
             if !plugin.tools {
                 continue;
@@ -292,7 +277,7 @@ impl AgentBuilder {
         builder: &mut HostBuilder<()>,
         config: &Config,
         consent: &ConsentStore,
-    ) -> Result<(BTreeMap<String, AdmittedPlugin>, BTreeMap<String, String>), String> {
+    ) -> Result<(BTreeMap<String, PluginHandle>, BTreeMap<String, String>), String> {
         let mut plugins = BTreeMap::new();
         let mut plugin_errors = BTreeMap::new();
 
@@ -332,7 +317,6 @@ impl AgentBuilder {
                 return Ok(PluginLoad::Refused(error));
             }
         };
-        let exported_interfaces = prepared.inspection().exported_interfaces().to_vec();
         builder
             .admit(
                 prepared,
@@ -341,12 +325,7 @@ impl AgentBuilder {
                 InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL),
             )
             .await
-            .map(|handle| {
-                PluginLoad::Admitted(AdmittedPlugin {
-                    handle,
-                    exported_interfaces,
-                })
-            })
+            .map(PluginLoad::Admitted)
             .map_err(|error| Self::load_error(id, &path, error))
     }
 
@@ -359,7 +338,7 @@ impl AgentBuilder {
         let path = config.component_path(plugin);
         let bytes = Self::plugin_bytes(config, id, plugin)?;
         let settings = plugin.settings(id)?;
-        builder
+        let prepared = builder
             .prepare(
                 id,
                 &bytes,
@@ -369,7 +348,9 @@ impl AgentBuilder {
                 },
             )
             .await
-            .map_err(|error| Self::load_error(id, &path, error))
+            .map_err(|error| Self::load_error(id, &path, error))?;
+        Self::validate_supported_role(id, &path, prepared.inspection().exported_interfaces())?;
+        Ok(prepared)
     }
 
     fn consent_error(id: &str, path: &Path, required: ConsentRequired) -> String {
@@ -399,6 +380,22 @@ impl AgentBuilder {
         )
     }
 
+    fn validate_supported_role(
+        id: &str,
+        path: &Path,
+        exported_interfaces: &[String],
+    ) -> Result<(), String> {
+        if !supported_roles(exported_interfaces).is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "plugin `{id}` from `{}` does not implement a supported role; expected an export from the `{}` package, but the component exports {}",
+            path.display(),
+            role_package(<bindings::provider::Role as Role>::INTERFACE),
+            describe_exports(exported_interfaces),
+        ))
+    }
+
     fn plugin_bytes(
         config: &Config,
         id: &str,
@@ -415,29 +412,13 @@ impl AgentBuilder {
 
     fn classify_plugins(
         host: &InnerHost,
-        admitted: BTreeMap<String, AdmittedPlugin>,
-        config: &Config,
+        handles: BTreeMap<String, PluginHandle>,
     ) -> Result<BTreeMap<String, LoadedPlugin>, String> {
-        admitted
+        handles
             .into_iter()
-            .map(|(id, plugin)| {
-                let AdmittedPlugin {
-                    handle,
-                    exported_interfaces,
-                } = plugin;
+            .map(|(id, handle)| {
                 let provider = Self::exports_role::<bindings::provider::Role>(host, &handle, &id)?;
                 let tools = Self::exports_role::<bindings::tools::Role>(host, &handle, &id)?;
-                if !provider && !tools {
-                    let plugin = config
-                        .plugin(&id)
-                        .expect("loaded plugin must have a matching configuration");
-                    return Err(format!(
-                        "plugin `{id}` from `{}` does not implement a supported role; expected an export from the `{}` package, but the component exports {}",
-                        config.component_path(plugin).display(),
-                        role_package(<bindings::provider::Role as Role>::INTERFACE),
-                        describe_exports(&exported_interfaces),
-                    ));
-                }
                 Ok((
                     id,
                     LoadedPlugin {
@@ -463,6 +444,23 @@ impl AgentBuilder {
             )),
         }
     }
+}
+
+fn supported_roles(interfaces: &[String]) -> Vec<&'static str> {
+    let mut roles = Vec::new();
+    if interfaces
+        .iter()
+        .any(|interface| interface == <bindings::provider::Role as Role>::INTERFACE)
+    {
+        roles.push("provider");
+    }
+    if interfaces
+        .iter()
+        .any(|interface| interface == <bindings::tools::Role as Role>::INTERFACE)
+    {
+        roles.push("tool");
+    }
+    roles
 }
 
 fn role_package(interface: &str) -> String {
@@ -526,13 +524,8 @@ impl Agent {
 
 #[allow(clippy::large_enum_variant)]
 enum PluginLoad {
-    Admitted(AdmittedPlugin),
+    Admitted(PluginHandle),
     Refused(String),
-}
-
-struct AdmittedPlugin {
-    handle: PluginHandle,
-    exported_interfaces: Vec<String>,
 }
 
 impl AgentInner {

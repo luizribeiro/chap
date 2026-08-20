@@ -8,7 +8,11 @@ use super::{
 };
 use crate::{SessionOptions, Tool, ToolDefinition};
 use lockgate::{ConsentRequired, DriftReport, Role};
-use std::{fs, sync::mpsc};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::mpsc,
+};
 
 #[tokio::test]
 async fn approved_matching_manifest_admits_a_configured_provider() {
@@ -395,6 +399,43 @@ component = "missing.wasm"
 
 #[tokio::test]
 async fn reports_the_component_path_for_an_unsupported_plugin_role() {
+    let (directory, component, builder) = unsupported_plugin_builder();
+    let error = match builder.start().await {
+        Ok(_) => panic!("a plugin without a supported role should be rejected"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error, unsupported_role_error(&component));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn reviewing_rejects_a_plugin_without_a_supported_role() {
+    let (directory, component, builder) = unsupported_plugin_builder();
+
+    let error = match builder.review_plugin("example").await {
+        Ok(_) => panic!("reviewing a plugin without a supported role should fail"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error, unsupported_role_error(&component));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn approving_rejects_a_plugin_without_a_supported_role() {
+    let (directory, component, builder) = unsupported_plugin_builder();
+
+    let error = match builder.approve_plugin("example").await {
+        Ok(_) => panic!("approving a plugin without a supported role should fail"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error, unsupported_role_error(&component));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+fn unsupported_plugin_builder() -> (PathBuf, PathBuf, AgentBuilder) {
     let directory = test_directory();
     let component = directory.join("unsupported.wasm");
     fs::write(&component, unsupported_component("example.unsupported")).unwrap();
@@ -407,23 +448,16 @@ component = "unsupported.wasm"
 "#,
     )
     .unwrap();
-
     let builder = AgentBuilder::load(&config_path).unwrap();
-    builder.approve_plugin("example").await.unwrap();
-    let error = match builder.start().await {
-        Ok(_) => panic!("a plugin without a supported role should be rejected"),
-        Err(error) => error,
-    };
+    (directory, component, builder)
+}
 
-    assert_eq!(
-        error,
-        format!(
-            "plugin `example` from `{}` does not implement a supported role; expected an export from the `{}` package, but the component exports `lockgate:config/schema`",
-            component.display(),
-            super::super::role_package(<super::super::bindings::provider::Role as Role>::INTERFACE),
-        )
-    );
-    fs::remove_dir_all(directory).unwrap();
+fn unsupported_role_error(component: &Path) -> String {
+    format!(
+        "plugin `example` from `{}` does not implement a supported role; expected an export from the `{}` package, but the component exports `lockgate:config/schema`",
+        component.display(),
+        super::super::role_package(<super::super::bindings::provider::Role as Role>::INTERFACE),
+    )
 }
 
 struct DropProbe {
