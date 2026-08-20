@@ -18,5 +18,5 @@ pub use lockgate_plugin::{
 };
 
 pub use cap::net;
-pub use export::{provider, tools};
+pub use export::{Provider, Tools, provider, tools};
 pub use http_reexport::http;
