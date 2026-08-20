@@ -259,6 +259,36 @@ component = "missing.wasm"
 }
 
 #[tokio::test]
+async fn reports_the_component_path_for_an_unsupported_plugin_role() {
+    let directory = test_directory();
+    let component = directory.join("unsupported.wasm");
+    fs::write(&component, unsupported_component("example.unsupported")).unwrap();
+    let config_path = directory.join("sage.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins.example]
+component = "unsupported.wasm"
+"#,
+    )
+    .unwrap();
+
+    let error = match AgentBuilder::load(&config_path).unwrap().start().await {
+        Ok(_) => panic!("a plugin without a supported role should be rejected"),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        error,
+        format!(
+            "plugin `example` from `{}` does not implement a supported role",
+            component.display()
+        )
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
 async fn resumes_a_turn_after_executing_a_tool_call() {
     let manager = SessionManager::new();
     let state = manager
@@ -807,6 +837,44 @@ fn tool_component(id: &str) -> Vec<u8> {
 
 fn tool_component_with_schema(id: &str, schema: &str) -> Vec<u8> {
     plugin_component(id, "tool-plugin", Some(schema))
+}
+
+fn unsupported_component(id: &str) -> Vec<u8> {
+    let mut resolve = Resolve::new();
+    resolve
+        .push_str(
+            "lockgate-config.wit",
+            r#"
+package lockgate:config;
+
+interface schema {
+  settings-schema: func() -> string;
+}
+"#,
+        )
+        .unwrap();
+    let package = resolve
+        .push_str(
+            "fixture.wit",
+            r#"
+package sage:test;
+
+world fixture {
+  export lockgate:config/schema;
+}
+"#,
+        )
+        .unwrap();
+    let world = resolve.packages[package].worlds["fixture"];
+    let module = dummy_module(&resolve, world, ManglingAndAbi::Standard32);
+    let mut module = module_with_schema(&module, permissive_schema(), false);
+    embed_component_metadata(&mut module, &resolve, world, StringEncoding::UTF8).unwrap();
+    let bytes = ComponentEncoder::default()
+        .module(&module)
+        .unwrap()
+        .encode()
+        .unwrap();
+    with_plugin_sections(bytes, id)
 }
 
 fn plugin_component(id: &str, world_name: &str, schema: Option<&str>) -> Vec<u8> {

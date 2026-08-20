@@ -177,7 +177,7 @@ impl AgentBuilder {
         let builder = resources.builder.take().expect("uninitialized host");
         resources.host = Some(Arc::new(builder.finish()));
         let lockgate = resources.host.as_ref().expect("initialized host");
-        let plugins = Self::classify_plugins(lockgate, handles)?;
+        let plugins = Self::classify_plugins(lockgate, handles, config)?;
         for (id, plugin) in &plugins {
             if !plugin.tools {
                 continue;
@@ -263,6 +263,7 @@ impl AgentBuilder {
     fn classify_plugins(
         host: &InnerHost,
         handles: BTreeMap<String, PluginHandle>,
+        config: &Config,
     ) -> Result<BTreeMap<String, LoadedPlugin>, String> {
         handles
             .into_iter()
@@ -270,7 +271,13 @@ impl AgentBuilder {
                 let provider = Self::exports_role::<bindings::provider::Role>(host, &handle, &id)?;
                 let tools = Self::exports_role::<bindings::tools::Role>(host, &handle, &id)?;
                 if !provider && !tools {
-                    return Err(format!("plugin `{id}` does not implement a supported role"));
+                    let plugin = config
+                        .plugin(&id)
+                        .expect("loaded plugin must have a matching configuration");
+                    return Err(format!(
+                        "plugin `{id}` from `{}` does not implement a supported role",
+                        config.component_path(plugin).display()
+                    ));
                 }
                 Ok((
                     id,
