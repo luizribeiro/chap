@@ -115,9 +115,28 @@ impl Tools for Kagi {
                 .body(request)
                 .send()
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| match error {
+                    sage::http::Error::InvalidHeaderValue(_) => {
+                        "Kagi API key contains invalid header characters".to_owned()
+                    }
+                    sage::http::Error::Request(error) => {
+                        format!("Kagi HTTP request failed: {error}")
+                    }
+                    sage::http::Error::Body(error) => {
+                        format!("failed to read Kagi response: {error}")
+                    }
+                    sage::http::Error::ResponseTooLarge { limit } => {
+                        format!("Kagi response exceeded the {limit}-byte limit")
+                    }
+                    error => error.to_string(),
+                })?;
             let status = response.status();
-            let body = response.text().map_err(|error| error.to_string())?;
+            let body = response.text().map_err(|error| match error {
+                sage::http::Error::Utf8(error) => {
+                    format!("Kagi response was not valid UTF-8: {error}")
+                }
+                error => error.to_string(),
+            })?;
             Ok((status, body))
         };
         #[cfg(not(target_arch = "wasm32"))]
