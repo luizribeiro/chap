@@ -50,32 +50,22 @@ impl Provider for OpenAiCompatible {
             "{}/chat/completions",
             settings.base_url.trim_end_matches('/')
         );
-        #[cfg(target_arch = "wasm32")]
-        let transport: Result<(u16, String), String> = {
-            let response = sage::http::Client::new()
-                .post(&url)
-                .header("content-type", "application/json")
-                .map_err(|error| error.to_string())?
-                .bearer(
-                    settings
-                        .api_key
-                        .as_deref()
-                        .filter(|api_key| !api_key.is_empty()),
-                )
-                .body(request.into_bytes())
-                .send()
-                .await
-                .map_err(|error| error.to_string())?;
-            let status = response.status();
-            let body = response.text().map_err(|error| error.to_string())?;
-            Ok((status, body))
-        };
-        #[cfg(not(target_arch = "wasm32"))]
-        let transport: Result<(u16, String), String> = {
-            let _ = (url, request, &settings.api_key);
-            Err("HTTP transport is only available to WebAssembly plugins".to_owned())
-        };
-        let (status, body) = transport?;
+        let response = sage::http::Client::new()
+            .post(&url)
+            .header("content-type", "application/json")
+            .map_err(|error| error.to_string())?
+            .bearer(
+                settings
+                    .api_key
+                    .as_deref()
+                    .filter(|api_key| !api_key.is_empty()),
+            )
+            .body(request.into_bytes())
+            .send()
+            .await
+            .map_err(|error| error.to_string())?;
+        let status = response.status();
+        let body = response.text().map_err(|error| error.to_string())?;
         parse_response(status, &body)
     }
 }

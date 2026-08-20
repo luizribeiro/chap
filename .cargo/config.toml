@@ -1,0 +1,2 @@
+[alias]
+test-all = "run --quiet -p sage-test-all --"

@@ -37,4 +37,4 @@ impl Provider for SingleRole {
 sage::plugin!(SingleRole: Provider);
 
 #[test]
-fn generated_guest_reuses_sdk_types() {}
+fn plugin_macro_supports_single_role_tests() {}

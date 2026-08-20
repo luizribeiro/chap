@@ -7,6 +7,7 @@ pub(crate) struct Role {
     pub(crate) interface: &'static str,
     pub(crate) wit: &'static str,
     pub(crate) bridge: fn(&Ident) -> TokenStream,
+    pub(crate) test_reference: fn(&Ident) -> TokenStream,
 }
 
 const PROVIDER_WIT: &str = include_str!("../../sage-plugin/wit/provider.wit");
@@ -18,12 +19,14 @@ const ROLES: &[Role] = &[
         interface: "provider",
         wit: PROVIDER_WIT,
         bridge: provider_bridge,
+        test_reference: provider_test_reference,
     },
     Role {
         rust_name: "Tools",
         interface: "tools",
         wit: TOOLS_WIT,
         bridge: tools_bridge,
+        test_reference: tools_test_reference,
     },
 ];
 
@@ -50,6 +53,12 @@ fn provider_bridge(plugin: &Ident) -> TokenStream {
                 <#plugin as ::sage_plugin::Provider>::complete(&object, request).await
             }
         }
+    }
+}
+
+fn provider_test_reference(plugin: &Ident) -> TokenStream {
+    quote! {
+        let _ = <#plugin as ::sage_plugin::Provider>::complete;
     }
 }
 
@@ -80,5 +89,12 @@ fn tools_bridge(plugin: &Ident) -> TokenStream {
                 <#plugin as ::sage_plugin::Tools>::execute(&object, name, arguments).await
             }
         }
+    }
+}
+
+fn tools_test_reference(plugin: &Ident) -> TokenStream {
+    quote! {
+        let _ = <#plugin as ::sage_plugin::Tools>::definitions;
+        let _ = <#plugin as ::sage_plugin::Tools>::execute;
     }
 }

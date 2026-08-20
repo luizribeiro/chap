@@ -58,6 +58,17 @@ model = "example-model"
 api-key-env = "OPENAI_API_KEY"
 ```
 
+Each built-in plugin carries its own Cargo configuration and defaults to the
+`wasm32-wasip2` target. The development shell provides Wasmtime as Cargo's test
+runner, so `cargo test`, `cargo check`, and `cargo clippy` work directly from a
+plugin directory without target flags.
+
+From the workspace root, run the complete native and WASI test suites with:
+
+```console
+cargo test-all
+```
+
 The OpenAI-compatible plugin declares network egress through Lockgate and
 resolves its exact origin from `egress-origin`. The scheme and effective port
 are part of the origin. Kagi declares the literal origin `https://kagi.com` and

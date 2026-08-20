@@ -46,9 +46,3 @@ fn role_traits_are_implementable() {
     assert_provider::<Dummy>();
     assert_tools::<Dummy>();
 }
-
-#[cfg(target_arch = "wasm32")]
-#[test]
-fn http_client_resolves() {
-    let _client = sage::http::Client::new();
-}

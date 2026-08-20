@@ -4,6 +4,7 @@ members = [
     "crates/sage-core",
     "crates/sage-plugin",
     "crates/sage-plugin-macros",
+    "crates/sage-test-all",
     "crates/sage-plugin/tests/fixtures/multi-role",
     "crates/sage-plugin/tests/fixtures/provider",
     "plugins/kagi",

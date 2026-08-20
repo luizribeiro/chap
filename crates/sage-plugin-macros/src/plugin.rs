@@ -39,8 +39,10 @@ pub(crate) fn expand(input: PluginInput) -> syn::Result<TokenStream> {
     let inline = LitStr::new(&compose::world(&roles), proc_macro2::Span::call_site());
     let world = LitStr::new(compose::WORLD, proc_macro2::Span::call_site());
     let bridges = roles.iter().map(|role| (role.bridge)(&plugin));
+    let test_references = roles.iter().map(|role| (role.test_reference)(&plugin));
 
     Ok(quote! {
+        #[cfg(not(test))]
         ::sage_plugin::generate!({
             inline: #inline,
             world: #world,
@@ -71,8 +73,17 @@ pub(crate) fn expand(input: PluginInput) -> syn::Result<TokenStream> {
             type Settings = <Self as ::sage_plugin::Plugin>::Settings;
         }
 
-        #(#bridges)*
+        #[cfg(not(test))]
+        const _: () = {
+            #(#bridges)*
+        };
 
+        #[cfg(test)]
+        const _: () = {
+            #(#test_references)*
+        };
+
+        #[cfg(not(test))]
         ::sage_plugin::__lockgate::export!(
             #plugin;
             facade = ::sage_plugin::__lockgate

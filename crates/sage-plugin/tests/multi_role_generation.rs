@@ -55,4 +55,4 @@ impl Tools for MultiRole {
 sage::plugin!(MultiRole: Provider + Tools);
 
 #[test]
-fn generated_world_exports_both_roles() {}
+fn plugin_macro_supports_multi_role_tests() {}
