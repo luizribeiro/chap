@@ -97,7 +97,7 @@ component = "provider.wasm"
     assert_eq!(errors[0].0, "unapproved");
     assert!(errors[0].1.contains("requires approval"), "{}", errors[0].1);
     assert!(
-        errors[0].1.contains("sage grants review unapproved"),
+        errors[0].1.contains("chap grants review unapproved"),
         "{}",
         errors[0].1
     );
@@ -199,7 +199,7 @@ component = "provider.wasm"
         error.contains("reported a changed permission manifest"),
         "{error}"
     );
-    assert!(error.contains("sage grants review example"), "{error}");
+    assert!(error.contains("chap grants review example"), "{error}");
     fs::remove_dir_all(directory).unwrap();
 }
 

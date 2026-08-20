@@ -369,7 +369,7 @@ impl AgentBuilder {
     fn consent_error(id: &str, path: &Path, required: ConsentRequired) -> String {
         match required {
             ConsentRequired::FirstRun { .. } => format!(
-                "plugin `{id}` from `{}` requires approval before admission; run `sage grants review {id}` and then `sage grants approve {id}`",
+                "plugin `{id}` from `{}` requires approval before admission; run `chap grants review {id}` and then `chap grants approve {id}`",
                 path.display()
             ),
             ConsentRequired::Drift { drift, .. } => {
@@ -379,7 +379,7 @@ impl AgentBuilder {
                     "reported a changed permission manifest"
                 };
                 format!(
-                    "plugin `{id}` from `{}` {change} and requires renewed approval before admission; run `sage grants review {id}` and then `sage grants approve {id}`",
+                    "plugin `{id}` from `{}` {change} and requires renewed approval before admission; run `chap grants review {id}` and then `chap grants approve {id}`",
                     path.display()
                 )
             }

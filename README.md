@@ -8,7 +8,7 @@ by Lockgate.
 
 - `crates/sage-core` owns configuration, plugin loading, and the headless agent
   runtime.
-- `crates/sage-cli` builds the `sage` executable and owns command-line and
+- `crates/sage-cli` builds the `chap` executable and owns command-line and
   terminal interaction.
 - `crates/sage-plugin` is the thin plugin-author facade over Lockgate and owns
   the shared `chap:agent` WIT package.

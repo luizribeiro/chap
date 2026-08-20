@@ -173,7 +173,7 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
         errors[0].1
     );
     assert!(
-        errors[0].1.contains("sage grants review openai"),
+        errors[0].1.contains("chap grants review openai"),
         "{}",
         errors[0].1
     );

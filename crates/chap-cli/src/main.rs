@@ -333,14 +333,14 @@ mod tests {
 
     #[test]
     fn starts_the_tui_when_no_subcommand_is_given() {
-        let cli = Cli::try_parse_from(["sage"]).unwrap();
+        let cli = Cli::try_parse_from(["chap"]).unwrap();
 
         assert!(cli.command.is_none());
     }
 
     #[test]
     fn still_parses_plugin_commands() {
-        let cli = Cli::try_parse_from(["sage", "plugins", "list"]).unwrap();
+        let cli = Cli::try_parse_from(["chap", "plugins", "list"]).unwrap();
 
         assert!(matches!(
             cli.command,
@@ -352,9 +352,9 @@ mod tests {
 
     #[test]
     fn parses_grants_review_approve_and_deny_commands() {
-        let review = Cli::try_parse_from(["sage", "grants", "review"]).unwrap();
-        let approve = Cli::try_parse_from(["sage", "grants", "approve", "openai"]).unwrap();
-        let deny = Cli::try_parse_from(["sage", "grants", "deny", "openai"]).unwrap();
+        let review = Cli::try_parse_from(["chap", "grants", "review"]).unwrap();
+        let approve = Cli::try_parse_from(["chap", "grants", "approve", "openai"]).unwrap();
+        let deny = Cli::try_parse_from(["chap", "grants", "deny", "openai"]).unwrap();
 
         assert!(matches!(
             review.command,
