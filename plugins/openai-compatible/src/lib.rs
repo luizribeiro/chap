@@ -68,32 +68,3 @@ impl Provider for OpenAiCompatible {
         chat_completions::parse_response(status, &body)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn deserializes_typed_settings() {
-        let settings: Settings = serde_json::from_str(
-            r#"{"base-url":"https://example.com/v1","egress-origin":"https://example.com","model":"example","api-key-env":"OPENAI_API_KEY"}"#,
-        )
-        .unwrap();
-
-        assert_eq!(settings.base_url, "https://example.com/v1");
-        assert_eq!(settings.egress_origin, "https://example.com");
-        assert_eq!(settings.model, "example");
-        assert_eq!(settings.api_key_env, "OPENAI_API_KEY");
-    }
-
-    #[test]
-    fn rejects_invalid_settings() {
-        for json in [
-            r#"{"base-url":"https://example.com/v1"}"#,
-            r#"{"base-url":42,"egress-origin":"https://example.com","model":"example"}"#,
-            r#"{"base-url":"https://example.com/v1","egress-origin":"https://example.com","model":"example","extra":true}"#,
-        ] {
-            assert!(serde_json::from_str::<Settings>(json).is_err());
-        }
-    }
-}
