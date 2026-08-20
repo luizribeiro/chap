@@ -69,8 +69,26 @@ impl Plugin {
             })?;
             settings.insert("api-key".to_owned(), toml::Value::String(api_key));
         }
-        serde_json::to_value(settings)
-            .map_err(|error| format!("failed to encode settings for plugin `{id}`: {error}"))
+        Ok(toml_to_json(toml::Value::Table(settings)))
+    }
+}
+
+fn toml_to_json(value: toml::Value) -> Value {
+    match value {
+        toml::Value::String(value) => Value::String(value),
+        toml::Value::Integer(value) => Value::Number(value.into()),
+        toml::Value::Float(value) => serde_json::Number::from_f64(value)
+            .map(Value::Number)
+            .unwrap_or_else(|| Value::String(toml::Value::Float(value).to_string())),
+        toml::Value::Boolean(value) => Value::Bool(value),
+        toml::Value::Datetime(value) => Value::String(value.to_string()),
+        toml::Value::Array(values) => Value::Array(values.into_iter().map(toml_to_json).collect()),
+        toml::Value::Table(values) => Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| (key, toml_to_json(value)))
+                .collect(),
+        ),
     }
 }
 
@@ -140,6 +158,42 @@ enabled = false
                 "array": ["one", "two"],
                 "nested": {"enabled": false}
             })
+        );
+    }
+
+    #[test]
+    fn converts_toml_only_values_to_plain_json_strings() {
+        let config: Config = toml::from_str(
+            r#"
+[plugins.example]
+component = "example.wasm"
+
+[plugins.example.settings]
+date = 1979-05-27
+time = 07:32:00
+local-date-time = 1979-05-27T07:32:00
+offset-date-time = 1979-05-27T07:32:00Z
+not-a-number = nan
+infinity = inf
+dates = [1979-05-27, 1980-05-27]
+"#,
+        )
+        .unwrap();
+
+        let settings = config
+            .plugin("example")
+            .unwrap()
+            .settings("example")
+            .unwrap();
+        assert_eq!(settings["date"], "1979-05-27");
+        assert_eq!(settings["time"], "07:32:00");
+        assert_eq!(settings["local-date-time"], "1979-05-27T07:32:00");
+        assert_eq!(settings["offset-date-time"], "1979-05-27T07:32:00Z");
+        assert_eq!(settings["not-a-number"], "nan");
+        assert_eq!(settings["infinity"], "inf");
+        assert_eq!(
+            settings["dates"],
+            serde_json::json!(["1979-05-27", "1980-05-27"])
         );
     }
 
