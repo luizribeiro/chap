@@ -19,6 +19,54 @@ const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
 type InnerHost = Host<()>;
+type StartDropResources = (
+    Option<ToolRegistry>,
+    Option<Arc<InnerHost>>,
+    Option<HostBuilder<()>>,
+);
+
+struct StartResources {
+    tools: Option<ToolRegistry>,
+    host: Option<Arc<InnerHost>>,
+    builder: Option<HostBuilder<()>>,
+}
+
+impl StartResources {
+    fn new(tools: ToolRegistry, builder: HostBuilder<()>) -> Self {
+        Self {
+            tools: Some(tools),
+            host: None,
+            builder: Some(builder),
+        }
+    }
+
+    fn take_drop_resources(&mut self) -> StartDropResources {
+        (self.tools.take(), self.host.take(), self.builder.take())
+    }
+
+    async fn cleanup(mut self) -> Result<(), String> {
+        let resources = self.take_drop_resources();
+        tokio::task::spawn_blocking(move || drop(resources))
+            .await
+            .map_err(|error| format!("failed to clean up Lockgate host: {error}"))
+    }
+}
+
+impl Drop for StartResources {
+    fn drop(&mut self) {
+        let resources = self.take_drop_resources();
+        if resources.0.is_none() && resources.1.is_none() && resources.2.is_none() {
+            return;
+        }
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let _ = runtime.spawn_blocking(move || drop(resources));
+        } else {
+            let _ = std::thread::Builder::new()
+                .name("sage-lockgate-drop".to_owned())
+                .spawn(move || drop(resources));
+        }
+    }
+}
 
 #[derive(Clone)]
 struct LoadedPlugin {
@@ -92,20 +140,21 @@ impl AgentBuilder {
     }
 
     pub async fn start(self) -> Result<Agent, String> {
-        let mut builder = HostBuilder::new(())
+        let Self { config, tools } = self;
+        let builder = HostBuilder::new(())
             .map_err(|error| format!("failed to create Lockgate host: {error}"))?;
-        let handles = Self::load_plugins(&mut builder, &self.config).await?;
-        let lockgate = Arc::new(builder.finish());
-        let plugins = Self::classify_plugins(&lockgate, handles)?;
-        let mut tools = self.tools;
-        for (id, plugin) in &plugins {
-            if !plugin.tools {
-                continue;
+        let mut resources = StartResources::new(tools, builder);
+        let plugins = match Self::initialize_plugins(&mut resources, &config).await {
+            Ok(plugins) => plugins,
+            Err(error) => {
+                return match resources.cleanup().await {
+                    Ok(()) => Err(error),
+                    Err(cleanup_error) => Err(format!("{error}; {cleanup_error}")),
+                };
             }
-            for tool in PluginTool::load(id, Arc::clone(&lockgate), plugin.handle.clone()).await? {
-                tools.register(tool)?;
-            }
-        }
+        };
+        let lockgate = resources.host.take().expect("initialized Lockgate host");
+        let tools = resources.tools.take().expect("initialized tool registry");
         Ok(Agent {
             inner: Arc::new(AgentInner {
                 lockgate,
@@ -114,6 +163,34 @@ impl AgentBuilder {
                 tools,
             }),
         })
+    }
+
+    async fn initialize_plugins(
+        resources: &mut StartResources,
+        config: &Config,
+    ) -> Result<BTreeMap<String, LoadedPlugin>, String> {
+        let handles = Self::load_plugins(
+            resources.builder.as_mut().expect("uninitialized host"),
+            config,
+        )
+        .await?;
+        let builder = resources.builder.take().expect("uninitialized host");
+        resources.host = Some(Arc::new(builder.finish()));
+        let lockgate = resources.host.as_ref().expect("initialized host");
+        let plugins = Self::classify_plugins(lockgate, handles)?;
+        for (id, plugin) in &plugins {
+            if !plugin.tools {
+                continue;
+            }
+            for tool in PluginTool::load(id, Arc::clone(&lockgate), plugin.handle.clone()).await? {
+                resources
+                    .tools
+                    .as_mut()
+                    .expect("initialized tool registry")
+                    .register(tool)?;
+            }
+        }
+        Ok(plugins)
     }
 
     async fn load_plugins(

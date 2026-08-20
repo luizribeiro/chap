@@ -14,7 +14,7 @@ use std::{
     collections::VecDeque,
     fs,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
 };
 use tokio::sync::Notify;
 use wit_component::{ComponentEncoder, StringEncoding, dummy_module, embed_component_metadata};
@@ -218,6 +218,43 @@ component = "provider.wasm"
         .start()
         .await
         .unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn drops_partial_start_resources_on_a_blocking_thread() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component("example.provider"),
+    )
+    .unwrap();
+    let config_path = directory.join("sage.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins.a-provider]
+component = "provider.wasm"
+
+[plugins.z-missing]
+component = "missing.wasm"
+"#,
+    )
+    .unwrap();
+    let (dropped, observed_drop) = mpsc::sync_channel(1);
+    let async_thread = std::thread::current().id();
+    let builder = AgentBuilder::load(&config_path)
+        .unwrap()
+        .tool(DropProbe { dropped })
+        .unwrap();
+
+    let error = match builder.start().await {
+        Ok(_) => panic!("the missing second plugin should fail admission"),
+        Err(error) => error,
+    };
+
+    assert!(error.contains("z-missing"), "{error}");
+    assert_ne!(observed_drop.recv().unwrap(), async_thread);
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -680,6 +717,34 @@ impl CompletionBackend for FakeBackend {
 }
 
 struct EchoTool;
+
+struct DropProbe {
+    dropped: mpsc::SyncSender<std::thread::ThreadId>,
+}
+
+impl Drop for DropProbe {
+    fn drop(&mut self) {
+        self.dropped.send(std::thread::current().id()).unwrap();
+    }
+}
+
+impl Tool for DropProbe {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "drop-probe".to_owned(),
+            description: "Reports the thread that drops it".to_owned(),
+            parameters: r#"{"type":"object"}"#.to_owned(),
+        }
+    }
+
+    fn execute(
+        &self,
+        _arguments: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
+    {
+        Box::pin(async { Ok(String::new()) })
+    }
+}
 
 struct PausedTool {
     started: Arc<Notify>,
