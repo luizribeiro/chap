@@ -155,7 +155,7 @@ impl AgentBuilder {
         let prior = self.consent.load(id);
         let drift = prior
             .as_ref()
-            .filter(|prior| prior.fingerprint != manifest.fingerprint)
+            .filter(|prior| prior.request_digest != manifest.request_digest)
             .map(|prior| consent_drift(&prior.grants, &manifest.grants));
         let review = PluginConsentReview {
             manifest,
@@ -319,9 +319,10 @@ impl AgentBuilder {
         };
         let refreshed_record = record.as_ref().and_then(|prior| {
             let manifest = prepared.review();
-            (prior.fingerprint != manifest.fingerprint).then(|| ConsentRecord {
+            (prior.request_digest != manifest.request_digest).then(|| ConsentRecord {
                 instance_id: manifest.instance_id,
-                fingerprint: manifest.fingerprint,
+                request_digest: manifest.request_digest,
+                component_digest: Some(manifest.component_digest),
                 grants: manifest.grants,
                 approved_at: prior.approved_at.clone(),
             })

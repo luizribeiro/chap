@@ -316,11 +316,12 @@ mod tests {
     }
 
     fn manifest(scopes: &[&str], digest_byte: char) -> ConsentManifest {
-        let fingerprint = consent_record("example", digest_byte).fingerprint;
+        let fingerprint = consent_record("example", digest_byte).request_digest;
         ConsentManifest {
             instance_id: "example".to_owned(),
             plugin_label: "Example provider".to_owned(),
-            fingerprint,
+            request_digest: fingerprint,
+            component_digest: format!("sha256:{}", digest_byte.to_string().repeat(64)),
             grants: vec![GrantReview {
                 capability: "net".to_owned(),
                 permission: "egress".to_owned(),

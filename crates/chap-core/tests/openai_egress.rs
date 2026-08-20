@@ -222,7 +222,8 @@ async fn admission_after_narrowed_egress_refreshes_the_stored_record() {
     assert!(agent.plugin_errors().next().is_none());
     let refreshed = consent.load("openai").unwrap();
 
-    assert_eq!(refreshed.fingerprint, approved.fingerprint);
+    assert_eq!(refreshed.request_digest, approved.request_digest);
+    assert_eq!(refreshed.component_digest, approved.component_digest);
     assert_eq!(refreshed.grants, approved.grants);
     assert_eq!(refreshed.approved_at, prior.approved_at);
 
@@ -264,10 +265,10 @@ async fn admission_with_a_matching_digest_does_not_rewrite_the_store() {
 fn with_different_fingerprint(record: ConsentRecord) -> ConsentRecord {
     let mut value = serde_json::to_value(&record).unwrap();
     let replacement = format!("sha256:{}", "0".repeat(64));
-    if value["fingerprint"] == replacement {
-        value["fingerprint"] = format!("sha256:{}", "1".repeat(64)).into();
+    if value["request_digest"] == replacement {
+        value["request_digest"] = format!("sha256:{}", "1".repeat(64)).into();
     } else {
-        value["fingerprint"] = replacement.into();
+        value["request_digest"] = replacement.into();
     }
     serde_json::from_value(value).unwrap()
 }
