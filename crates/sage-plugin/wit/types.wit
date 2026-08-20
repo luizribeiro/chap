@@ -1,17 +1,6 @@
-package sage:agent@0.1.0;
+package sage:agent@0.2.0;
 
-interface tools {
-  record tool-definition {
-    name: string,
-    description: string,
-    parameters: string,
-  }
-
-  definitions: func() -> result<list<tool-definition>, string>;
-  execute: async func(name: string, arguments: string) -> result<string, string>;
-}
-
-interface provider {
+interface types {
   record tool-definition {
     name: string,
     description: string,
@@ -59,19 +48,4 @@ interface provider {
     content: list<assistant-content>,
     finish-reason: finish-reason,
   }
-
-  complete: async func(request: completion-request) -> result<completion, string>;
-}
-
-world provider-plugin {
-  export provider;
-}
-
-world tool-plugin {
-  export tools;
-}
-
-world host {
-  export provider;
-  export tools;
 }

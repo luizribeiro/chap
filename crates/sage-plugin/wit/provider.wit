@@ -1,0 +1,12 @@
+package sage:agent@0.2.0;
+
+interface provider {
+  use types.{completion, completion-request};
+
+  complete: async func(request: completion-request) -> result<completion, string>;
+}
+
+world provider-plugin {
+  export types;
+  export provider;
+}
