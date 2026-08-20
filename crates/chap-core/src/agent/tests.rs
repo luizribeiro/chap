@@ -10,7 +10,7 @@ use crate::{
     },
     tool::ToolRegistry,
 };
-use lockgate::{ConsentRequired, DriftReport};
+use lockgate::{ConsentRequired, DriftReport, Role};
 use std::{
     collections::VecDeque,
     fs,
@@ -429,8 +429,9 @@ component = "unsupported.wasm"
     assert_eq!(
         error,
         format!(
-            "plugin `example` from `{}` does not implement a supported role",
-            component.display()
+            "plugin `example` from `{}` does not implement a supported role; expected an export from the `{}` package, but the component exports `lockgate:config/schema`",
+            component.display(),
+            super::role_package(<super::bindings::provider::Role as Role>::INTERFACE),
         )
     );
     fs::remove_dir_all(directory).unwrap();
@@ -965,6 +966,44 @@ impl Tool for EchoTool {
     {
         Box::pin(async move { Ok(arguments) })
     }
+}
+
+#[test]
+fn derives_the_package_id_from_a_role_interface() {
+    assert_eq!(
+        super::role_package("chap:agent/provider@0.2.0"),
+        "chap:agent@0.2.0"
+    );
+}
+
+#[test]
+fn derives_the_package_id_from_an_unversioned_interface() {
+    assert_eq!(super::role_package("chap:agent/provider"), "chap:agent");
+}
+
+#[test]
+fn keeps_a_bare_export_name_as_the_package_id() {
+    assert_eq!(super::role_package("settings"), "settings");
+}
+
+#[test]
+fn describes_an_export_list_with_backticked_names() {
+    let interfaces = [
+        <super::bindings::tools::Role as Role>::INTERFACE.to_owned(),
+        "lockgate:config/schema".to_owned(),
+    ];
+    assert_eq!(
+        super::describe_exports(&interfaces),
+        format!(
+            "`{}`, `lockgate:config/schema`",
+            <super::bindings::tools::Role as Role>::INTERFACE
+        )
+    );
+}
+
+#[test]
+fn describes_an_empty_export_list_as_no_interfaces() {
+    assert_eq!(super::describe_exports(&[]), "no interfaces");
 }
 
 fn provider_component(id: &str) -> Vec<u8> {
