@@ -2246,6 +2246,7 @@ dependencies = [
  "lockgate-http",
  "lockgate-plugin",
  "sage-plugin-macros",
+ "serde_json",
 ]
 
 [[package]]
