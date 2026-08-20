@@ -6,7 +6,6 @@ mod bindings {
     lockgate_plugin::__wit_bindgen::generate!({
         path: "wit",
         world: "sdk-types",
-        generate_all,
     });
 }
 
