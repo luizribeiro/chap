@@ -1,5 +1,3 @@
-use http::{HeaderMap, HeaderName, HeaderValue};
-use http_body_util::BodyExt;
 use sage::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message as ProviderMessage,
     ToolCall as ProviderToolCall, ToolDefinition as ProviderTool,
@@ -7,9 +5,6 @@ use sage::provider::{
 use sage_plugin as sage;
 use sage_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, net};
 use serde::{Deserialize, Serialize};
-use wasi_fetch::Client;
-
-const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 struct OpenAiCompatible {
     settings: Settings,
@@ -55,11 +50,32 @@ impl Provider for OpenAiCompatible {
             "{}/chat/completions",
             settings.base_url.trim_end_matches('/')
         );
-        let mut headers = vec![("content-type".to_owned(), "application/json".to_owned())];
-        if let Some(api_key) = settings.api_key.as_deref().filter(|key| !key.is_empty()) {
-            headers.push(("authorization".to_owned(), format!("Bearer {api_key}")));
-        }
-        let (status, body) = post(&url, &headers, request.as_bytes()).await?;
+        #[cfg(target_arch = "wasm32")]
+        let transport: Result<(u16, String), String> = {
+            let response = sage::http::Client::new()
+                .post(&url)
+                .header("content-type", "application/json")
+                .map_err(|error| error.to_string())?
+                .bearer(
+                    settings
+                        .api_key
+                        .as_deref()
+                        .filter(|api_key| !api_key.is_empty()),
+                )
+                .body(request.into_bytes())
+                .send()
+                .await
+                .map_err(|error| error.to_string())?;
+            let status = response.status();
+            let body = response.text().map_err(|error| error.to_string())?;
+            Ok((status, body))
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let transport: Result<(u16, String), String> = {
+            let _ = (url, request, &settings.api_key);
+            Err("HTTP transport is only available to WebAssembly plugins".to_owned())
+        };
+        let (status, body) = transport?;
         parse_response(status, &body)
     }
 }
@@ -71,49 +87,6 @@ struct Settings {
     model: String,
     #[settings(optional)]
     api_key: Option<String>,
-}
-
-async fn post(
-    url: &str,
-    headers: &[(String, String)],
-    body: &[u8],
-) -> Result<(u16, String), String> {
-    let mut request_headers = HeaderMap::new();
-    for (name, value) in headers {
-        let name = HeaderName::try_from(name)
-            .map_err(|error| format!("invalid HTTP header name: {error}"))?;
-        let value = HeaderValue::try_from(value)
-            .map_err(|error| format!("invalid HTTP header value: {error}"))?;
-        request_headers.append(name, value);
-    }
-
-    let response = Client::new()
-        .post(url)
-        .headers(request_headers)
-        .body(body.to_vec())
-        .send()
-        .await
-        .map_err(|error| format!("HTTP request failed: {error}"))?;
-    let status = response.status().as_u16();
-    let body = collect_limited(response.into_body(), MAX_RESPONSE_BYTES).await?;
-    let body = String::from_utf8(body)
-        .map_err(|error| format!("HTTP response body was not valid UTF-8: {error}"))?;
-    Ok((status, body))
-}
-
-async fn collect_limited(mut body: wasi_fetch::Body, limit: usize) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
-    while let Some(frame) = body.frame().await {
-        let frame = frame.map_err(|error| format!("failed to read HTTP response body: {error}"))?;
-        let Ok(chunk) = frame.into_data() else {
-            continue;
-        };
-        if bytes.len().saturating_add(chunk.len()) > limit {
-            return Err(format!("HTTP response exceeded the {limit}-byte limit"));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    Ok(bytes)
 }
 
 fn parse_response(status: u16, body: &str) -> Result<Completion, String> {
