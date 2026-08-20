@@ -2,6 +2,7 @@
 members = [
     "crates/sage-cli",
     "crates/sage-core",
+    "crates/sage-plugin",
     "plugins/kagi",
     "plugins/openai-compatible",
 ]
@@ -18,6 +19,7 @@ clap = { version = "4.6.6", features = ["derive"] }
 iocraft = { git = "https://github.com/luizribeiro/iocraft.git", rev = "619ee083dd84dc0070758221dee6a3936c7897de" }
 lockgate = { path = "/Users/luiz/lockgate-ng/crates/lockgate" }
 lockgate-plugin = { path = "/Users/luiz/lockgate-ng/crates/lockgate-plugin" }
+sage-plugin = { path = "crates/sage-plugin" }
 pulldown-cmark = "0.13.4"
 schemars = "1.2.2"
 serde = { version = "1.0.228", features = ["derive"] }

@@ -1,0 +1,77 @@
+package sage:agent@0.1.0;
+
+interface tools {
+  record tool-definition {
+    name: string,
+    description: string,
+    parameters: string,
+  }
+
+  definitions: func() -> result<list<tool-definition>, string>;
+  execute: async func(name: string, arguments: string) -> result<string, string>;
+}
+
+interface provider {
+  record tool-definition {
+    name: string,
+    description: string,
+    parameters: string,
+  }
+
+  record tool-call {
+    id: string,
+    name: string,
+    arguments: string,
+  }
+
+  record tool-result {
+    call-id: string,
+    name: string,
+    output: string,
+    is-error: bool,
+  }
+
+  variant assistant-content {
+    text(string),
+    tool-call(tool-call),
+  }
+
+  variant message {
+    system(string),
+    user(string),
+    assistant(list<assistant-content>),
+    tool-result(tool-result),
+  }
+
+  record completion-request {
+    messages: list<message>,
+    tools: list<tool-definition>,
+  }
+
+  variant finish-reason {
+    stop,
+    tool-calls,
+    length,
+    other(string),
+  }
+
+  record completion {
+    content: list<assistant-content>,
+    finish-reason: finish-reason,
+  }
+
+  complete: async func(request: completion-request) -> result<completion, string>;
+}
+
+world provider-plugin {
+  export provider;
+}
+
+world tool-plugin {
+  export tools;
+}
+
+world host {
+  export provider;
+  export tools;
+}
