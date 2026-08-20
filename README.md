@@ -49,7 +49,6 @@ component = "./target/wasm32-wasip2/release/chap_openai_compatible.wasm"
 
 [plugins.openai.settings]
 base-url = "http://127.0.0.1:8080/v1"
-egress-origin = "http://127.0.0.1:8080"
 model = "example-model"
 # Names the environment variable holding the API key. The plugin declares an
 # env.read grant for it, so the access shows up in `chap grants review`; the
@@ -68,10 +67,10 @@ From the workspace root, run the complete native and WASI test suites with:
 cargo test-all
 ```
 
-The OpenAI-compatible plugin declares network egress through Lockgate and
-resolves its exact origin from `egress-origin`. The scheme and effective port
-are part of the origin. Kagi declares the literal origin `https://kagi.com` and
-therefore needs no configurable origin.
+The OpenAI-compatible plugin declares network egress scoped from `base-url`,
+and Lockgate resolves that URL's origin as the granted scope. The scheme and
+effective port are part of the origin. Kagi declares the literal origin
+`https://kagi.com` and therefore needs no configurable origin.
 
 ### Permission grants
 
@@ -89,9 +88,9 @@ cargo run -- plugins check
 `grants review` also accepts one instance id. `grants deny <instance-id>` removes
 that instance's approval. CHAP stores approvals in `consent.json` beside the
 selected `chap.toml`; concrete scopes remain in `chap.toml`. A permission
-expansion, such as changing `egress-origin`, blocks admission until the new
-manifest is reviewed and approved. Narrowing or removing authority is reported
-as non-blocking drift.
+expansion, such as changing `base-url` to point at a different origin, blocks
+admission until the new manifest is reviewed and approved. Narrowing or
+removing authority is reported as non-blocking drift.
 
 `plugins check` verifies that every configured component exists, has matching
 embedded plugin metadata, implements a supported role, publishes a schema that
@@ -126,7 +125,6 @@ tools](plugins/kagi/src/lib.rs) do:
 #[derive(chap::Settings)]
 struct Settings {
     base_url: String,
-    egress_origin: String,
     model: String,
     api_key_env: String,
 }
