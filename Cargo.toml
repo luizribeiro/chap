@@ -3,6 +3,7 @@ members = [
     "crates/sage-cli",
     "crates/sage-core",
     "crates/sage-plugin",
+    "crates/sage-plugin-macros",
     "plugins/kagi",
     "plugins/openai-compatible",
 ]
