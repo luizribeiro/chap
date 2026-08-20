@@ -2228,15 +2228,9 @@ dependencies = [
 name = "sage-openai-compatible"
 version = "0.1.0"
 dependencies = [
- "http",
- "http-body-util",
- "lockgate-plugin",
  "sage-plugin",
- "schemars",
  "serde",
  "serde_json",
- "wasi-fetch",
- "wit-bindgen",
 ]
 
 [[package]]
