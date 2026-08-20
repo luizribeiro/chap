@@ -1,13 +1,23 @@
 #![cfg(all(feature = "provider", feature = "tools"))]
 
 use sage::{
-    Provider, Tools,
+    Needs, NoSettings, Plugin, Provider, Tools,
     provider::{Completion, CompletionRequest, FinishReason},
     tools::ToolDefinition,
 };
 use sage_plugin as sage;
 
 struct Dummy;
+
+impl Plugin for Dummy {
+    const ID: &'static str = "dummy";
+    const NEEDS: Needs = Needs::NOTHING;
+    type Settings = NoSettings;
+
+    fn new(_settings: Self::Settings) -> Self {
+        Self
+    }
+}
 
 impl Provider for Dummy {
     async fn complete(&self, _request: CompletionRequest) -> Result<Completion, String> {

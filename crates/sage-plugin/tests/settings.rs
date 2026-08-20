@@ -15,6 +15,16 @@ impl sage::Plugin for TestPlugin {
     const ID: &'static str = "settings-test";
     const NEEDS: sage::Needs = sage::Needs::NOTHING;
     type Settings = Settings;
+
+    fn new(_settings: Self::Settings) -> Self {
+        Self
+    }
+}
+
+impl sage::__lockgate::Plugin for TestPlugin {
+    const ID: &'static str = <Self as sage::Plugin>::ID;
+    const NEEDS: sage::Needs = <Self as sage::Plugin>::NEEDS;
+    type Settings = <Self as sage::Plugin>::Settings;
 }
 
 #[test]

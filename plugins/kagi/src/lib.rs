@@ -11,7 +11,8 @@ use exports::sage::agent::tools::Guest;
 use exports::sage::agent::types::ToolDefinition;
 use http::{HeaderMap, HeaderValue, header};
 use http_body_util::BodyExt;
-use sage_plugin::{MetadataSource, Needs, Plugin, ScopeRef, net};
+use sage_plugin::__lockgate::Plugin;
+use sage_plugin::{MetadataSource, Needs, ScopeRef, net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -570,4 +571,4 @@ mod tests {
     }
 }
 
-sage_plugin::export!(Kagi);
+sage_plugin::__lockgate::export!(Kagi; facade = ::sage_plugin::__lockgate);

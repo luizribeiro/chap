@@ -9,14 +9,15 @@ mod export;
 #[cfg(feature = "http")]
 #[path = "http.rs"]
 mod http_reexport;
+mod plugin;
 #[cfg(any(feature = "provider", feature = "tools"))]
 pub mod types;
 
 #[doc(hidden)]
-pub use lockgate_plugin::{__private, __wit_bindgen, alloc};
+pub use lockgate_plugin::{self as __lockgate, __private, __wit_bindgen, alloc};
 pub use lockgate_plugin::{
     Deserialize, HttpOrigin, JsonSchema, MetadataSource, Need, Needs, NoSettings, Permission,
-    Plugin, ScopeRef, ScopedPermission, SettingsPolicy, export, generate, schemars, serde,
+    ScopeRef, ScopedPermission, SettingsPolicy, export, generate, schemars, serde,
 };
 pub use sage_plugin_macros::Settings;
 
@@ -27,3 +28,4 @@ pub use export::{Provider, provider};
 pub use export::{Tools, tools};
 #[cfg(feature = "http")]
 pub use http_reexport::http;
+pub use plugin::Plugin;

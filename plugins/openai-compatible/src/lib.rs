@@ -12,7 +12,8 @@ use exports::sage::agent::types::{
 };
 use http::{HeaderMap, HeaderName, HeaderValue};
 use http_body_util::BodyExt;
-use sage_plugin::{MetadataSource, Need, Needs, Plugin, ScopeRef, net};
+use sage_plugin::__lockgate::Plugin;
+use sage_plugin::{MetadataSource, Need, Needs, ScopeRef, net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use wasi_fetch::Client;
@@ -460,4 +461,7 @@ mod tests {
     }
 }
 
-sage_plugin::export!(OpenAiCompatible);
+sage_plugin::__lockgate::export!(
+    OpenAiCompatible;
+    facade = ::sage_plugin::__lockgate
+);
