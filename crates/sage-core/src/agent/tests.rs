@@ -1046,7 +1046,7 @@ interface schema {
 package sage:test;
 
 world fixture {{
-  include sage:agent/{world_name}@0.1.0;
+  include sage:agent/{world_name}@0.2.0;
   export lockgate:config/schema;
 }}
 "#

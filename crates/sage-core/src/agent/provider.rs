@@ -4,6 +4,7 @@ use crate::{
     session::{AssistantContent, Message, ToolCall},
 };
 use bindings::provider as provider_bindings;
+use bindings::types as provider_types;
 use lockgate::InvocationCtx;
 use std::{future::Future, pin::Pin};
 
@@ -47,7 +48,7 @@ impl AgentInner {
             .map_err(|error| format!("provider plugin `{provider}` failed: {error}"))?
             .complete(
                 InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL),
-                provider_bindings::CompletionRequest {
+                provider_types::CompletionRequest {
                     messages: messages.into_iter().map(Into::into).collect(),
                     tools: self
                         .tools
@@ -69,7 +70,7 @@ pub(super) struct ProviderCompletion {
     pub(super) content: Vec<AssistantContent>,
 }
 
-impl From<Message> for provider_bindings::Message {
+impl From<Message> for provider_types::Message {
     fn from(message: Message) -> Self {
         match message {
             Message::System(content) => Self::System(content),
@@ -77,7 +78,7 @@ impl From<Message> for provider_bindings::Message {
             Message::Assistant(content) => {
                 Self::Assistant(content.into_iter().map(Into::into).collect())
             }
-            Message::ToolResult(result) => Self::ToolResult(provider_bindings::ToolResult {
+            Message::ToolResult(result) => Self::ToolResult(provider_types::ToolResult {
                 call_id: result.call_id,
                 name: result.name,
                 output: result.output,
@@ -87,11 +88,11 @@ impl From<Message> for provider_bindings::Message {
     }
 }
 
-impl From<AssistantContent> for provider_bindings::AssistantContent {
+impl From<AssistantContent> for provider_types::AssistantContent {
     fn from(content: AssistantContent) -> Self {
         match content {
             AssistantContent::Text(text) => Self::Text(text),
-            AssistantContent::ToolCall(call) => Self::ToolCall(provider_bindings::ToolCall {
+            AssistantContent::ToolCall(call) => Self::ToolCall(provider_types::ToolCall {
                 id: call.id,
                 name: call.name,
                 arguments: call.arguments,
@@ -100,7 +101,7 @@ impl From<AssistantContent> for provider_bindings::AssistantContent {
     }
 }
 
-impl From<ToolDefinition> for provider_bindings::ToolDefinition {
+impl From<ToolDefinition> for provider_types::ToolDefinition {
     fn from(definition: ToolDefinition) -> Self {
         Self {
             name: definition.name,
@@ -110,15 +111,15 @@ impl From<ToolDefinition> for provider_bindings::ToolDefinition {
     }
 }
 
-impl From<provider_bindings::Completion> for ProviderCompletion {
-    fn from(completion: provider_bindings::Completion) -> Self {
+impl From<provider_types::Completion> for ProviderCompletion {
+    fn from(completion: provider_types::Completion) -> Self {
         Self {
             content: completion
                 .content
                 .into_iter()
                 .map(|content| match content {
-                    provider_bindings::AssistantContent::Text(text) => AssistantContent::Text(text),
-                    provider_bindings::AssistantContent::ToolCall(call) => {
+                    provider_types::AssistantContent::Text(text) => AssistantContent::Text(text),
+                    provider_types::AssistantContent::ToolCall(call) => {
                         AssistantContent::ToolCall(ToolCall {
                             id: call.id,
                             name: call.name,

@@ -5,9 +5,10 @@ sage_plugin::generate!({
     world: "provider-plugin",
 });
 
-use exports::sage::agent::provider::{
-    AssistantContent, Completion, CompletionRequest, FinishReason, Guest,
-    Message as ProviderMessage, ToolCall as ProviderToolCall, ToolDefinition as ProviderTool,
+use exports::sage::agent::provider::Guest;
+use exports::sage::agent::types::{
+    AssistantContent, Completion, CompletionRequest, FinishReason, Message as ProviderMessage,
+    ToolCall as ProviderToolCall, ToolDefinition as ProviderTool,
 };
 use http::{HeaderMap, HeaderName, HeaderValue};
 use http_body_util::BodyExt;
@@ -418,7 +419,7 @@ mod tests {
                 name: "weather".to_owned(),
                 arguments: r#"{"city":"Paris"}"#.to_owned(),
             })]),
-            ProviderMessage::ToolResult(exports::sage::agent::provider::ToolResult {
+            ProviderMessage::ToolResult(exports::sage::agent::types::ToolResult {
                 call_id: "call-1".to_owned(),
                 name: "weather".to_owned(),
                 output: "sunny".to_owned(),

@@ -7,7 +7,8 @@ sage_plugin::generate!({
 
 #[cfg(test)]
 use exports::lockgate::config::schema::Guest as ConfigurationGuest;
-use exports::sage::agent::tools::{Guest, ToolDefinition};
+use exports::sage::agent::tools::Guest;
+use exports::sage::agent::types::ToolDefinition;
 use http::{HeaderMap, HeaderValue, header};
 use http_body_util::BodyExt;
 use sage_plugin::{MetadataSource, Needs, Plugin, ScopeRef, net};
