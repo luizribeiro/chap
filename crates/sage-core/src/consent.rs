@@ -231,16 +231,12 @@ impl ConsentStore {
 mod tests {
     use super::*;
 
-    #[test]
-    fn consent_record_round_trips_through_json_storage() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("consent.json");
-        let store = ConsentStore::new(&path);
-        let record: ConsentRecord = serde_json::from_value(serde_json::json!({
-            "instance_id": "example",
-            "fingerprint": format!("sha256:{}", "0".repeat(64)),
+    fn record(instance_id: &str, digest_byte: char) -> ConsentRecord {
+        serde_json::from_value(serde_json::json!({
+            "instance_id": instance_id,
+            "fingerprint": format!("sha256:{}", digest_byte.to_string().repeat(64)),
             "grants": [{
-                "capability": "http",
+                "capability": "net",
                 "permission": "egress",
                 "scopes": ["https://example.com"],
                 "optional": false,
@@ -248,7 +244,15 @@ mod tests {
             }],
             "approved_at": "2026-08-19T14:30:00Z"
         }))
-        .unwrap();
+        .unwrap()
+    }
+
+    #[test]
+    fn consent_record_round_trips_through_json_storage() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("consent.json");
+        let store = ConsentStore::new(&path);
+        let record = record("example", '0');
 
         store.save(record.clone()).unwrap();
 
@@ -259,6 +263,36 @@ mod tests {
         store.remove("example").unwrap();
         assert_eq!(store.load("example"), None);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn save_merges_with_other_plugin_records() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ConsentStore::new(directory.path().join("consent.json"));
+        let first = record("first", '1');
+        let second = record("second", '2');
+
+        store.save(first.clone()).unwrap();
+        store.save(second.clone()).unwrap();
+
+        assert_eq!(store.load("first"), Some(first));
+        assert_eq!(store.load("second"), Some(second));
+    }
+
+    #[test]
+    fn corrupt_storage_is_preserved_before_saving_a_new_record() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("consent.json");
+        let corrupt_path = directory.path().join("consent.json.corrupt");
+        let store = ConsentStore::new(&path);
+        let corrupt = b"{ definitely not valid JSON";
+        fs::write(&path, corrupt).unwrap();
+
+        let replacement = record("replacement", '3');
+        store.save(replacement.clone()).unwrap();
+
+        assert_eq!(fs::read(corrupt_path).unwrap(), corrupt);
+        assert_eq!(store.load("replacement"), Some(replacement));
     }
 
     #[test]

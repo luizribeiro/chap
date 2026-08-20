@@ -1,4 +1,4 @@
-use sage_core::{AgentBuilder, SessionOptions};
+use sage_core::{AgentBuilder, DriftKind, SessionOptions};
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -127,11 +127,17 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
         .await
         .unwrap();
     write_openai_config(&config_path, &component, "http://127.0.0.1:41002");
-    let agent = AgentBuilder::load(&config_path)
-        .unwrap()
-        .start()
-        .await
-        .unwrap();
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    let review = builder.review_plugin("openai").await.unwrap();
+    let drift = review.drift.as_ref().expect("expanded manifest must drift");
+    assert!(drift.blocks_admission);
+    assert!(
+        drift
+            .changes
+            .iter()
+            .any(|change| change.kind == DriftKind::ScopeWidened)
+    );
+    let agent = builder.start().await.unwrap();
     let errors = agent.plugin_errors().collect::<Vec<_>>();
 
     assert_eq!(errors.len(), 1);

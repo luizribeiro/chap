@@ -10,6 +10,7 @@ use crate::{
     },
     tool::ToolRegistry,
 };
+use lockgate::{ConsentRequired, DriftReport};
 use std::{
     collections::VecDeque,
     fs,
@@ -109,6 +110,96 @@ component = "provider.wasm"
             .unwrap(),
         errors[0].1
     );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn approving_then_denying_toggles_plugin_admission() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component("example.provider"),
+    )
+    .unwrap();
+    let config_path = directory.join("sage.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins.example]
+component = "provider.wasm"
+"#,
+    )
+    .unwrap();
+
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    assert!(
+        builder
+            .review_plugin("example")
+            .await
+            .unwrap()
+            .prior
+            .is_none()
+    );
+    builder.approve_plugin("example").await.unwrap();
+    let agent = builder.start().await.unwrap();
+    assert!(agent.plugin_errors().next().is_none());
+    tokio::task::spawn_blocking(move || drop(agent))
+        .await
+        .unwrap();
+
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    builder.deny_plugin("example").unwrap();
+    assert!(
+        builder
+            .review_plugin("example")
+            .await
+            .unwrap()
+            .prior
+            .is_none()
+    );
+    let agent = builder.start().await.unwrap();
+    assert!(
+        agent
+            .plugin_errors()
+            .any(|(id, error)| id == "example" && error.contains("requires approval"))
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn nonblocking_drift_errors_are_reported_without_panicking() {
+    let directory = test_directory();
+    let component = directory.join("provider.wasm");
+    fs::write(&component, provider_component("example.provider")).unwrap();
+    let config_path = directory.join("sage.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins.example]
+component = "provider.wasm"
+"#,
+    )
+    .unwrap();
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    let manifest = builder.review_plugin("example").await.unwrap().manifest;
+
+    let error = AgentBuilder::consent_error(
+        "example",
+        &component,
+        ConsentRequired::Drift {
+            manifest,
+            drift: DriftReport {
+                changes: Vec::new(),
+                blocks_admission: false,
+            },
+        },
+    );
+
+    assert!(
+        error.contains("reported a changed permission manifest"),
+        "{error}"
+    );
+    assert!(error.contains("sage grants review example"), "{error}");
     fs::remove_dir_all(directory).unwrap();
 }
 

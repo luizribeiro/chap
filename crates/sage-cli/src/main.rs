@@ -295,6 +295,41 @@ fn push_row(output: &mut String, row: [&str; 3], widths: [usize; 3]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sage_core::{
+        ConsentManifest, ConsentRecord, DriftReport, GrantReview, PluginConsentReview,
+    };
+
+    fn consent_record(instance_id: &str, digest_byte: char) -> ConsentRecord {
+        serde_json::from_value(serde_json::json!({
+            "instance_id": instance_id,
+            "fingerprint": format!("sha256:{}", digest_byte.to_string().repeat(64)),
+            "grants": [{
+                "capability": "net",
+                "permission": "egress",
+                "scopes": ["https://api.example.com"],
+                "optional": false,
+                "reason": "Call the configured API"
+            }],
+            "approved_at": "2026-08-19T14:30:00Z"
+        }))
+        .unwrap()
+    }
+
+    fn manifest(scopes: &[&str], digest_byte: char) -> ConsentManifest {
+        let fingerprint = consent_record("example", digest_byte).fingerprint;
+        ConsentManifest {
+            instance_id: "example".to_owned(),
+            plugin_label: "Example provider".to_owned(),
+            fingerprint,
+            grants: vec![GrantReview {
+                capability: "net".to_owned(),
+                permission: "egress".to_owned(),
+                scopes: scopes.iter().map(|scope| (*scope).to_owned()).collect(),
+                optional: false,
+                reason: Some("Call the configured API".to_owned()),
+            }],
+        }
+    }
 
     #[test]
     fn starts_the_tui_when_no_subcommand_is_given() {
@@ -313,6 +348,92 @@ mod tests {
                 command: PluginsCommand::List
             }))
         ));
+    }
+
+    #[test]
+    fn parses_grants_review_approve_and_deny_commands() {
+        let review = Cli::try_parse_from(["sage", "grants", "review"]).unwrap();
+        let approve = Cli::try_parse_from(["sage", "grants", "approve", "openai"]).unwrap();
+        let deny = Cli::try_parse_from(["sage", "grants", "deny", "openai"]).unwrap();
+
+        assert!(matches!(
+            review.command,
+            Some(Command::Grants(Grants {
+                command: GrantsCommand::Review { instance_id: None }
+            }))
+        ));
+        assert!(matches!(
+            approve.command,
+            Some(Command::Grants(Grants {
+                command: GrantsCommand::Approve { instance_id }
+            })) if instance_id == "openai"
+        ));
+        assert!(matches!(
+            deny.command,
+            Some(Command::Grants(Grants {
+                command: GrantsCommand::Deny { instance_id }
+            })) if instance_id == "openai"
+        ));
+    }
+
+    #[test]
+    fn renders_every_manifest_field_for_review() {
+        let output = render_grant_review(&PluginConsentReview {
+            manifest: manifest(&["https://api.example.com"], '1'),
+            prior: None,
+            drift: None,
+        });
+
+        assert!(output.contains("Instance: example"), "{output}");
+        assert!(output.contains("Plugin: Example provider"), "{output}");
+        assert!(output.contains("NEEDS APPROVAL (first run)"), "{output}");
+        assert!(output.contains("net.egress"), "{output}");
+        assert!(
+            output.contains("scopes: https://api.example.com"),
+            "{output}"
+        );
+        assert!(output.contains("optional: no"), "{output}");
+        assert!(
+            output.contains("reason: Call the configured API"),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn renders_blocking_scope_expansion_as_a_drift_delta() {
+        let prior = consent_record("example", '1');
+        let output = render_grant_review(&PluginConsentReview {
+            manifest: manifest(
+                &["https://api.example.com", "https://evil.example.com"],
+                '2',
+            ),
+            prior: Some(prior),
+            drift: Some(DriftReport {
+                changes: vec![DriftChange {
+                    capability: "net".to_owned(),
+                    permission: "egress".to_owned(),
+                    kind: DriftKind::ScopeWidened,
+                    before: Some(vec!["https://api.example.com".to_owned()]),
+                    after: Some(vec![
+                        "https://api.example.com".to_owned(),
+                        "https://evil.example.com".to_owned(),
+                    ]),
+                }],
+                blocks_admission: true,
+            }),
+        });
+
+        assert!(output.contains("blocking permission expansion"), "{output}");
+        assert!(
+            output.contains("Drift since approval (BLOCKING)"),
+            "{output}"
+        );
+        assert!(
+            output.contains(
+                "now ALSO requests: net.egress → https://evil.example.com (WIDENED, BLOCKING)"
+            ),
+            "{output}"
+        );
     }
 
     #[test]

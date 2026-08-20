@@ -1,4 +1,4 @@
 /.direnv/
 /.pre-commit-config.yaml
 /target/
-/consent.json
+consent.json*
