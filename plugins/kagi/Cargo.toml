@@ -9,17 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 html-escape = "0.2.15"
-http = "1.5.0"
-http-body-util = "0.1.3"
-sage-plugin = { workspace = true }
-schemars.workspace = true
+sage-plugin = { workspace = true, default-features = false, features = ["tools", "http"] }
 serde.workspace = true
 serde_json.workspace = true
 url = "2.5.8"
-wasi-fetch = "0.2.0"
-
-# Lockgate's proc macros use Cargo metadata to locate their runtime facade. The
-# disabled dependency supplies that package-name mapping; generated paths are
-# resolved to `sage-plugin` by the crate alias in lib.rs.
-[target.'cfg(any())'.dependencies]
-sage-plugin-internals = { package = "lockgate-plugin", git = "https://github.com/luizribeiro/lockgate.git", branch = "plugin-sdk", default-features = false }

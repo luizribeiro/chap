@@ -2213,15 +2213,10 @@ name = "sage-kagi"
 version = "0.1.0"
 dependencies = [
  "html-escape",
- "http",
- "http-body-util",
- "lockgate-plugin",
  "sage-plugin",
- "schemars",
  "serde",
  "serde_json",
  "url",
- "wasi-fetch",
 ]
 
 [[package]]
