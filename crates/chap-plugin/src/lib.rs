@@ -17,11 +17,11 @@ pub use chap_plugin_macros::{Settings, plugin};
 #[doc(hidden)]
 pub use lockgate_plugin::{self as __lockgate, __private, __wit_bindgen, alloc};
 pub use lockgate_plugin::{
-    Deserialize, HttpOrigin, JsonSchema, MetadataSource, Need, Needs, NoSettings, Permission,
-    ScopeRef, ScopedPermission, SettingsPolicy, export, generate, schemars, serde,
+    Deserialize, EnvVarName, HttpOrigin, JsonSchema, MetadataSource, Need, Needs, NoSettings,
+    Permission, ScopeRef, ScopedPermission, SettingsPolicy, export, generate, schemars, serde,
 };
 
-pub use cap::net;
+pub use cap::{env, net};
 #[cfg(feature = "provider")]
 pub use export::{Provider, provider};
 #[cfg(feature = "tools")]
