@@ -1,4 +1,4 @@
-use crate::config::{Config, Plugin as ConfiguredPlugin};
+use crate::config::{Config, ConfiguredPlugin};
 use crate::consent::{ConsentStore, PluginConsentReview, consent_drift};
 use crate::session::{Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions};
 use crate::tool::ToolRegistry;

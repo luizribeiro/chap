@@ -10,14 +10,14 @@ use std::{
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
-    plugins: BTreeMap<String, Plugin>,
+    plugins: BTreeMap<String, ConfiguredPlugin>,
     #[serde(skip)]
     directory: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Plugin {
+pub struct ConfiguredPlugin {
     component: PathBuf,
     #[serde(default)]
     settings: toml::Table,
@@ -33,17 +33,17 @@ impl Config {
         Ok(config)
     }
 
-    pub fn plugins(&self) -> impl Iterator<Item = (&str, &Plugin)> {
+    pub fn plugins(&self) -> impl Iterator<Item = (&str, &ConfiguredPlugin)> {
         self.plugins
             .iter()
             .map(|(id, plugin)| (id.as_str(), plugin))
     }
 
-    pub(crate) fn plugin(&self, id: &str) -> Option<&Plugin> {
+    pub(crate) fn plugin(&self, id: &str) -> Option<&ConfiguredPlugin> {
         self.plugins.get(id)
     }
 
-    pub(crate) fn component_path(&self, plugin: &Plugin) -> PathBuf {
+    pub(crate) fn component_path(&self, plugin: &ConfiguredPlugin) -> PathBuf {
         self.directory.join(&plugin.component)
     }
 
@@ -52,7 +52,7 @@ impl Config {
     }
 }
 
-impl Plugin {
+impl ConfiguredPlugin {
     pub fn component(&self) -> &Path {
         &self.component
     }
