@@ -1,7 +1,7 @@
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
-use syn::{Attribute, Data, DeriveInput, Field, Fields, GenericArgument, PathArguments, Type};
+use syn::{Data, DeriveInput, Field, Fields, Type};
 
 pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
     if !input.generics.params.is_empty() {
@@ -100,75 +100,18 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 fn proxy_field(field: &Field) -> syn::Result<TokenStream> {
     let name = field.ident.as_ref().expect("named fields were checked");
     let ty = &field.ty;
-    let optional = settings_optional(&field.attrs)?;
-    if optional && !is_option(ty) {
-        return Err(syn::Error::new_spanned(
-            ty,
-            "#[settings(optional)] requires an Option<T> field",
-        ));
-    }
-
     let docs = field
         .attrs
         .iter()
         .filter(|attribute| attribute.path().is_ident("doc"));
-    let serde_default = optional.then(|| quote!(#[serde(default)]));
-    let non_empty = (!optional && is_named_type(ty, "String"))
-        .then(|| quote!(#[schemars(regex(pattern = r"\S"))]));
+    let non_empty =
+        is_named_type(ty, "String").then(|| quote!(#[schemars(regex(pattern = r"\S"))]));
 
     Ok(quote! {
         #(#docs)*
-        #serde_default
         #non_empty
         #name: #ty,
     })
-}
-
-fn settings_optional(attributes: &[Attribute]) -> syn::Result<bool> {
-    let mut optional = false;
-    for attribute in attributes
-        .iter()
-        .filter(|attribute| attribute.path().is_ident("settings"))
-    {
-        let mut saw_argument = false;
-        attribute.parse_nested_meta(|meta| {
-            saw_argument = true;
-            if !meta.path.is_ident("optional") {
-                return Err(meta.error("unsupported settings attribute; expected `optional`"));
-            }
-            if !meta.input.is_empty() {
-                return Err(meta.error("`optional` does not take a value"));
-            }
-            if optional {
-                return Err(meta.error("duplicate `optional` settings attribute"));
-            }
-            optional = true;
-            Ok(())
-        })?;
-        if !saw_argument {
-            return Err(syn::Error::new_spanned(
-                attribute,
-                "expected #[settings(optional)]",
-            ));
-        }
-    }
-    Ok(optional)
-}
-
-fn is_option(ty: &Type) -> bool {
-    let Type::Path(path) = ty else {
-        return false;
-    };
-    let Some(segment) = path.path.segments.last() else {
-        return false;
-    };
-    if segment.ident != "Option" {
-        return false;
-    }
-    let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
-        return false;
-    };
-    arguments.args.len() == 1 && matches!(arguments.args.first(), Some(GenericArgument::Type(_)))
 }
 
 fn is_named_type(ty: &Type, expected: &str) -> bool {

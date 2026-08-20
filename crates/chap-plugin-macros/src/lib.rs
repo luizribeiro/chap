@@ -18,7 +18,7 @@ pub fn plugin(input: TokenStream) -> TokenStream {
 }
 
 /// Applies CHAP's deserialization and JSON Schema settings conventions.
-#[proc_macro_derive(Settings, attributes(settings))]
+#[proc_macro_derive(Settings)]
 pub fn derive_settings(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     settings::expand(input)

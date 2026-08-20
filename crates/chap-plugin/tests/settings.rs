@@ -5,7 +5,6 @@ struct Settings {
     base_url: String,
     egress_origin: String,
     model: String,
-    #[settings(optional)]
     api_key: Option<String>,
 }
 
