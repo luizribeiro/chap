@@ -5,8 +5,10 @@
 //! either the `provider-plugin` or `tool-plugin` world.
 
 mod cap;
+mod export;
 #[path = "http.rs"]
 mod http_reexport;
+pub mod types;
 
 #[doc(hidden)]
 pub use lockgate_plugin::{__private, __wit_bindgen, alloc};
@@ -16,4 +18,5 @@ pub use lockgate_plugin::{
 };
 
 pub use cap::net;
+pub use export::{provider, tools};
 pub use http_reexport::http;

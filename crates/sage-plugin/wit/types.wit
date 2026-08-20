@@ -49,3 +49,7 @@ interface types {
     finish-reason: finish-reason,
   }
 }
+
+world sdk-types {
+  import types;
+}
