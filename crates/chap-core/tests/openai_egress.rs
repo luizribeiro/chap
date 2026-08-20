@@ -76,7 +76,7 @@ async fn completes_through_the_sage_host_against_an_allowed_local_server() {
     let component = build_openai_component(&workspace);
     let mock = MockServer::start();
     let directory = tempfile::tempdir().unwrap();
-    let config_path = directory.path().join("sage.toml");
+    let config_path = directory.path().join("chap.toml");
     write_openai_config(&config_path, &component, &mock.origin);
 
     let builder = AgentBuilder::load(&config_path).unwrap();
@@ -143,7 +143,7 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let component = build_openai_component(&workspace);
     let directory = tempfile::tempdir().unwrap();
-    let config_path = directory.path().join("sage.toml");
+    let config_path = directory.path().join("chap.toml");
     write_openai_config(&config_path, &component, "http://127.0.0.1:41001");
 
     AgentBuilder::load(&config_path)

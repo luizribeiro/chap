@@ -26,14 +26,14 @@ cargo run
 
 ## Plugins
 
-Plugins and their configuration live in `sage.toml`. List the configured
+Plugins and their configuration live in `chap.toml`. List the configured
 plugins with:
 
 ```console
 cargo run -- plugins list
 ```
 
-Use `--config /path/to/sage.toml` to read a different file.
+Use `--config /path/to/chap.toml` to read a different file.
 
 The repository includes an OpenAI-compatible Chat Completions provider and Kagi
 web tools. Build their configured release components with the system Cargo:
@@ -54,7 +54,7 @@ base-url = "http://127.0.0.1:8080/v1"
 egress-origin = "http://127.0.0.1:8080"
 model = "example-model"
 # Optional: the host reads this environment variable without storing its value
-# in sage.toml.
+# in chap.toml.
 api-key-env = "OPENAI_API_KEY"
 ```
 
@@ -89,7 +89,7 @@ cargo run -- plugins check
 
 `grants review` also accepts one instance id. `grants deny <instance-id>` removes
 that instance's approval. SAGE stores approvals in `consent.json` beside the
-selected `sage.toml`; concrete scopes remain in `sage.toml`. A permission
+selected `chap.toml`; concrete scopes remain in `chap.toml`. A permission
 expansion, such as changing `egress-origin`, blocks admission until the new
 manifest is reviewed and approved. Narrowing or removing authority is reported
 as non-blocking drift.
@@ -97,7 +97,7 @@ as non-blocking drift.
 `plugins check` verifies that every configured component exists, has matching
 embedded plugin metadata, implements a supported role, publishes a schema that
 accepts its settings, and has sufficient consent for admission. Use
-`--config /path/to/sage.toml` with either `grants` or `plugins` to select another
+`--config /path/to/chap.toml` with either `grants` or `plugins` to select another
 configuration.
 
 ### Typed plugin settings

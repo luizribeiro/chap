@@ -33,7 +33,7 @@ async fn approved_matching_manifest_admits_a_configured_provider() {
         ),
     )
     .unwrap();
-    let config_path = directory.join("sage.toml");
+    let config_path = directory.join("chap.toml");
     fs::write(
         &config_path,
         r#"
@@ -75,7 +75,7 @@ async fn first_run_refuses_only_the_unapproved_plugin() {
         provider_component("example.provider"),
     )
     .unwrap();
-    let config_path = directory.join("sage.toml");
+    let config_path = directory.join("chap.toml");
     fs::write(
         &config_path,
         r#"
@@ -121,7 +121,7 @@ async fn approving_then_denying_toggles_plugin_admission() {
         provider_component("example.provider"),
     )
     .unwrap();
-    let config_path = directory.join("sage.toml");
+    let config_path = directory.join("chap.toml");
     fs::write(
         &config_path,
         r#"
@@ -171,7 +171,7 @@ async fn nonblocking_drift_errors_are_reported_without_panicking() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
     fs::write(&component, provider_component("example.provider")).unwrap();
-    let config_path = directory.join("sage.toml");
+    let config_path = directory.join("chap.toml");
     fs::write(
         &config_path,
         r#"
@@ -215,7 +215,7 @@ async fn rejects_missing_required_settings_during_prepare() {
         ),
     )
     .unwrap();
-    let config_path = directory.join("sage.toml");
+    let config_path = directory.join("chap.toml");
     fs::write(
         &config_path,
         r#"
@@ -248,7 +248,7 @@ async fn validates_settings_before_loading_tool_definitions() {
         ),
     )
     .unwrap();
-    let config_path = directory.join("sage.toml");
+    let config_path = directory.join("chap.toml");
     fs::write(
         &config_path,
         r#"
@@ -273,7 +273,7 @@ component = "tools.wasm"
 #[tokio::test]
 async fn reports_framework_schema_transport_errors() {
     let directory = test_directory();
-    let config_path = directory.join("sage.toml");
+    let config_path = directory.join("chap.toml");
     fs::write(
         &config_path,
         r#"
@@ -301,7 +301,7 @@ fn discovers_a_configured_tool_plugin() {
     let directory = test_directory();
     let component = directory.join("tools.wasm");
     fs::write(&component, tool_component("example.tools")).unwrap();
-    let config_path = directory.join("sage.toml");
+    let config_path = directory.join("chap.toml");
     fs::write(
         &config_path,
         r#"
@@ -325,7 +325,7 @@ async fn loads_definitions_from_an_admitted_tool_plugin() {
         tool_component("example.tools"),
     )
     .unwrap();
-    let config_path = directory.join("sage.toml");
+    let config_path = directory.join("chap.toml");
     fs::write(
         &config_path,
         r#"
@@ -349,7 +349,7 @@ async fn accepts_an_instance_id_that_differs_from_plugin_metadata() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
     fs::write(&component, provider_component("embedded.id")).unwrap();
-    let config_path = directory.join("sage.toml");
+    let config_path = directory.join("chap.toml");
     fs::write(
         &config_path,
         r#"
@@ -374,7 +374,7 @@ async fn drops_partial_start_resources_on_a_blocking_thread() {
         provider_component("example.provider"),
     )
     .unwrap();
-    let config_path = directory.join("sage.toml");
+    let config_path = directory.join("chap.toml");
     fs::write(
         &config_path,
         r#"
@@ -409,7 +409,7 @@ async fn reports_the_component_path_for_an_unsupported_plugin_role() {
     let directory = test_directory();
     let component = directory.join("unsupported.wasm");
     fs::write(&component, unsupported_component("example.unsupported")).unwrap();
-    let config_path = directory.join("sage.toml");
+    let config_path = directory.join("chap.toml");
     fs::write(
         &config_path,
         r#"

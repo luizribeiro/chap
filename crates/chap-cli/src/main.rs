@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 #[command(version, about = "A plugin-powered coding agent")]
 struct Cli {
     /// Configuration file to read.
-    #[arg(long, default_value = "sage.toml", global = true)]
+    #[arg(long, default_value = "chap.toml", global = true)]
     config: PathBuf,
 
     #[command(subcommand)]
@@ -108,7 +108,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         })) => {
             builder.approve_plugin(&instance_id).await?;
             println!(
-                "Approved `{instance_id}` for its exact resolved manifest. Concrete scopes remain configured in sage.toml."
+                "Approved `{instance_id}` for its exact resolved manifest. Concrete scopes remain configured in chap.toml."
             );
         }
         Some(Command::Grants(Grants {
@@ -137,7 +137,7 @@ async fn grants_review(
     }
 
     let mut output = String::from(
-        "Concrete scopes come from sage.toml; approval grants this exact resolved manifest.\n",
+        "Concrete scopes come from chap.toml; approval grants this exact resolved manifest.\n",
     );
     for (index, id) in ids.iter().enumerate() {
         if index > 0 {

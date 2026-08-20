@@ -9,7 +9,7 @@ async fn migrated_kagi_component_admits_and_classifies_as_tools_only() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let component = build_kagi_component(&workspace);
     let directory = tempfile::tempdir().unwrap();
-    let config_path = directory.path().join("sage.toml");
+    let config_path = directory.path().join("chap.toml");
     std::fs::write(
         &config_path,
         format!(
