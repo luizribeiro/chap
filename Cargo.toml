@@ -22,6 +22,7 @@ lockgate = { git = "https://github.com/luizribeiro/lockgate.git", branch = "plug
 lockgate-http = { git = "https://github.com/luizribeiro/lockgate.git", branch = "plugin-sdk" }
 lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", branch = "plugin-sdk", default-features = false }
 sage-plugin = { path = "crates/sage-plugin" }
+sage-plugin-macros = { path = "crates/sage-plugin-macros" }
 pulldown-cmark = "0.13.4"
 proc-macro-crate = "3.5.0"
 proc-macro2 = "1.0.107"

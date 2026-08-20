@@ -13,3 +13,4 @@ http = ["dep:lockgate-http"]
 [dependencies]
 lockgate-http = { workspace = true, optional = true }
 lockgate-plugin = { workspace = true }
+sage-plugin-macros = { workspace = true }

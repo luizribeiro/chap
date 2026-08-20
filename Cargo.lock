@@ -2245,6 +2245,7 @@ version = "0.1.0"
 dependencies = [
  "lockgate-http",
  "lockgate-plugin",
+ "sage-plugin-macros",
 ]
 
 [[package]]
