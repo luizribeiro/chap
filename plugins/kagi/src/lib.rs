@@ -1,14 +1,10 @@
-use http::{HeaderMap, HeaderValue, header};
-use http_body_util::BodyExt;
 use sage::tools::ToolDefinition;
 use sage_plugin as sage;
 use sage_plugin::{MetadataSource, Needs, Plugin, ScopeRef, Tools, net};
 use serde::{Deserialize, Serialize};
 use url::Url;
-use wasi_fetch::Client;
 
 const API_BASE_URL: &str = "https://kagi.com/api/v1";
-const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const WEB_FETCH: &str = "web_fetch";
 const WEB_SEARCH: &str = "web_search";
 const DEFAULT_SEARCH_LIMIT: usize = 10;
@@ -72,38 +68,70 @@ impl Tools for Kagi {
     }
 
     async fn execute(&self, name: String, arguments: String) -> Result<String, String> {
-        match name.as_str() {
+        enum Output {
+            Search(usize),
+            Extract(usize),
+        }
+
+        let (path, request, output) = match name.as_str() {
             WEB_SEARCH => {
                 let arguments: SearchArguments = parse_arguments(WEB_SEARCH, &arguments)?;
                 arguments.validate()?;
-                let body = post_json(
-                    "/search",
-                    &self.settings.api_key,
-                    &SearchRequest {
-                        query: &arguments.query,
-                        workflow: "search",
-                        format: "json",
-                        limit: arguments.limit,
-                    },
-                )
-                .await?;
-                search_output(&body, arguments.limit)
+                let request = serde_json::to_vec(&SearchRequest {
+                    query: &arguments.query,
+                    workflow: "search",
+                    format: "json",
+                    limit: arguments.limit,
+                })
+                .map_err(|error| format!("failed to encode Kagi request: {error}"))?;
+                ("/search", request, Output::Search(arguments.limit))
             }
             WEB_FETCH => {
                 let arguments: FetchArguments = parse_arguments(WEB_FETCH, &arguments)?;
                 arguments.validate()?;
-                let body = post_json(
+                let request = serde_json::to_vec(&ExtractRequest {
+                    pages: arguments.urls.iter().map(|url| PageInput { url }).collect(),
+                    format: "json",
+                })
+                .map_err(|error| format!("failed to encode Kagi request: {error}"))?;
+                (
                     "/extract",
-                    &self.settings.api_key,
-                    &ExtractRequest {
-                        pages: arguments.urls.iter().map(|url| PageInput { url }).collect(),
-                        format: "json",
-                    },
+                    request,
+                    Output::Extract(arguments.max_chars_per_page),
                 )
-                .await?;
-                extract_output(&body, arguments.max_chars_per_page)
             }
-            _ => Err(format!("tool `{name}` is not provided by the Kagi plugin")),
+            _ => return Err(format!("tool `{name}` is not provided by the Kagi plugin")),
+        };
+        let url = format!("{API_BASE_URL}{path}");
+        #[cfg(target_arch = "wasm32")]
+        let transport: Result<(u16, String), String> = {
+            let response = sage::http::Client::with_max_response_bytes(8 * 1024 * 1024)
+                .post(&url)
+                .header("accept", "application/json")
+                .map_err(|error| error.to_string())?
+                .header("content-type", "application/json")
+                .map_err(|error| error.to_string())?
+                .bearer(Some(&self.settings.api_key))
+                .body(request)
+                .send()
+                .await
+                .map_err(|error| error.to_string())?;
+            let status = response.status();
+            let body = response.text().map_err(|error| error.to_string())?;
+            Ok((status, body))
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let transport: Result<(u16, String), String> = {
+            let _ = (url, request, &self.settings.api_key);
+            Err("HTTP transport is only available to WebAssembly plugins".to_owned())
+        };
+        let (status, body) = transport?;
+        if !(200..300).contains(&status) {
+            return Err(api_error(status, &body));
+        }
+        match output {
+            Output::Search(limit) => search_output(&body, limit),
+            Output::Extract(max_chars) => extract_output(&body, max_chars),
         }
     }
 }
@@ -193,54 +221,6 @@ struct ExtractRequest<'a> {
 #[derive(Serialize)]
 struct PageInput<'a> {
     url: &'a str,
-}
-
-async fn post_json(path: &str, token: &str, body: &impl Serialize) -> Result<String, String> {
-    let body = serde_json::to_vec(body)
-        .map_err(|error| format!("failed to encode Kagi request: {error}"))?;
-    let mut headers = HeaderMap::new();
-    headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
-    );
-    headers.insert(
-        header::AUTHORIZATION,
-        HeaderValue::try_from(format!("Bearer {token}"))
-            .map_err(|_| "Kagi API key contains invalid header characters".to_owned())?,
-    );
-
-    let url = format!("{API_BASE_URL}{path}");
-    let response = Client::new()
-        .post(&url)
-        .headers(headers)
-        .body(body)
-        .send()
-        .await
-        .map_err(|error| format!("Kagi HTTP request failed: {error}"))?;
-    let status = response.status().as_u16();
-    let body = collect_limited(response.into_body(), MAX_RESPONSE_BYTES).await?;
-    let body = String::from_utf8(body)
-        .map_err(|error| format!("Kagi response was not valid UTF-8: {error}"))?;
-    if !(200..300).contains(&status) {
-        return Err(api_error(status, &body));
-    }
-    Ok(body)
-}
-
-async fn collect_limited(mut body: wasi_fetch::Body, limit: usize) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
-    while let Some(frame) = body.frame().await {
-        let frame = frame.map_err(|error| format!("failed to read Kagi response: {error}"))?;
-        let Ok(chunk) = frame.into_data() else {
-            continue;
-        };
-        if bytes.len().saturating_add(chunk.len()) > limit {
-            return Err(format!("Kagi response exceeded the {limit}-byte limit"));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    Ok(bytes)
 }
 
 #[derive(Deserialize)]
