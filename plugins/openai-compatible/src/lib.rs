@@ -1,27 +1,19 @@
-extern crate sage_plugin as sage_plugin_internals;
-
-sage_plugin::generate!({
-    path: "../../crates/sage-plugin/wit",
-    world: "provider-plugin",
-});
-
-use exports::sage::agent::provider::Guest;
-use exports::sage::agent::types::{
+use http::{HeaderMap, HeaderName, HeaderValue};
+use http_body_util::BodyExt;
+use sage::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message as ProviderMessage,
     ToolCall as ProviderToolCall, ToolDefinition as ProviderTool,
 };
-use http::{HeaderMap, HeaderName, HeaderValue};
-use http_body_util::BodyExt;
 use sage_plugin as sage;
-use sage_plugin::__lockgate::Plugin;
-use sage_plugin::{MetadataSource, Need, Needs, ScopeRef, net};
+use sage_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, net};
 use serde::{Deserialize, Serialize};
 use wasi_fetch::Client;
 
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
-const REQUIRED: &[Need] = &[net::EGRESS.need(&[ScopeRef::setting("/egress-origin")])];
 
-struct OpenAiCompatible;
+struct OpenAiCompatible {
+    settings: Settings,
+}
 
 impl Plugin for OpenAiCompatible {
     const ID: &'static str = "openai";
@@ -31,16 +23,21 @@ impl Plugin for OpenAiCompatible {
     const LICENSE: MetadataSource = MetadataSource::Absent;
     const REPOSITORY: MetadataSource = MetadataSource::Absent;
     const HOMEPAGE: MetadataSource = MetadataSource::Absent;
-    const NEEDS: Needs = Needs::required(REQUIRED);
+    const NEEDS: Needs =
+        Needs::required(&[net::EGRESS.need(&[ScopeRef::setting("/egress-origin")])]);
     type Settings = Settings;
+
+    fn new(settings: Self::Settings) -> Self {
+        Self { settings }
+    }
 }
 
-impl Guest for OpenAiCompatible {
-    async fn complete(request: CompletionRequest) -> Result<Completion, String> {
-        let settings = Self::settings();
+impl Provider for OpenAiCompatible {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, String> {
+        let settings = &self.settings;
         let _ = &settings.egress_origin;
         let request = serde_json::to_string(&Request {
-            model: settings.model,
+            model: settings.model.clone(),
             messages: request
                 .messages
                 .into_iter()
@@ -59,7 +56,7 @@ impl Guest for OpenAiCompatible {
             settings.base_url.trim_end_matches('/')
         );
         let mut headers = vec![("content-type".to_owned(), "application/json".to_owned())];
-        if let Some(api_key) = settings.api_key.filter(|key| !key.is_empty()) {
+        if let Some(api_key) = settings.api_key.as_deref().filter(|key| !key.is_empty()) {
             headers.push(("authorization".to_owned(), format!("Bearer {api_key}")));
         }
         let (status, body) = post(&url, &headers, request.as_bytes()).await?;
@@ -416,7 +413,7 @@ mod tests {
                 name: "weather".to_owned(),
                 arguments: r#"{"city":"Paris"}"#.to_owned(),
             })]),
-            ProviderMessage::ToolResult(exports::sage::agent::types::ToolResult {
+            ProviderMessage::ToolResult(sage::types::ToolResult {
                 call_id: "call-1".to_owned(),
                 name: "weather".to_owned(),
                 output: "sunny".to_owned(),
@@ -457,7 +454,4 @@ mod tests {
     }
 }
 
-sage_plugin::__lockgate::export!(
-    OpenAiCompatible;
-    facade = ::sage_plugin::__lockgate
-);
+sage::plugin!(OpenAiCompatible: Provider);
