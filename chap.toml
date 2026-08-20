@@ -13,7 +13,6 @@ component = "./target/wasm32-wasip2/release/chap_openai_compatible.wasm"
 
 [plugins.openai.settings]
 base-url = "http://127.0.0.1:8080/v1"
-egress-origin = "http://127.0.0.1:8080"
 model = "Inkling-Small-mxfp4-mtp4"
 
 [plugins.kagi]

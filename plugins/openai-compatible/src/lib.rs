@@ -19,7 +19,7 @@ impl Plugin for OpenAiCompatible {
     const REPOSITORY: MetadataSource = MetadataSource::Absent;
     const HOMEPAGE: MetadataSource = MetadataSource::Absent;
     const NEEDS: Needs = Needs::required(&[
-        net::EGRESS.need(&[ScopeRef::setting("/egress-origin")]),
+        net::EGRESS.need(&[ScopeRef::setting("/base-url")]),
         env::READ.need(&[ScopeRef::setting("/api-key-env")]),
     ]);
     type Settings = Settings;
@@ -32,10 +32,6 @@ impl Plugin for OpenAiCompatible {
 #[derive(chap::Settings)]
 struct Settings {
     base_url: String,
-    // Lockgate resolves the egress scope from this setting; plugin code never
-    // reads it.
-    #[allow(dead_code)]
-    egress_origin: String,
     model: String,
     api_key_env: String,
 }

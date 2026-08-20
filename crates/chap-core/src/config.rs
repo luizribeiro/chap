@@ -94,7 +94,6 @@ component = "./plugins/openai-compatible.wasm"
 
 [plugins.openai.settings]
 base-url = "https://api.example.com/v1"
-egress-origin = "https://api.example.com"
 model = "example-model"
 "#,
         )
@@ -108,7 +107,6 @@ model = "example-model"
         );
         let settings = plugin.settings();
         assert_eq!(settings["base-url"], "https://api.example.com/v1");
-        assert_eq!(settings["egress-origin"], "https://api.example.com");
         assert_eq!(settings["model"], "example-model");
     }
 

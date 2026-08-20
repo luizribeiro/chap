@@ -287,7 +287,6 @@ component = {component:?}
 
 [plugins.openai.settings]
 base-url = "{origin}/v1"
-egress-origin = "{origin}"
 model = "mock-model"
 api-key-env = "CHAP_TEST_OPENAI_API_KEY"
 "#,
