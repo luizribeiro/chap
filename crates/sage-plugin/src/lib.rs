@@ -19,7 +19,7 @@ pub use lockgate_plugin::{
     Deserialize, HttpOrigin, JsonSchema, MetadataSource, Need, Needs, NoSettings, Permission,
     ScopeRef, ScopedPermission, SettingsPolicy, export, generate, schemars, serde,
 };
-pub use sage_plugin_macros::Settings;
+pub use sage_plugin_macros::{Settings, plugin};
 
 pub use cap::net;
 #[cfg(feature = "provider")]

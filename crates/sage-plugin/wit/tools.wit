@@ -6,14 +6,3 @@ interface tools {
   definitions: func() -> result<list<tool-definition>, string>;
   execute: async func(name: string, arguments: string) -> result<string, string>;
 }
-
-world tool-plugin {
-  export types;
-  export tools;
-}
-
-world host {
-  export types;
-  export provider;
-  export tools;
-}

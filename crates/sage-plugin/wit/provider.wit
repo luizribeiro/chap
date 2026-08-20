@@ -5,8 +5,3 @@ interface provider {
 
   complete: async func(request: completion-request) -> result<completion, string>;
 }
-
-world provider-plugin {
-  export types;
-  export provider;
-}
