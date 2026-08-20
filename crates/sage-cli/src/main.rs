@@ -32,6 +32,16 @@ struct Grants {
 
 #[derive(Debug, Subcommand)]
 enum GrantsCommand {
+    /// Approve the plugin's exact currently resolved permission manifest.
+    Approve {
+        /// Plugin instance to approve.
+        instance_id: String,
+    },
+    /// Remove a plugin's stored approval.
+    Deny {
+        /// Plugin instance to deny.
+        instance_id: String,
+    },
     /// Review resolved permission requests without approving them.
     Review {
         /// Plugin instance to review; omit to review every configured plugin.
@@ -93,6 +103,20 @@ async fn run(cli: Cli) -> Result<(), String> {
         Some(Command::Grants(Grants {
             command: GrantsCommand::Review { instance_id },
         })) => print!("{}", grants_review(&builder, instance_id.as_deref()).await?),
+        Some(Command::Grants(Grants {
+            command: GrantsCommand::Approve { instance_id },
+        })) => {
+            builder.approve_plugin(&instance_id).await?;
+            println!(
+                "Approved `{instance_id}` for its exact resolved manifest. Concrete scopes remain configured in sage.toml."
+            );
+        }
+        Some(Command::Grants(Grants {
+            command: GrantsCommand::Deny { instance_id },
+        })) => {
+            builder.deny_plugin(&instance_id)?;
+            println!("Denied `{instance_id}`. It will require approval before its next admission.");
+        }
     }
     Ok(())
 }

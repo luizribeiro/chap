@@ -157,6 +157,13 @@ impl AgentBuilder {
         Ok(record)
     }
 
+    pub fn deny_plugin(&self, id: &str) -> Result<(), String> {
+        if self.config.plugin(id).is_none() {
+            return Err(format!("plugin `{id}` is not configured"));
+        }
+        self.consent.remove(id)
+    }
+
     pub async fn review_plugin(&self, id: &str) -> Result<PluginConsentReview, String> {
         let (prepared, resources) = self.prepare_configured_plugin(id).await?;
         let manifest = prepared.review();
