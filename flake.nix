@@ -36,6 +36,7 @@
             "rust-src"
             "rustfmt"
           ];
+          targets = [ "wasm32-wasip2" ];
         };
         wasiSysroot = import ./nix/wasip3-sysroot.nix { inherit pkgs system; };
         rustfmtHook = {
