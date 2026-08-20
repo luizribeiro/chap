@@ -436,7 +436,7 @@ mod tests {
             "https://json-schema.org/draft/2020-12/schema"
         );
         assert_eq!(schema["type"], "object");
-        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["unevaluatedProperties"], false);
         assert_eq!(schema["properties"].as_object().unwrap().len(), 1);
         assert_eq!(schema["properties"]["api-key"]["type"], "string");
         assert_eq!(schema["properties"]["api-key"]["pattern"], r"\S");
