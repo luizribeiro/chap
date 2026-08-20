@@ -23,10 +23,14 @@ lockgate-http = { git = "https://github.com/luizribeiro/lockgate.git", branch = 
 lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", branch = "plugin-sdk", default-features = false }
 sage-plugin = { path = "crates/sage-plugin" }
 pulldown-cmark = "0.13.4"
+proc-macro-crate = "3.5.0"
+proc-macro2 = "1.0.107"
+quote = "1.0.47"
 schemars = "1.2.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 shlex = "2.0.1"
+syn = { version = "2.0.119", features = ["full"] }
 tempfile = "3.27.0"
 time = { version = "0.3.41", features = ["formatting", "parsing"] }
 tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "sync", "time"] }

@@ -2250,6 +2250,12 @@ dependencies = [
 [[package]]
 name = "sage-plugin-macros"
 version = "0.1.0"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "same-file"
