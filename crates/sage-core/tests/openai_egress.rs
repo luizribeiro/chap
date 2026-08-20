@@ -1,4 +1,4 @@
-use sage_core::{AgentBuilder, DriftKind, SessionOptions};
+use sage_core::{AgentBuilder, DriftKind, SessionEventKind, SessionOptions};
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -84,13 +84,38 @@ async fn completes_through_the_sage_host_against_an_allowed_local_server() {
     let agent = builder.start().await.unwrap();
     assert!(agent.plugin_errors().next().is_none());
     let session = agent.session(SessionOptions::new("openai")).unwrap();
+    let mut events = session.subscribe();
     let completion = tokio::time::timeout(INVOCATION_TIMEOUT, session.send("hello"))
         .await
         .expect("provider invocation timed out")
         .expect("provider invocation failed");
+    let events = tokio::time::timeout(INVOCATION_TIMEOUT, async {
+        let mut observed = Vec::new();
+        for _ in 0..3 {
+            observed.push(events.recv().await.unwrap().unwrap());
+        }
+        observed
+    })
+    .await
+    .expect("agent loop events timed out");
     let received = mock.finish();
 
     assert_eq!(completion, "mocked response");
+    assert_eq!(events[0].sequence, 1);
+    assert!(matches!(
+        &events[0].kind,
+        SessionEventKind::RunStarted { input } if input == "hello"
+    ));
+    assert_eq!(events[1].sequence, 2);
+    assert!(matches!(
+        &events[1].kind,
+        SessionEventKind::AssistantMessage { text } if text == "mocked response"
+    ));
+    assert_eq!(events[2].sequence, 3);
+    assert!(matches!(
+        &events[2].kind,
+        SessionEventKind::RunCompleted { response } if response == "mocked response"
+    ));
     assert!(
         received
             .head
