@@ -372,12 +372,16 @@ impl AgentBuilder {
                 "plugin `{id}` from `{}` requires approval before admission; run `sage grants review {id}` and then `sage grants approve {id}`",
                 path.display()
             ),
-            ConsentRequired::Drift { drift, .. } if drift.blocks_admission => format!(
-                "plugin `{id}` from `{}` expanded its permission manifest and requires renewed approval before admission; run `sage grants review {id}` and then `sage grants approve {id}`",
-                path.display()
-            ),
-            ConsentRequired::Drift { .. } => {
-                unreachable!("Lockgate only reports consent drift when it blocks admission")
+            ConsentRequired::Drift { drift, .. } => {
+                let change = if drift.blocks_admission {
+                    "expanded its permission manifest"
+                } else {
+                    "reported a changed permission manifest"
+                };
+                format!(
+                    "plugin `{id}` from `{}` {change} and requires renewed approval before admission; run `sage grants review {id}` and then `sage grants approve {id}`",
+                    path.display()
+                )
             }
         }
     }
