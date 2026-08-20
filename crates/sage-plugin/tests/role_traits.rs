@@ -1,10 +1,11 @@
 #![cfg(all(feature = "provider", feature = "tools"))]
 
-use sage_plugin::{
+use sage::{
     Provider, Tools,
     provider::{Completion, CompletionRequest, FinishReason},
     tools::ToolDefinition,
 };
+use sage_plugin as sage;
 
 struct Dummy;
 
@@ -34,4 +35,10 @@ fn role_traits_are_implementable() {
 
     assert_provider::<Dummy>();
     assert_tools::<Dummy>();
+}
+
+#[cfg(target_arch = "wasm32")]
+#[test]
+fn http_client_resolves() {
+    let _client = sage::http::Client::new();
 }
