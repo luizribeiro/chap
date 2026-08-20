@@ -46,6 +46,10 @@ impl Config {
     pub(crate) fn component_path(&self, plugin: &Plugin) -> PathBuf {
         self.directory.join(&plugin.component)
     }
+
+    pub(crate) fn consent_path(&self) -> PathBuf {
+        self.directory.join("consent.json")
+    }
 }
 
 impl Plugin {

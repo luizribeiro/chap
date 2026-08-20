@@ -1,9 +1,11 @@
 use crate::config::{Config, Plugin as ConfiguredPlugin};
+use crate::consent::ConsentStore;
 use crate::session::{Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions};
 use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition};
 use lockgate::{
-    Host, HostBuilder, InvocationCtx, PluginConfig, PluginHandle, Role, RoleError, RuntimeLimits,
+    ConsentRequired, Host, HostBuilder, InvocationCtx, PluginConfig, PluginHandle, Role, RoleError,
+    RuntimeLimits,
 };
 use plugin_tool::PluginTool;
 use provider::PluginBackend;
@@ -77,6 +79,7 @@ struct LoadedPlugin {
 
 pub struct AgentBuilder {
     config: Config,
+    consent: ConsentStore,
     tools: ToolRegistry,
 }
 
@@ -87,14 +90,18 @@ pub struct Agent {
 pub(crate) struct AgentInner {
     lockgate: Arc<InnerHost>,
     plugins: BTreeMap<String, LoadedPlugin>,
+    plugin_errors: BTreeMap<String, String>,
     sessions: SessionManager,
     tools: ToolRegistry,
 }
 
 impl AgentBuilder {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
+        let config = Config::load(path.as_ref())?;
+        let consent = ConsentStore::new(config.consent_path());
         Ok(Self {
-            config: Config::load(path.as_ref())?,
+            config,
+            consent,
             tools: ToolRegistry::new(),
         })
     }
@@ -140,25 +147,31 @@ impl AgentBuilder {
     }
 
     pub async fn start(self) -> Result<Agent, String> {
-        let Self { config, tools } = self;
+        let Self {
+            config,
+            consent,
+            tools,
+        } = self;
         let builder = HostBuilder::new(())
             .map_err(|error| format!("failed to create Lockgate host: {error}"))?;
         let mut resources = StartResources::new(tools, builder);
-        let plugins = match Self::initialize_plugins(&mut resources, &config).await {
-            Ok(plugins) => plugins,
-            Err(error) => {
-                return match resources.cleanup().await {
-                    Ok(()) => Err(error),
-                    Err(cleanup_error) => Err(format!("{error}; {cleanup_error}")),
-                };
-            }
-        };
+        let (plugins, plugin_errors) =
+            match Self::initialize_plugins(&mut resources, &config, &consent).await {
+                Ok(plugins) => plugins,
+                Err(error) => {
+                    return match resources.cleanup().await {
+                        Ok(()) => Err(error),
+                        Err(cleanup_error) => Err(format!("{error}; {cleanup_error}")),
+                    };
+                }
+            };
         let lockgate = resources.host.take().expect("initialized Lockgate host");
         let tools = resources.tools.take().expect("initialized tool registry");
         Ok(Agent {
             inner: Arc::new(AgentInner {
                 lockgate,
                 plugins,
+                plugin_errors,
                 sessions: SessionManager::new(),
                 tools,
             }),
@@ -168,10 +181,12 @@ impl AgentBuilder {
     async fn initialize_plugins(
         resources: &mut StartResources,
         config: &Config,
-    ) -> Result<BTreeMap<String, LoadedPlugin>, String> {
-        let handles = Self::load_plugins(
+        consent: &ConsentStore,
+    ) -> Result<(BTreeMap<String, LoadedPlugin>, BTreeMap<String, String>), String> {
+        let (handles, plugin_errors) = Self::load_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
             config,
+            consent,
         )
         .await?;
         let builder = resources.builder.take().expect("uninitialized host");
@@ -190,29 +205,38 @@ impl AgentBuilder {
                     .register(tool)?;
             }
         }
-        Ok(plugins)
+        Ok((plugins, plugin_errors))
     }
 
     async fn load_plugins(
         builder: &mut HostBuilder<()>,
         config: &Config,
-    ) -> Result<BTreeMap<String, PluginHandle>, String> {
+        consent: &ConsentStore,
+    ) -> Result<(BTreeMap<String, PluginHandle>, BTreeMap<String, String>), String> {
         let mut plugins = BTreeMap::new();
+        let mut plugin_errors = BTreeMap::new();
 
         for (id, plugin) in config.plugins() {
-            let handle = Self::load_plugin(builder, config, id, plugin).await?;
-            plugins.insert(id.to_owned(), handle);
+            match Self::load_plugin(builder, config, consent, id, plugin).await? {
+                PluginLoad::Admitted(handle) => {
+                    plugins.insert(id.to_owned(), handle);
+                }
+                PluginLoad::Refused(error) => {
+                    plugin_errors.insert(id.to_owned(), error);
+                }
+            }
         }
 
-        Ok(plugins)
+        Ok((plugins, plugin_errors))
     }
 
     async fn load_plugin(
         builder: &mut HostBuilder<()>,
         config: &Config,
+        consent: &ConsentStore,
         id: &str,
         plugin: &ConfiguredPlugin,
-    ) -> Result<PluginHandle, String> {
+    ) -> Result<PluginLoad, String> {
         let path = config.component_path(plugin);
         let bytes = Self::plugin_bytes(config, id, plugin)?;
         let settings = plugin.settings(id)?;
@@ -227,7 +251,19 @@ impl AgentBuilder {
             )
             .await
             .map_err(|error| Self::load_error(id, &path, error))?;
-        let acceptance = prepared.accept_all();
+        let record = consent.load(id);
+        let acceptance = match prepared.accept_reviewed(record.as_ref()) {
+            Ok(acceptance) => acceptance,
+            Err(required) => {
+                let error = Self::consent_error(id, &path, required);
+                tokio::task::spawn_blocking(move || drop(prepared))
+                    .await
+                    .map_err(|error| {
+                        format!("failed to clean up refused plugin `{id}`: {error}")
+                    })?;
+                return Ok(PluginLoad::Refused(error));
+            }
+        };
         builder
             .admit(
                 prepared,
@@ -236,7 +272,24 @@ impl AgentBuilder {
                 InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL),
             )
             .await
+            .map(PluginLoad::Admitted)
             .map_err(|error| Self::load_error(id, &path, error))
+    }
+
+    fn consent_error(id: &str, path: &Path, required: ConsentRequired) -> String {
+        match required {
+            ConsentRequired::FirstRun { .. } => format!(
+                "plugin `{id}` from `{}` requires approval before admission; run `sage grants review {id}` and then `sage grants approve {id}`",
+                path.display()
+            ),
+            ConsentRequired::Drift { drift, .. } if drift.blocks_admission => format!(
+                "plugin `{id}` from `{}` expanded its permission manifest and requires renewed approval before admission; run `sage grants review {id}` and then `sage grants approve {id}`",
+                path.display()
+            ),
+            ConsentRequired::Drift { .. } => {
+                unreachable!("Lockgate only reports consent drift when it blocks admission")
+            }
+        }
     }
 
     fn load_error(id: &str, path: &Path, error: impl std::fmt::Display) -> String {
@@ -307,11 +360,21 @@ impl AgentBuilder {
 }
 
 impl Agent {
+    pub fn plugin_errors(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.inner
+            .plugin_errors
+            .iter()
+            .map(|(id, error)| (id.as_str(), error.as_str()))
+    }
+
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
         self.inner.tools.definitions()
     }
 
     pub fn session(&self, options: SessionOptions) -> Result<Session, String> {
+        if let Some(error) = self.inner.plugin_errors.get(&options.provider) {
+            return Err(error.clone());
+        }
         if !self
             .inner
             .plugins
@@ -326,6 +389,11 @@ impl Agent {
         let state = self.inner.sessions.create(options)?;
         Ok(Session::new(state, self.inner.clone()))
     }
+}
+
+enum PluginLoad {
+    Admitted(PluginHandle),
+    Refused(String),
 }
 
 impl AgentInner {
