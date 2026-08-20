@@ -1,19 +1,8 @@
-extern crate sage_plugin as sage_plugin_internals;
-
-sage_plugin::generate!({
-    path: "../../crates/sage-plugin/wit",
-    world: "tool-plugin",
-});
-
-#[cfg(test)]
-use exports::lockgate::config::schema::Guest as ConfigurationGuest;
-use exports::sage::agent::tools::Guest;
-use exports::sage::agent::types::ToolDefinition;
 use http::{HeaderMap, HeaderValue, header};
 use http_body_util::BodyExt;
+use sage::tools::ToolDefinition;
 use sage_plugin as sage;
-use sage_plugin::__lockgate::Plugin;
-use sage_plugin::{MetadataSource, Needs, ScopeRef, net};
+use sage_plugin::{MetadataSource, Needs, Plugin, ScopeRef, Tools, net};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use wasi_fetch::Client;
@@ -28,7 +17,9 @@ const DEFAULT_MAX_CHARS: usize = 30_000;
 const MIN_MAX_CHARS: usize = 1_000;
 const MAX_MAX_CHARS: usize = 100_000;
 
-struct Kagi;
+struct Kagi {
+    settings: Settings,
+}
 
 impl Plugin for Kagi {
     const ID: &'static str = "kagi";
@@ -41,10 +32,14 @@ impl Plugin for Kagi {
     const NEEDS: Needs =
         Needs::required(&[net::EGRESS.need(&[ScopeRef::literal("https://kagi.com")])]);
     type Settings = Settings;
+
+    fn new(settings: Self::Settings) -> Self {
+        Self { settings }
+    }
 }
 
-impl Guest for Kagi {
-    fn definitions() -> Result<Vec<ToolDefinition>, String> {
+impl Tools for Kagi {
+    fn definitions(&self) -> Result<Vec<ToolDefinition>, String> {
         Ok(vec![
             ToolDefinition {
                 name: WEB_SEARCH.to_owned(),
@@ -76,15 +71,14 @@ impl Guest for Kagi {
         ])
     }
 
-    async fn execute(name: String, arguments: String) -> Result<String, String> {
+    async fn execute(&self, name: String, arguments: String) -> Result<String, String> {
         match name.as_str() {
             WEB_SEARCH => {
                 let arguments: SearchArguments = parse_arguments(WEB_SEARCH, &arguments)?;
                 arguments.validate()?;
-                let settings = Self::settings();
                 let body = post_json(
                     "/search",
-                    &settings.api_key,
+                    &self.settings.api_key,
                     &SearchRequest {
                         query: &arguments.query,
                         workflow: "search",
@@ -98,10 +92,9 @@ impl Guest for Kagi {
             WEB_FETCH => {
                 let arguments: FetchArguments = parse_arguments(WEB_FETCH, &arguments)?;
                 arguments.validate()?;
-                let settings = Self::settings();
                 let body = post_json(
                     "/extract",
-                    &settings.api_key,
+                    &self.settings.api_key,
                     &ExtractRequest {
                         pages: arguments.urls.iter().map(|url| PageInput { url }).collect(),
                         format: "json",
@@ -428,7 +421,7 @@ mod tests {
 
     #[test]
     fn publishes_the_settings_object_schema() {
-        let schema = <Kagi as ConfigurationGuest>::settings_schema();
+        let schema = sage::__private::settings_schema::<Kagi>();
         let schema: serde_json::Value = serde_json::from_str(&schema).unwrap();
 
         assert_eq!(
@@ -446,7 +439,10 @@ mod tests {
 
     #[test]
     fn exposes_search_and_fetch_tools() {
-        let definitions = <Kagi as Guest>::definitions().unwrap();
+        let plugin = <Kagi as Plugin>::new(Settings {
+            api_key: "key".to_owned(),
+        });
+        let definitions = <Kagi as Tools>::definitions(&plugin).unwrap();
 
         assert_eq!(
             definitions
@@ -569,4 +565,4 @@ mod tests {
     }
 }
 
-sage_plugin::__lockgate::export!(Kagi; facade = ::sage_plugin::__lockgate);
+sage::plugin!(Kagi: Tools);
