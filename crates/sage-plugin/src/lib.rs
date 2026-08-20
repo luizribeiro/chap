@@ -1,6 +1,6 @@
 //! Guest authoring facade for SAGE plugins.
 //!
-//! The shared `sage:agent` WIT package lives in this crate's `wit` directory.
+//! The shared `chap:agent` WIT package lives in this crate's `wit` directory.
 //! Built-in plugins reference it as `../../crates/sage-plugin/wit` and select
 //! either the `provider-plugin` or `tool-plugin` world.
 

@@ -48,7 +48,7 @@ pub(crate) fn expand(input: PluginInput) -> syn::Result<TokenStream> {
             world: #world,
             facade: ::sage_plugin,
             with: {
-                "sage:agent/types@0.2.0": ::sage_plugin::types,
+                "chap:agent/types@0.2.0": ::sage_plugin::types,
             },
         });
 

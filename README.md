@@ -11,7 +11,7 @@ by Lockgate.
 - `crates/sage-cli` builds the `sage` executable and owns command-line and
   terminal interaction.
 - `crates/sage-plugin` is the thin plugin-author facade over Lockgate and owns
-  the shared `sage:agent` WIT package.
+  the shared `chap:agent` WIT package.
 - `plugins` contains independently compiled WebAssembly components.
 
 The CLI is the default workspace member, so root-level `cargo run` commands keep

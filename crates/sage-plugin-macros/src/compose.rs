@@ -1,7 +1,7 @@
 use crate::roles::Role;
 
 const TYPES_WIT: &str = include_str!("../../sage-plugin/wit/types.wit");
-const PACKAGE: &str = "package sage:agent@0.2.0;";
+const PACKAGE: &str = "package chap:agent@0.2.0;";
 pub(crate) const WORLD: &str = "sage-plugin";
 
 pub(crate) fn world(roles: &[&Role]) -> String {

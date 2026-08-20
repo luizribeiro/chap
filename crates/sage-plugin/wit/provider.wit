@@ -1,4 +1,4 @@
-package sage:agent@0.2.0;
+package chap:agent@0.2.0;
 
 interface provider {
   use types.{completion, completion-request};

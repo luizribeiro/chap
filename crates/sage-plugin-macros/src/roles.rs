@@ -40,7 +40,7 @@ pub(crate) fn resolve(name: &Ident) -> syn::Result<&'static Role> {
 fn provider_bridge(plugin: &Ident) -> TokenStream {
     quote! {
         #[automatically_derived]
-        impl exports::sage::agent::provider::Guest for #plugin {
+        impl exports::chap::agent::provider::Guest for #plugin {
             async fn complete(
                 request: ::sage_plugin::types::CompletionRequest,
             ) -> ::core::result::Result<
@@ -65,7 +65,7 @@ fn provider_test_reference(plugin: &Ident) -> TokenStream {
 fn tools_bridge(plugin: &Ident) -> TokenStream {
     quote! {
         #[automatically_derived]
-        impl exports::sage::agent::tools::Guest for #plugin {
+        impl exports::chap::agent::tools::Guest for #plugin {
             fn definitions() -> ::core::result::Result<
                 ::sage_plugin::alloc::vec::Vec<::sage_plugin::types::ToolDefinition>,
                 ::sage_plugin::alloc::string::String,
