@@ -6,8 +6,10 @@
 
 mod cap;
 mod export;
+#[cfg(feature = "http")]
 #[path = "http.rs"]
 mod http_reexport;
+#[cfg(any(feature = "provider", feature = "tools"))]
 pub mod types;
 
 #[doc(hidden)]
@@ -18,5 +20,9 @@ pub use lockgate_plugin::{
 };
 
 pub use cap::net;
-pub use export::{Provider, Tools, provider, tools};
+#[cfg(feature = "provider")]
+pub use export::{Provider, provider};
+#[cfg(feature = "tools")]
+pub use export::{Tools, tools};
+#[cfg(feature = "http")]
 pub use http_reexport::http;

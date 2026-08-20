@@ -1,3 +1,5 @@
+#![cfg(all(feature = "provider", feature = "tools"))]
+
 use sage_plugin::{
     Provider, Tools,
     provider::{Completion, CompletionRequest, FinishReason},
