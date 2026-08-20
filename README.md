@@ -10,8 +10,9 @@ by Lockgate.
   runtime.
 - `crates/sage-cli` builds the `sage` executable and owns command-line and
   terminal interaction.
+- `crates/sage-plugin` is the thin plugin-author facade over Lockgate and owns
+  the shared `sage:agent` WIT package.
 - `plugins` contains independently compiled WebAssembly components.
-- `wit` contains the application-owned contracts shared by the core and plugins.
 
 The CLI is the default workspace member, so root-level `cargo run` commands keep
 working while other frontends can depend directly on `sage-core`.
@@ -34,20 +35,11 @@ cargo run -- plugins list
 
 Use `--config /path/to/sage.toml` to read a different file.
 
-Check that every configured component exists, has matching embedded plugin
-metadata, implements a supported role, and publishes a schema that accepts its
-configured settings with:
+The repository includes an OpenAI-compatible Chat Completions provider and Kagi
+web tools. Build their configured release components with the system Cargo:
 
 ```console
-cargo run -- plugins check
-```
-
-The repository includes an OpenAI-compatible Chat Completions provider that uses
-WASI HTTP. Build it with the system Cargo before checking configured plugins:
-
-```console
-cargo build -p sage-openai-compatible --release --target wasm32-wasip2
-cargo run -- plugins check
+cargo build -p sage-openai-compatible -p sage-kagi --release --target wasm32-wasip2
 ```
 
 Each plugin is keyed by an operator-assigned instance id and maps directly to
@@ -70,6 +62,32 @@ The OpenAI-compatible plugin declares network egress through Lockgate and
 resolves its exact origin from `egress-origin`. The scheme and effective port
 are part of the origin. Kagi declares the literal origin `https://kagi.com` and
 therefore needs no configurable origin.
+
+### Permission grants
+
+Lockgate v2 admits a component only after its exact resolved permission
+manifest has been approved. Review all configured instances, approve each one,
+then check that the components can be admitted:
+
+```console
+cargo run -- grants review
+cargo run -- grants approve openai
+cargo run -- grants approve kagi
+cargo run -- plugins check
+```
+
+`grants review` also accepts one instance id. `grants deny <instance-id>` removes
+that instance's approval. SAGE stores approvals in `consent.json` beside the
+selected `sage.toml`; concrete scopes remain in `sage.toml`. A permission
+expansion, such as changing `egress-origin`, blocks admission until the new
+manifest is reviewed and approved. Narrowing or removing authority is reported
+as non-blocking drift.
+
+`plugins check` verifies that every configured component exists, has matching
+embedded plugin metadata, implements a supported role, publishes a schema that
+accepts its settings, and has sufficient consent for admission. Use
+`--config /path/to/sage.toml` with either `grants` or `plugins` to select another
+configuration.
 
 ### Typed plugin settings
 
@@ -105,15 +123,20 @@ struct Settings {
 
 Lockgate fetches the framework schema and validates resolved settings before
 admitting the plugin, loading tool definitions, or using a provider. Invalid
-settings are reported as plugin admission errors:
+settings are reported as plugin admission errors. Closed v2 settings schemas
+carry `unevaluatedProperties: false`, so properties introduced by composition
+cannot bypass the plugin's declared settings contract:
 
 ```text
 failed to load plugin `openai`: plugin settings do not satisfy the schema
 ```
 
-`cargo run -- plugins check` exercises this preparation and admission path. See
-[the WIT contract](wit/sage.wit) for the SAGE-owned role interfaces; Lockgate
-adds its settings and schema interfaces automatically.
+`cargo run -- plugins check` exercises this preparation and admission path. The
+old `settings-host` and `outbound-http` application interfaces are gone: v2
+injects typed settings through the framework contract and links HTTP only from
+the plugin's declared `net::EGRESS` grants. See [the WIT
+contract](crates/sage-plugin/wit/sage.wit) for the SAGE-owned role interfaces;
+Lockgate adds its configuration interfaces automatically.
 
 ## Development
 

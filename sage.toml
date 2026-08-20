@@ -1,3 +1,13 @@
+# Build these component paths with:
+# cargo build -p sage-openai-compatible -p sage-kagi --release --target wasm32-wasip2
+#
+# Lockgate v2 derives network access from each plugin's egress declaration.
+# Review and approve the exact resolved grants before first admission:
+# cargo run -- grants review
+# cargo run -- grants approve openai
+# cargo run -- grants approve kagi
+# The old settings-host and outbound-http application interfaces are not used.
+
 [plugins.openai]
 component = "./target/wasm32-wasip2/release/sage_openai_compatible.wasm"
 
