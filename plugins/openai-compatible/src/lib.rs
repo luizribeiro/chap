@@ -32,6 +32,9 @@ impl Plugin for OpenAiCompatible {
 #[derive(chap::Settings)]
 struct Settings {
     base_url: String,
+    // Lockgate resolves the egress scope from this setting; plugin code never
+    // reads it.
+    #[allow(dead_code)]
     egress_origin: String,
     model: String,
     api_key_env: String,
@@ -40,7 +43,6 @@ struct Settings {
 impl Provider for OpenAiCompatible {
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, String> {
         let settings = &self.settings;
-        let _ = &settings.egress_origin;
         let request = chat_completions::encode_request(&settings.model, request)?;
         let url = format!(
             "{}/chat/completions",
