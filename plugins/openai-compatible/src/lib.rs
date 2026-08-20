@@ -8,6 +8,8 @@ struct OpenAiCompatible {
     settings: Settings,
 }
 
+chap::plugin!(OpenAiCompatible: Provider);
+
 impl Plugin for OpenAiCompatible {
     const ID: &'static str = "openai";
     const DISPLAY_NAME: MetadataSource = MetadataSource::Explicit("OpenAI-compatible provider");
@@ -25,6 +27,14 @@ impl Plugin for OpenAiCompatible {
     fn new(settings: Self::Settings) -> Self {
         Self { settings }
     }
+}
+
+#[derive(chap::Settings)]
+struct Settings {
+    base_url: String,
+    egress_origin: String,
+    model: String,
+    api_key_env: String,
 }
 
 impl Provider for OpenAiCompatible {
@@ -57,14 +67,6 @@ impl Provider for OpenAiCompatible {
     }
 }
 
-#[derive(chap::Settings)]
-struct Settings {
-    base_url: String,
-    egress_origin: String,
-    model: String,
-    api_key_env: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,5 +95,3 @@ mod tests {
         }
     }
 }
-
-chap::plugin!(OpenAiCompatible: Provider);
