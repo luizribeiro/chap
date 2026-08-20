@@ -4,8 +4,8 @@ use crate::session::{Session, SessionExecutor, SessionFuture, SessionManager, Se
 use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition};
 use lockgate::{
-    ConsentRequired, Host, HostBuilder, InvocationCtx, PluginConfig, PluginHandle, Role, RoleError,
-    RuntimeLimits,
+    ConsentRecord, ConsentRequired, Host, HostBuilder, InvocationCtx, PluginConfig, PluginHandle,
+    Prepared, Role, RoleError, RuntimeLimits,
 };
 use plugin_tool::PluginTool;
 use provider::PluginBackend;
@@ -146,6 +146,43 @@ impl AgentBuilder {
         Ok(self)
     }
 
+    pub async fn approve_plugin(&self, id: &str) -> Result<ConsentRecord, String> {
+        let plugin = self
+            .config
+            .plugin(id)
+            .ok_or_else(|| format!("plugin `{id}` is not configured"))?;
+        let builder = HostBuilder::new(())
+            .map_err(|error| format!("failed to create Lockgate host: {error}"))?;
+        let mut resources = StartResources::new(ToolRegistry::new(), builder);
+        let prepared = match Self::prepare_plugin(
+            resources.builder.as_mut().expect("uninitialized host"),
+            &self.config,
+            id,
+            plugin,
+        )
+        .await
+        {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return match resources.cleanup().await {
+                    Ok(()) => Err(error),
+                    Err(cleanup_error) => Err(format!("{error}; {cleanup_error}")),
+                };
+            }
+        };
+        let record = prepared.approve(now_rfc3339());
+        let save_result = self.consent.save(record.clone());
+        let prepared_cleanup = tokio::task::spawn_blocking(move || drop(prepared))
+            .await
+            .map_err(|error| format!("failed to clean up prepared plugin `{id}`: {error}"));
+        let resource_cleanup = resources.cleanup().await;
+
+        save_result?;
+        prepared_cleanup?;
+        resource_cleanup?;
+        Ok(record)
+    }
+
     pub async fn start(self) -> Result<Agent, String> {
         let Self {
             config,
@@ -238,19 +275,7 @@ impl AgentBuilder {
         plugin: &ConfiguredPlugin,
     ) -> Result<PluginLoad, String> {
         let path = config.component_path(plugin);
-        let bytes = Self::plugin_bytes(config, id, plugin)?;
-        let settings = plugin.settings(id)?;
-        let prepared = builder
-            .prepare(
-                id,
-                &bytes,
-                PluginConfig {
-                    settings: Some(settings),
-                    ..PluginConfig::default()
-                },
-            )
-            .await
-            .map_err(|error| Self::load_error(id, &path, error))?;
+        let prepared = Self::prepare_plugin(builder, config, id, plugin).await?;
         let record = consent.load(id);
         let acceptance = match prepared.accept_reviewed(record.as_ref()) {
             Ok(acceptance) => acceptance,
@@ -273,6 +298,28 @@ impl AgentBuilder {
             )
             .await
             .map(PluginLoad::Admitted)
+            .map_err(|error| Self::load_error(id, &path, error))
+    }
+
+    async fn prepare_plugin(
+        builder: &mut HostBuilder<()>,
+        config: &Config,
+        id: &str,
+        plugin: &ConfiguredPlugin,
+    ) -> Result<Prepared, String> {
+        let path = config.component_path(plugin);
+        let bytes = Self::plugin_bytes(config, id, plugin)?;
+        let settings = plugin.settings(id)?;
+        builder
+            .prepare(
+                id,
+                &bytes,
+                PluginConfig {
+                    settings: Some(settings),
+                    ..PluginConfig::default()
+                },
+            )
+            .await
             .map_err(|error| Self::load_error(id, &path, error))
     }
 
@@ -357,6 +404,12 @@ impl AgentBuilder {
             )),
         }
     }
+}
+
+fn now_rfc3339() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("the current UTC time must be representable as RFC3339")
 }
 
 impl Agent {
