@@ -1,6 +1,6 @@
+use chap_plugin as sage;
+use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, Tools, net};
 use sage::tools::ToolDefinition;
-use sage_plugin as sage;
-use sage_plugin::{MetadataSource, Needs, Plugin, ScopeRef, Tools, net};
 use serde::{Deserialize, Serialize};
 use url::Url;
 

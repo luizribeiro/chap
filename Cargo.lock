@@ -287,6 +287,99 @@ dependencies = [
 ]
 
 [[package]]
+name = "chap-cli"
+version = "0.1.0"
+dependencies = [
+ "chap-core",
+ "clap",
+ "iocraft",
+ "pulldown-cmark",
+ "serde_json",
+ "shlex",
+ "tempfile",
+ "tokio",
+ "two-face",
+ "unicode-segmentation",
+ "unicode-width 0.2.2",
+]
+
+[[package]]
+name = "chap-core"
+version = "0.1.0"
+dependencies = [
+ "lockgate",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "toml",
+ "uuid",
+ "wasmprinter 0.255.0",
+ "wat",
+ "wit-component 0.255.0",
+ "wit-parser 0.255.0",
+]
+
+[[package]]
+name = "chap-kagi"
+version = "0.1.0"
+dependencies = [
+ "chap-plugin",
+ "html-escape",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
+name = "chap-openai-compatible"
+version = "0.1.0"
+dependencies = [
+ "chap-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "chap-plugin"
+version = "0.1.0"
+dependencies = [
+ "chap-plugin-macros",
+ "lockgate-http",
+ "lockgate-plugin",
+ "serde_json",
+]
+
+[[package]]
+name = "chap-plugin-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "chap-sdk-multi-role-fixture"
+version = "0.1.0"
+dependencies = [
+ "chap-plugin",
+]
+
+[[package]]
+name = "chap-sdk-provider-fixture"
+version = "0.1.0"
+dependencies = [
+ "chap-plugin",
+]
+
+[[package]]
+name = "chap-test-all"
+version = "0.1.0"
+
+[[package]]
 name = "clap"
 version = "4.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2172,99 +2265,6 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
-
-[[package]]
-name = "sage-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "iocraft",
- "pulldown-cmark",
- "sage-core",
- "serde_json",
- "shlex",
- "tempfile",
- "tokio",
- "two-face",
- "unicode-segmentation",
- "unicode-width 0.2.2",
-]
-
-[[package]]
-name = "sage-core"
-version = "0.1.0"
-dependencies = [
- "lockgate",
- "serde",
- "serde_json",
- "tempfile",
- "time",
- "tokio",
- "toml",
- "uuid",
- "wasmprinter 0.255.0",
- "wat",
- "wit-component 0.255.0",
- "wit-parser 0.255.0",
-]
-
-[[package]]
-name = "sage-kagi"
-version = "0.1.0"
-dependencies = [
- "html-escape",
- "sage-plugin",
- "serde",
- "serde_json",
- "url",
-]
-
-[[package]]
-name = "sage-openai-compatible"
-version = "0.1.0"
-dependencies = [
- "sage-plugin",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "sage-plugin"
-version = "0.1.0"
-dependencies = [
- "lockgate-http",
- "lockgate-plugin",
- "sage-plugin-macros",
- "serde_json",
-]
-
-[[package]]
-name = "sage-plugin-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "sage-sdk-multi-role-fixture"
-version = "0.1.0"
-dependencies = [
- "sage-plugin",
-]
-
-[[package]]
-name = "sage-sdk-provider-fixture"
-version = "0.1.0"
-dependencies = [
- "sage-plugin",
-]
-
-[[package]]
-name = "sage-test-all"
-version = "0.1.0"
 
 [[package]]
 name = "same-file"

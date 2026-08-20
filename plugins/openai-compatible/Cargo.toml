@@ -1,5 +1,5 @@
 [package]
-name = "sage-openai-compatible"
+name = "chap-openai-compatible"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -8,6 +8,6 @@ publish.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-sage-plugin = { workspace = true, default-features = false, features = ["provider", "http"] }
+chap-plugin = { workspace = true, default-features = false, features = ["provider", "http"] }
 serde.workspace = true
 serde_json.workspace = true

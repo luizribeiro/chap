@@ -1,16 +1,16 @@
 [workspace]
 members = [
-    "crates/sage-cli",
-    "crates/sage-core",
-    "crates/sage-plugin",
-    "crates/sage-plugin-macros",
-    "crates/sage-test-all",
-    "crates/sage-plugin/tests/fixtures/multi-role",
-    "crates/sage-plugin/tests/fixtures/provider",
+    "crates/chap-cli",
+    "crates/chap-core",
+    "crates/chap-plugin",
+    "crates/chap-plugin-macros",
+    "crates/chap-test-all",
+    "crates/chap-plugin/tests/fixtures/multi-role",
+    "crates/chap-plugin/tests/fixtures/provider",
     "plugins/kagi",
     "plugins/openai-compatible",
 ]
-default-members = ["crates/sage-cli"]
+default-members = ["crates/chap-cli"]
 resolver = "3"
 
 [workspace.package]
@@ -24,8 +24,8 @@ iocraft = { git = "https://github.com/luizribeiro/iocraft.git", rev = "619ee083d
 lockgate = { git = "https://github.com/luizribeiro/lockgate.git", branch = "plugin-sdk" }
 lockgate-http = { git = "https://github.com/luizribeiro/lockgate.git", branch = "plugin-sdk" }
 lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", branch = "plugin-sdk", default-features = false }
-sage-plugin = { path = "crates/sage-plugin" }
-sage-plugin-macros = { path = "crates/sage-plugin-macros" }
+chap-plugin = { path = "crates/chap-plugin" }
+chap-plugin-macros = { path = "crates/chap-plugin-macros" }
 pulldown-cmark = "0.13.4"
 proc-macro-crate = "3.5.0"
 proc-macro2 = "1.0.107"

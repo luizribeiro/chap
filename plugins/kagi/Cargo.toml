@@ -1,5 +1,5 @@
 [package]
-name = "sage-kagi"
+name = "chap-kagi"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -9,7 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 html-escape = "0.2.15"
-sage-plugin = { workspace = true, default-features = false, features = ["tools", "http"] }
+chap-plugin = { workspace = true, default-features = false, features = ["tools", "http"] }
 serde.workspace = true
 serde_json.workspace = true
 url = "2.5.8"

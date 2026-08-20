@@ -1,9 +1,9 @@
+use chap_plugin as sage;
+use chap_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, net};
 use sage::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message as ProviderMessage,
     ToolCall as ProviderToolCall, ToolDefinition as ProviderTool,
 };
-use sage_plugin as sage;
-use sage_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, net};
 use serde::{Deserialize, Serialize};
 
 struct OpenAiCompatible {

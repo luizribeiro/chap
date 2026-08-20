@@ -1,0 +1,22 @@
+[package]
+name = "chap-cli"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "sage"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+iocraft.workspace = true
+pulldown-cmark.workspace = true
+chap-core = { path = "../chap-core" }
+serde_json.workspace = true
+shlex.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+two-face.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true

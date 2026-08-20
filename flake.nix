@@ -60,21 +60,21 @@
               };
               settings = {
                 denyWarnings = true;
-                extraArgs = "--workspace --all-targets --locked --exclude sage-openai-compatible --exclude sage-kagi";
+                extraArgs = "--workspace --all-targets --locked --exclude chap-openai-compatible --exclude chap-kagi";
                 offline = false;
               };
             };
             plugin-clippy = {
               enable = true;
               name = "cargo clippy (WASI plugins)";
-              entry = "${rust}/bin/cargo clippy -p sage-openai-compatible -p sage-kagi --target wasm32-wasip2 --all-targets --locked -- -D warnings";
+              entry = "${rust}/bin/cargo clippy -p chap-openai-compatible -p chap-kagi --target wasm32-wasip2 --all-targets --locked -- -D warnings";
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
             };
             cargo-test = {
               enable = true;
               name = "cargo test";
-              entry = "${rust}/bin/cargo test --workspace --all-targets --locked --exclude sage-openai-compatible --exclude sage-kagi";
+              entry = "${rust}/bin/cargo test --workspace --all-targets --locked --exclude chap-openai-compatible --exclude chap-kagi";
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
               stages = [ "pre-push" ];
@@ -82,7 +82,7 @@
             plugin-test = {
               enable = true;
               name = "cargo test (WASI plugins)";
-              entry = "env CARGO_TARGET_WASM32_WASIP2_RUNNER='${pkgs.wasmtime}/bin/wasmtime run' ${rust}/bin/cargo test -p sage-openai-compatible -p sage-kagi --target wasm32-wasip2 --locked";
+              entry = "env CARGO_TARGET_WASM32_WASIP2_RUNNER='${pkgs.wasmtime}/bin/wasmtime run' ${rust}/bin/cargo test -p chap-openai-compatible -p chap-kagi --target wasm32-wasip2 --locked";
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
               stages = [ "pre-push" ];
