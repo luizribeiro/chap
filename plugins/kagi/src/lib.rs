@@ -1,5 +1,7 @@
-lockgate_plugin::generate!({
-    path: "../../wit",
+extern crate sage_plugin as sage_plugin_internals;
+
+sage_plugin::generate!({
+    path: "../../crates/sage-plugin/wit",
     world: "tool-plugin",
 });
 
@@ -8,7 +10,7 @@ use exports::lockgate::config::schema::Guest as ConfigurationGuest;
 use exports::sage::agent::tools::{Guest, ToolDefinition};
 use http::{HeaderMap, HeaderValue, header};
 use http_body_util::BodyExt;
-use lockgate_plugin::{MetadataSource, Needs, Plugin, ScopeRef, net};
+use sage_plugin::{MetadataSource, Needs, Plugin, ScopeRef, net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -567,4 +569,4 @@ mod tests {
     }
 }
 
-lockgate_plugin::export!(Kagi);
+sage_plugin::export!(Kagi);

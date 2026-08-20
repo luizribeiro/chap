@@ -1,5 +1,7 @@
-lockgate_plugin::generate!({
-    path: "../../wit",
+extern crate sage_plugin as sage_plugin_internals;
+
+sage_plugin::generate!({
+    path: "../../crates/sage-plugin/wit",
     world: "provider-plugin",
 });
 
@@ -9,7 +11,7 @@ use exports::sage::agent::provider::{
 };
 use http::{HeaderMap, HeaderName, HeaderValue};
 use http_body_util::BodyExt;
-use lockgate_plugin::{MetadataSource, Need, Needs, Plugin, ScopeRef, net};
+use sage_plugin::{MetadataSource, Need, Needs, Plugin, ScopeRef, net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use wasi_fetch::Client;
@@ -457,4 +459,4 @@ mod tests {
     }
 }
 
-lockgate_plugin::export!(OpenAiCompatible);
+sage_plugin::export!(OpenAiCompatible);
