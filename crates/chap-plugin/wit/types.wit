@@ -30,6 +30,9 @@ interface types {
     is-error: bool,
   }
 
+  /// Replaying reasoning is only sound when it returns to the same model that
+  /// produced it. Provider settings fix the model today; mid-session model
+  /// switching must guard replay.
   record reasoning {
     /// Display text for the model's thinking. May be empty when a provider
     /// returns only an opaque blob.

@@ -115,8 +115,8 @@ input, and reasoning is a subset of output, so neither is added to the totals.
 An absent subset counter means the server did not report it, distinct from zero;
 this is normal for local servers such as vLLM and llama.cpp.
 
-CHAP accumulates reported usage across every provider step. The footer shows the
-last request's input as measured context, not a forecast, with session-wide input
+CHAP accumulates reported usage across every provider step. The footer forecasts
+the next prompt from the latest step's input and output, with session-wide input
 and output totals and nonzero subset totals. Providers omitting optional `usage`
 remain supported: CHAP invents no counters and the footer stays hidden.
 

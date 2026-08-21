@@ -185,11 +185,12 @@ pub(super) fn apply_event(
         }
         SessionEventKind::UsageUpdated { usage } => {
             let model = transcript.usage.get_or_insert_default();
-            // chap drops reasoning from assistant messages instead of sending it back to the
-            // model. Counting output would include those billed tokens, so context reports the
-            // last request's measured input rather than forecasting the next request. If chap
-            // ever replays reasoning, this must become input plus output.
-            model.context_tokens = usage.last_step.input_tokens;
+            // Forecast the next prompt as latest input plus output; reasoning belongs in this
+            // figure iff it is replayed. Disabling `replay-reasoning` can overstate the forecast.
+            model.context_tokens = usage
+                .last_step
+                .input_tokens
+                .saturating_add(usage.last_step.output_tokens);
             model.session.saturating_add_assign(usage.last_step);
             None
         }
@@ -361,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn accumulates_usage_and_measures_context_from_input() {
+    fn accumulates_usage_and_forecasts_context_from_the_latest_step() {
         let mut transcript = TranscriptModel::default();
 
         assert_eq!(
@@ -391,7 +392,7 @@ mod tests {
         assert_eq!(
             transcript.usage,
             Some(UsageModel {
-                context_tokens: 12,
+                context_tokens: 15,
                 session: Usage {
                     input_tokens: 12,
                     cached_input_tokens: Some(4),
@@ -429,7 +430,7 @@ mod tests {
         assert_eq!(
             transcript.usage,
             Some(UsageModel {
-                context_tokens: 12,
+                context_tokens: 111,
                 session: Usage {
                     input_tokens: 24,
                     cached_input_tokens: Some(10),
@@ -466,7 +467,7 @@ mod tests {
         assert_eq!(
             transcript.usage,
             Some(UsageModel {
-                context_tokens: 900,
+                context_tokens: 1200,
                 session: Usage {
                     input_tokens: 900,
                     output_tokens: 300,
