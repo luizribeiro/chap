@@ -67,13 +67,23 @@ fn tools_bridge(plugin: &Ident) -> TokenStream {
         #[automatically_derived]
         impl exports::chap::agent::tools::Guest for #plugin {
             fn definitions() -> ::core::result::Result<
-                ::chap_plugin::alloc::vec::Vec<::chap_plugin::types::ToolDefinition>,
+                ::chap_plugin::alloc::vec::Vec<::chap_plugin::types::ToolRegistration>,
                 ::chap_plugin::alloc::string::String,
             > {
                 let object = <#plugin as ::chap_plugin::Plugin>::new(
                     <#plugin as ::chap_plugin::__lockgate::Plugin>::settings(),
                 );
-                <#plugin as ::chap_plugin::Tools>::definitions(&object)
+                let definitions = <#plugin as ::chap_plugin::Tools>::definitions(&object)?;
+                Ok(definitions
+                    .into_iter()
+                    .map(|definition| ::chap_plugin::types::ToolRegistration {
+                        execution_mode: <#plugin as ::chap_plugin::Tools>::execution_mode(
+                            &object,
+                            &definition.name,
+                        ),
+                        definition,
+                    })
+                    .collect())
             }
 
             async fn execute(
@@ -95,6 +105,7 @@ fn tools_bridge(plugin: &Ident) -> TokenStream {
 fn tools_test_reference(plugin: &Ident) -> TokenStream {
     quote! {
         let _ = <#plugin as ::chap_plugin::Tools>::definitions;
+        let _ = <#plugin as ::chap_plugin::Tools>::execution_mode;
         let _ = <#plugin as ::chap_plugin::Tools>::execute;
     }
 }

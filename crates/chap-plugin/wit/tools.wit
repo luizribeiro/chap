@@ -1,8 +1,8 @@
 package chap:agent@0.2.0;
 
 interface tools {
-  use types.{tool-definition};
+  use types.{tool-registration};
 
-  definitions: func() -> result<list<tool-definition>, string>;
+  definitions: func() -> result<list<tool-registration>, string>;
   execute: async func(name: string, arguments: string) -> result<string, string>;
 }

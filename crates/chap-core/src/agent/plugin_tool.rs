@@ -3,7 +3,10 @@ use crate::{ExecutionMode, Tool, ToolDefinition};
 use lockgate::{InvocationCtx, PluginHandle};
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use bindings::tools as tool_bindings;
+use bindings::{
+    tools as tool_bindings,
+    types::{ExecutionMode as BindingExecutionMode, ToolDefinition as BindingToolDefinition},
+};
 
 pub(super) struct PluginTool {
     plugin: String,
@@ -29,12 +32,12 @@ impl PluginTool {
             .map_err(|error| format!("tool plugin `{plugin}`: {error}"))?;
         Ok(definitions
             .into_iter()
-            .map(|definition| {
-                let declared_mode = ExecutionMode::default();
+            .map(|registration| {
+                let declared_mode = registration.execution_mode.into();
                 Self {
                     plugin: plugin.to_owned(),
                     handle: handle.clone(),
-                    definition: definition.into(),
+                    definition: registration.definition.into(),
                     execution_mode: resolve_tool_mode(declared_mode, configured_mode),
                     runtime: Arc::clone(&runtime),
                 }
@@ -83,12 +86,21 @@ fn resolve_tool_mode(
     }
 }
 
-impl From<tool_bindings::ToolDefinition> for ToolDefinition {
-    fn from(definition: tool_bindings::ToolDefinition) -> Self {
+impl From<BindingToolDefinition> for ToolDefinition {
+    fn from(definition: BindingToolDefinition) -> Self {
         Self {
             name: definition.name,
             description: definition.description,
             parameters: definition.parameters,
+        }
+    }
+}
+
+impl From<BindingExecutionMode> for ExecutionMode {
+    fn from(mode: BindingExecutionMode) -> Self {
+        match mode {
+            BindingExecutionMode::Parallel => Self::Parallel,
+            BindingExecutionMode::Sequential => Self::Sequential,
         }
     }
 }

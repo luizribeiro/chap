@@ -125,40 +125,39 @@ fn module_with_schema(module: &[u8], schema: &str, tool_definitions: bool) -> Ve
         wat_bytes(schema.as_bytes())
     );
     if tool_definitions {
-        let name = "fixture-tool";
-        let description = "A fixture tool";
         let parameters = r#"{"type":"object"}"#;
-        let definition = definitions_result + 12;
-        let name_offset = definition + 24;
-        let description_offset = name_offset + name.len();
-        let parameters_offset = description_offset + description.len();
-        assert!(parameters_offset + parameters.len() <= 65_536);
+        let tools = [
+            ("fixture-tool", "A fixture tool", 0_u8),
+            ("sequential-tool", "A sequential fixture tool", 1_u8),
+        ];
+        let registrations = definitions_result + 12;
+        let mut string_offset = registrations + tools.len() * 28;
+        let mut registration_records = Vec::with_capacity(tools.len() * 28);
+        let mut strings = Vec::new();
+
+        for (name, description, execution_mode) in tools {
+            for value in [name, description, parameters] {
+                registration_records.extend_from_slice(&(string_offset as u32).to_le_bytes());
+                registration_records.extend_from_slice(&(value.len() as u32).to_le_bytes());
+                strings.push((string_offset, value));
+                string_offset += value.len();
+            }
+            registration_records.extend_from_slice(&[execution_mode, 0, 0, 0]);
+        }
+        assert!(string_offset <= 65_536);
 
         let mut list_result = vec![0; 12];
-        list_result[4..8].copy_from_slice(&(definition as u32).to_le_bytes());
-        list_result[8..12].copy_from_slice(&1_u32.to_le_bytes());
-        let mut definition_record = Vec::with_capacity(24);
-        for (offset, value) in [
-            (name_offset, name),
-            (description_offset, description),
-            (parameters_offset, parameters),
-        ] {
-            definition_record.extend_from_slice(&(offset as u32).to_le_bytes());
-            definition_record.extend_from_slice(&(value.len() as u32).to_le_bytes());
-        }
+        list_result[4..8].copy_from_slice(&(registrations as u32).to_le_bytes());
+        list_result[8..12].copy_from_slice(&(tools.len() as u32).to_le_bytes());
         data.push_str(&format!(
             "(data (i32.const {definitions_result}) \"{}\")\n",
             wat_bytes(&list_result)
         ));
         data.push_str(&format!(
-            "(data (i32.const {definition}) \"{}\")\n",
-            wat_bytes(&definition_record)
+            "(data (i32.const {registrations}) \"{}\")\n",
+            wat_bytes(&registration_records)
         ));
-        for (offset, value) in [
-            (name_offset, name),
-            (description_offset, description),
-            (parameters_offset, parameters),
-        ] {
+        for (offset, value) in strings {
             data.push_str(&format!(
                 "(data (i32.const {offset}) \"{}\")\n",
                 wat_bytes(value.as_bytes())

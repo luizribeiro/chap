@@ -338,6 +338,39 @@ component = "tools.wasm"
 }
 
 #[tokio::test]
+async fn loads_execution_modes_declared_by_an_admitted_tool_plugin() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("tools.wasm"),
+        tool_component("example.tools"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins."example.tools"]
+component = "tools.wasm"
+"#,
+    )
+    .unwrap();
+
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    builder.approve_plugin("example.tools").await.unwrap();
+    let agent = builder.start().await.unwrap();
+
+    assert_eq!(
+        agent.inner.tools.execution_mode("fixture-tool"),
+        ExecutionMode::Parallel
+    );
+    assert_eq!(
+        agent.inner.tools.execution_mode("sequential-tool"),
+        ExecutionMode::Sequential
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
 async fn plugin_execution_override_makes_loaded_tools_sequential() {
     let directory = test_directory();
     fs::write(

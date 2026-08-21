@@ -83,13 +83,17 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     assert_eq!(call.arguments, r#"{"value":"round-trip"}"#);
 
     let tools = host.client::<bindings::tools::Role>(&multi_role).unwrap();
-    let definitions = tools
+    let registrations = tools
         .definitions(InvocationCtx::bounded(INVOCATION_FUEL))
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(definitions.len(), 1);
-    assert_eq!(definitions[0].name, call.name);
+    assert_eq!(registrations.len(), 1);
+    assert_eq!(registrations[0].definition.name, call.name);
+    assert!(matches!(
+        registrations[0].execution_mode,
+        bindings::types::ExecutionMode::Parallel
+    ));
     let output = tools
         .execute(
             InvocationCtx::bounded(INVOCATION_FUEL),
@@ -100,6 +104,11 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
         .unwrap()
         .unwrap();
     assert_eq!(output, r#"tool:{"value":"round-trip"}"#);
+
+    let definitions = registrations
+        .into_iter()
+        .map(|registration| registration.definition)
+        .collect();
 
     let final_completion = host
         .client::<bindings::provider::Role>(&multi_role)
