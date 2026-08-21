@@ -35,6 +35,7 @@ struct Settings {
     model: String,
     api_key_env: Option<String>,
     replay_reasoning: ReplayReasoning,
+    reasoning_delimiters: Option<ReasoningDelimiters>,
     /// Rungs this instance offers, least to most effort. Omit to expose no effort
     /// control at all.
     effort_levels: Vec<EffortLevel>,
@@ -57,6 +58,7 @@ struct SettingsInput {
     #[serde(default = "replay_reasoning_by_default")]
     #[schemars(default = "replay_reasoning_by_default")]
     replay_reasoning: ReplayReasoning,
+    reasoning_delimiters: Option<ReasoningDelimiters>,
     /// Rungs this instance offers, least to most effort. Omit to expose no effort
     /// control at all.
     #[serde(default)]
@@ -74,6 +76,11 @@ impl TryFrom<SettingsInput> for Settings {
     type Error = String;
 
     fn try_from(settings: SettingsInput) -> Result<Self, Self::Error> {
+        if settings.reasoning_delimiters.is_some()
+            && settings.replay_reasoning != ReplayReasoning::Inline
+        {
+            return Err("reasoning-delimiters requires replay-reasoning to be `inline`".to_owned());
+        }
         for (index, level) in settings.effort_levels.iter().enumerate() {
             if level.name.trim().is_empty() {
                 return Err("effort-level names must not be empty".to_owned());
@@ -104,6 +111,7 @@ impl TryFrom<SettingsInput> for Settings {
             model: settings.model,
             api_key_env: settings.api_key_env,
             replay_reasoning: settings.replay_reasoning,
+            reasoning_delimiters: settings.reasoning_delimiters,
             effort_levels: settings.effort_levels,
             default_effort: settings.default_effort,
             request_body: settings.request_body,
@@ -178,8 +186,16 @@ where
 #[schemars(crate = "chap::schemars", rename_all = "kebab-case")]
 enum ReplayReasoning {
     Field,
-    ThinkTags,
+    Inline,
     Off,
+}
+
+#[derive(chap::serde::Deserialize, chap::schemars::JsonSchema)]
+#[serde(crate = "chap::serde", deny_unknown_fields)]
+#[schemars(crate = "chap::schemars")]
+struct ReasoningDelimiters {
+    open: String,
+    close: String,
 }
 
 const fn replay_reasoning_by_default() -> ReplayReasoning {
@@ -269,7 +285,7 @@ mod tests {
     fn parses_each_explicit_reasoning_replay_mode() {
         for (value, expected) in [
             ("field", ReplayReasoning::Field),
-            ("think-tags", ReplayReasoning::ThinkTags),
+            ("inline", ReplayReasoning::Inline),
             ("off", ReplayReasoning::Off),
         ] {
             assert_eq!(
@@ -284,6 +300,36 @@ mod tests {
     #[test]
     fn rejects_an_unknown_reasoning_replay_mode() {
         assert!(settings_with(serde_json::json!({ "replay-reasoning": "unknown" })).is_err());
+    }
+
+    #[test]
+    fn rejects_reasoning_delimiters_outside_inline_mode() {
+        for replay_reasoning in ["field", "off"] {
+            let error = settings_with(serde_json::json!({
+                "replay-reasoning": replay_reasoning,
+                "reasoning-delimiters": { "open": "[", "close": "]" },
+            }))
+            .err()
+            .unwrap();
+
+            assert!(error.to_string().contains("requires replay-reasoning"));
+        }
+    }
+
+    #[test]
+    fn rejects_half_specified_reasoning_delimiters() {
+        for reasoning_delimiters in [
+            serde_json::json!({ "open": "[" }),
+            serde_json::json!({ "close": "]" }),
+        ] {
+            assert!(
+                settings_with(serde_json::json!({
+                    "replay-reasoning": "inline",
+                    "reasoning-delimiters": reasoning_delimiters,
+                }))
+                .is_err()
+            );
+        }
     }
 
     #[test]
