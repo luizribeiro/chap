@@ -197,6 +197,9 @@ struct ResponseUsage {
 #[derive(Deserialize)]
 struct PromptTokensDetails {
     cached_tokens: Option<u64>,
+    /// A vLLM extension, not part of the OpenAI schema:
+    /// https://github.com/vllm-project/vllm/blob/d6c2fec9fd72eeac44f42c884e19a1c6bd1142a7/vllm/entrypoints/openai/engine/protocol.py#L110-L113
+    created_cache_tokens: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -210,7 +213,11 @@ impl From<ResponseUsage> for Usage {
             input_tokens: usage.prompt_tokens,
             cached_input_tokens: usage
                 .prompt_tokens_details
+                .as_ref()
                 .and_then(|details| details.cached_tokens),
+            cache_write_tokens: usage
+                .prompt_tokens_details
+                .and_then(|details| details.created_cache_tokens),
             output_tokens: usage.completion_tokens,
             reasoning_tokens: usage
                 .completion_tokens_details
@@ -366,7 +373,7 @@ mod tests {
     #[test]
     fn extracts_usage() {
         let completion = parse_completion_with_usage(Some(
-            r#"{"prompt_tokens":53,"completion_tokens":58,"prompt_tokens_details":{"cached_tokens":20},"completion_tokens_details":{"reasoning_tokens":45},"total_tokens":111}"#,
+            r#"{"prompt_tokens":53,"completion_tokens":58,"prompt_tokens_details":{"cached_tokens":20,"created_cache_tokens":17},"completion_tokens_details":{"reasoning_tokens":45},"total_tokens":111}"#,
         ));
 
         assert!(matches!(
@@ -374,6 +381,7 @@ mod tests {
             Some(Usage {
                 input_tokens: 53,
                 cached_input_tokens: Some(20),
+                cache_write_tokens: Some(17),
                 output_tokens: 58,
                 reasoning_tokens: Some(45),
             })
@@ -390,6 +398,7 @@ mod tests {
             Some(Usage {
                 input_tokens: 12,
                 cached_input_tokens: None,
+                cache_write_tokens: None,
                 output_tokens: 34,
                 reasoning_tokens: None,
             })
@@ -407,6 +416,7 @@ mod tests {
             Some(Usage {
                 input_tokens: 12,
                 cached_input_tokens: None,
+                cache_write_tokens: None,
                 output_tokens: 34,
                 reasoning_tokens: None,
             })
@@ -438,6 +448,7 @@ mod tests {
             Some(Usage {
                 input_tokens: 12,
                 cached_input_tokens: None,
+                cache_write_tokens: None,
                 output_tokens: 0,
                 reasoning_tokens: None,
             })
@@ -455,6 +466,7 @@ mod tests {
             Some(Usage {
                 input_tokens: 12,
                 cached_input_tokens: None,
+                cache_write_tokens: None,
                 output_tokens: 34,
                 reasoning_tokens: None,
             })

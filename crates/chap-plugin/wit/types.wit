@@ -60,6 +60,10 @@ interface types {
     /// The portion of input-tokens served from cache. Absent when the provider
     /// did not report this counter, which is distinct from a reported zero.
     cached-input-tokens: option<u64>,
+    /// Tokens written into the provider's prompt cache by this step, billed at a
+    /// write premium rather than included in input-tokens. Absent when the
+    /// provider did not report this counter.
+    cache-write-tokens: option<u64>,
     /// The whole completion, including reasoning tokens.
     output-tokens: u64,
     /// The portion of output-tokens spent on reasoning. Absent when the provider

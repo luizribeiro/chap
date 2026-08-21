@@ -132,6 +132,7 @@ impl From<provider_types::Completion> for ProviderCompletion {
             usage: completion.usage.map(|usage| Usage {
                 input_tokens: usage.input_tokens,
                 cached_input_tokens: usage.cached_input_tokens,
+                cache_write_tokens: usage.cache_write_tokens,
                 output_tokens: usage.output_tokens,
                 reasoning_tokens: usage.reasoning_tokens,
             }),

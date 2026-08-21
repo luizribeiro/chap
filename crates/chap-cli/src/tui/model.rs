@@ -370,12 +370,14 @@ mod tests {
                         total: Usage {
                             input_tokens: 12,
                             cached_input_tokens: Some(4),
+                            cache_write_tokens: Some(5),
                             output_tokens: 3,
                             reasoning_tokens: Some(2),
                         },
                         last_step: Usage {
                             input_tokens: 12,
                             cached_input_tokens: Some(4),
+                            cache_write_tokens: Some(5),
                             output_tokens: 3,
                             reasoning_tokens: Some(2),
                         },
@@ -391,6 +393,7 @@ mod tests {
                 session: Usage {
                     input_tokens: 12,
                     cached_input_tokens: Some(4),
+                    cache_write_tokens: Some(5),
                     output_tokens: 3,
                     reasoning_tokens: Some(2),
                 },
@@ -405,12 +408,14 @@ mod tests {
                         total: Usage {
                             input_tokens: 24,
                             cached_input_tokens: Some(10),
+                            cache_write_tokens: Some(12),
                             output_tokens: 102,
                             reasoning_tokens: Some(5),
                         },
                         last_step: Usage {
                             input_tokens: 12,
                             cached_input_tokens: Some(6),
+                            cache_write_tokens: Some(7),
                             output_tokens: 99,
                             reasoning_tokens: Some(3),
                         },
@@ -426,6 +431,7 @@ mod tests {
                 session: Usage {
                     input_tokens: 24,
                     cached_input_tokens: Some(10),
+                    cache_write_tokens: Some(12),
                     output_tokens: 102,
                     reasoning_tokens: Some(5),
                 },

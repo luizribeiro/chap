@@ -120,6 +120,10 @@ last request's input as measured context, not a forecast, with session-wide inpu
 and output totals and nonzero subset totals. Providers omitting optional `usage`
 remain supported: CHAP invents no counters and the footer stays hidden.
 
+Cache writes are separately billed rather than part of input. The bundled
+OpenAI-compatible plugin reads vLLM's `prompt_tokens_details.created_cache_tokens`;
+other servers may leave it absent, while Anthropic-style providers can report it.
+
 ### Permission grants
 
 Lockgate v2 admits a component only after its exact resolved permission

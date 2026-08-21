@@ -44,6 +44,7 @@ pub(crate) struct ToolResult {
 pub struct Usage {
     pub input_tokens: u64,
     pub cached_input_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
     pub output_tokens: u64,
     pub reasoning_tokens: Option<u64>,
 }
@@ -55,6 +56,7 @@ impl Usage {
     pub fn saturating_add_assign(&mut self, usage: Self) {
         self.input_tokens = self.input_tokens.saturating_add(usage.input_tokens);
         saturating_add_optional_assign(&mut self.cached_input_tokens, usage.cached_input_tokens);
+        saturating_add_optional_assign(&mut self.cache_write_tokens, usage.cache_write_tokens);
         self.output_tokens = self.output_tokens.saturating_add(usage.output_tokens);
         saturating_add_optional_assign(&mut self.reasoning_tokens, usage.reasoning_tokens);
     }

@@ -54,6 +54,7 @@ fn format_usage(usage: UsageModel) -> String {
         abbreviate_tokens(billed_tokens),
     );
     append_optional_counter(&mut text, usage.session.cached_input_tokens, "cached");
+    append_optional_counter(&mut text, usage.session.cache_write_tokens, "cache-write");
     append_optional_counter(&mut text, usage.session.reasoning_tokens, "reasoning");
     text
 }
@@ -88,5 +89,36 @@ mod tests {
         ] {
             assert_eq!(abbreviate_tokens(tokens), expected);
         }
+    }
+
+    #[test]
+    fn renders_only_nonzero_reported_cache_write_tokens() {
+        let mut usage = UsageModel::default();
+        usage.session.cache_write_tokens = Some(1_200);
+        assert_eq!(format_usage(usage), "ctx 0 · 0 billed · 1.2k cache-write");
+
+        for cache_write_tokens in [None, Some(0)] {
+            usage.session.cache_write_tokens = cache_write_tokens;
+            assert_eq!(format_usage(usage), "ctx 0 · 0 billed");
+        }
+    }
+
+    #[test]
+    fn subtracts_reported_cached_input_from_billed_tokens() {
+        let mut usage = UsageModel::default();
+        usage.session.input_tokens = 1_200;
+        usage.session.cached_input_tokens = Some(400);
+        usage.session.output_tokens = 300;
+
+        assert_eq!(format_usage(usage), "ctx 0 · 1.1k billed · 400 cached");
+    }
+
+    #[test]
+    fn treats_unreported_cached_input_as_zero_for_billed_tokens() {
+        let mut usage = UsageModel::default();
+        usage.session.input_tokens = 900;
+        usage.session.output_tokens = 300;
+
+        assert_eq!(format_usage(usage), "ctx 0 · 1.2k billed");
     }
 }

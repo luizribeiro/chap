@@ -136,6 +136,7 @@ async fn accumulates_usage_across_provider_steps() {
             Usage {
                 input_tokens: 12,
                 cached_input_tokens: Some(5),
+                cache_write_tokens: Some(6),
                 output_tokens: 4,
                 reasoning_tokens: Some(2),
             },
@@ -145,6 +146,7 @@ async fn accumulates_usage_across_provider_steps() {
             Usage {
                 input_tokens: 20,
                 cached_input_tokens: None,
+                cache_write_tokens: Some(7),
                 output_tokens: 3,
                 reasoning_tokens: None,
             },
@@ -170,12 +172,14 @@ async fn accumulates_usage_across_provider_steps() {
                     total: Usage {
                         input_tokens: 12,
                         cached_input_tokens: Some(5),
+                        cache_write_tokens: Some(6),
                         output_tokens: 4,
                         reasoning_tokens: Some(2),
                     },
                     last_step: Usage {
                         input_tokens: 12,
                         cached_input_tokens: Some(5),
+                        cache_write_tokens: Some(6),
                         output_tokens: 4,
                         reasoning_tokens: Some(2),
                     },
@@ -201,12 +205,14 @@ async fn accumulates_usage_across_provider_steps() {
                     total: Usage {
                         input_tokens: 32,
                         cached_input_tokens: Some(5),
+                        cache_write_tokens: Some(13),
                         output_tokens: 7,
                         reasoning_tokens: Some(2),
                     },
                     last_step: Usage {
                         input_tokens: 20,
                         cached_input_tokens: None,
+                        cache_write_tokens: Some(7),
                         output_tokens: 3,
                         reasoning_tokens: None,
                     },
@@ -304,12 +310,14 @@ async fn emits_usage_with_unreported_subset_counters() {
                     total: Usage {
                         input_tokens: 12,
                         cached_input_tokens: None,
+                        cache_write_tokens: None,
                         output_tokens: 4,
                         reasoning_tokens: None,
                     },
                     last_step: Usage {
                         input_tokens: 12,
                         cached_input_tokens: None,
+                        cache_write_tokens: None,
                         output_tokens: 4,
                         reasoning_tokens: None,
                     },
