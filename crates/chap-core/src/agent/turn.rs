@@ -1,4 +1,4 @@
-use super::{MAX_CONCURRENT_TOOL_CALLS, MAX_PROVIDER_STEPS_PER_TURN, provider::CompletionBackend};
+use super::{MAX_PROVIDER_STEPS_PER_TURN, ToolExecutionConfig, provider::CompletionBackend};
 use crate::{
     session::{
         ActiveRun, AssistantContent, Message, RunBoundary, SessionEventKind, SessionState,
@@ -13,6 +13,7 @@ pub(super) async fn run_agent_loop(
     session: &SessionState,
     input: String,
     tools: &ToolRegistry,
+    tool_execution: ToolExecutionConfig,
     backend: &impl CompletionBackend,
 ) -> Result<String, String> {
     if input.trim().is_empty() {
@@ -28,7 +29,7 @@ pub(super) async fn run_agent_loop(
         .push(Message::User(input.clone()));
     session.emit(SessionEventKind::RunStarted { input });
 
-    let outcome = run_steps(session, tools, backend, &mut active_run).await;
+    let outcome = run_steps(session, tools, tool_execution, backend, &mut active_run).await;
     drop(active_run);
     match outcome {
         RunOutcome::Completed(response) => {
@@ -68,6 +69,7 @@ impl From<Result<String, String>> for RunOutcome {
 async fn run_steps(
     session: &SessionState,
     tools: &ToolRegistry,
+    tool_execution: ToolExecutionConfig,
     backend: &impl CompletionBackend,
     active_run: &mut ActiveRun<'_>,
 ) -> RunOutcome {
@@ -123,9 +125,9 @@ async fn run_steps(
             });
         }
 
-        let mode = resolve_batch_mode(tools, &tool_calls, ExecutionMode::default());
+        let mode = resolve_batch_mode(tools, &tool_calls, tool_execution.mode);
         let limit = match mode {
-            ExecutionMode::Parallel => MAX_CONCURRENT_TOOL_CALLS,
+            ExecutionMode::Parallel => tool_execution.max_concurrency,
             ExecutionMode::Sequential => 1,
         };
         let slots = execute_tool_calls(session, tools, &tool_calls, active_run, limit).await;

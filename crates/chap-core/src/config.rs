@@ -1,8 +1,10 @@
+use crate::tool::ExecutionMode;
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
     fs,
+    num::NonZeroUsize,
     path::{Path, PathBuf},
 };
 
@@ -11,8 +13,19 @@ use std::{
 pub struct Config {
     #[serde(default)]
     plugins: BTreeMap<String, ConfiguredPlugin>,
+    #[serde(default)]
+    tools: ToolsConfig,
     #[serde(skip)]
     directory: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct ToolsConfig {
+    #[serde(default)]
+    execution: ExecutionMode,
+    #[serde(default = "default_max_concurrency")]
+    max_concurrency: NonZeroUsize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,12 +56,35 @@ impl Config {
         self.plugins.get(id)
     }
 
+    pub(crate) fn tools(&self) -> &ToolsConfig {
+        &self.tools
+    }
+
     pub(crate) fn component_path(&self, plugin: &ConfiguredPlugin) -> PathBuf {
         self.directory.join(&plugin.component)
     }
 
     pub(crate) fn consent_path(&self) -> PathBuf {
         self.directory.join("consent.json")
+    }
+}
+
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self {
+            execution: ExecutionMode::default(),
+            max_concurrency: default_max_concurrency(),
+        }
+    }
+}
+
+impl ToolsConfig {
+    pub(crate) fn execution(&self) -> ExecutionMode {
+        self.execution
+    }
+
+    pub(crate) fn max_concurrency(&self) -> NonZeroUsize {
+        self.max_concurrency
     }
 }
 
@@ -60,6 +96,10 @@ impl ConfiguredPlugin {
     pub(crate) fn settings(&self) -> Value {
         toml_to_json(toml::Value::Table(self.settings.clone()))
     }
+}
+
+fn default_max_concurrency() -> NonZeroUsize {
+    NonZeroUsize::new(8).expect("default tool concurrency is nonzero")
 }
 
 fn toml_to_json(value: toml::Value) -> Value {
@@ -108,6 +148,53 @@ model = "example-model"
         let settings = plugin.settings();
         assert_eq!(settings["base-url"], "https://api.example.com/v1");
         assert_eq!(settings["model"], "example-model");
+    }
+
+    #[test]
+    fn defaults_tool_execution_when_the_section_is_absent() {
+        let config: Config = toml::from_str("").unwrap();
+
+        assert_eq!(config.tools.execution, ExecutionMode::Parallel);
+        assert_eq!(config.tools.max_concurrency.get(), 8);
+    }
+
+    #[test]
+    fn parses_sequential_tool_execution() {
+        let config: Config = toml::from_str(
+            r#"
+[tools]
+execution = "sequential"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.tools.execution, ExecutionMode::Sequential);
+    }
+
+    #[test]
+    fn rejects_zero_tool_concurrency() {
+        let error = toml::from_str::<Config>(
+            r#"
+[tools]
+max-concurrency = 0
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("max-concurrency"));
+    }
+
+    #[test]
+    fn rejects_unknown_tool_settings() {
+        let error = toml::from_str::<Config>(
+            r#"
+[tools]
+concurrency = 8
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("unknown field `concurrency`"));
     }
 
     #[test]

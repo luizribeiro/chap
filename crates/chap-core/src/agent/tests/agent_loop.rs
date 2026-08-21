@@ -1,4 +1,5 @@
 use super::super::{
+    ToolExecutionConfig,
     provider::{CompletionBackend, CompletionFuture, ProviderCompletion},
     turn::run_agent_loop,
 };
@@ -18,6 +19,11 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{Barrier, Notify};
+
+const TOOL_EXECUTION: ToolExecutionConfig = ToolExecutionConfig {
+    mode: ExecutionMode::Parallel,
+    max_concurrency: 8,
+};
 
 #[tokio::test]
 async fn resumes_a_turn_after_executing_a_tool_call() {
@@ -44,9 +50,15 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
     let mut tools = ToolRegistry::new();
     tools.register(EchoTool).unwrap();
 
-    let response = run_agent_loop(&state, "say hello".to_owned(), &tools, &backend)
-        .await
-        .unwrap();
+    let response = run_agent_loop(
+        &state,
+        "say hello".to_owned(),
+        &tools,
+        TOOL_EXECUTION,
+        &backend,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(response, "The tool said hello.");
     assert_eq!(
@@ -154,7 +166,13 @@ async fn runs_independent_tool_calls_concurrently() {
 
     let response = tokio::time::timeout(
         Duration::from_secs(1),
-        run_agent_loop(&state, "run both".to_owned(), &tools, &backend),
+        run_agent_loop(
+            &state,
+            "run both".to_owned(),
+            &tools,
+            TOOL_EXECUTION,
+            &backend,
+        ),
     )
     .await
     .expect("parallel tools should not deadlock")
@@ -196,9 +214,15 @@ async fn records_tool_results_in_call_order_regardless_of_completion_order() {
         .unwrap();
 
     assert_eq!(
-        run_agent_loop(&state, "run both".to_owned(), &tools, &backend)
-            .await
-            .unwrap(),
+        run_agent_loop(
+            &state,
+            "run both".to_owned(),
+            &tools,
+            TOOL_EXECUTION,
+            &backend,
+        )
+        .await
+        .unwrap(),
         "done"
     );
 
@@ -263,9 +287,15 @@ async fn runs_the_batch_sequentially_when_a_tool_requires_it() {
     }
 
     assert_eq!(
-        run_agent_loop(&state, "run both".to_owned(), &tools, &backend)
-            .await
-            .unwrap(),
+        run_agent_loop(
+            &state,
+            "run both".to_owned(),
+            &tools,
+            TOOL_EXECUTION,
+            &backend,
+        )
+        .await
+        .unwrap(),
         "done"
     );
 
@@ -304,6 +334,7 @@ async fn applies_steering_before_the_next_provider_request() {
             &run_state,
             "answer this".to_owned(),
             &ToolRegistry::new(),
+            TOOL_EXECUTION,
             run_backend.as_ref(),
         )
         .await
@@ -372,6 +403,7 @@ async fn preserves_interrupted_input_for_the_next_provider_request() {
             &run_state,
             "hello".to_owned(),
             &ToolRegistry::new(),
+            TOOL_EXECUTION,
             run_backend.as_ref(),
         )
         .await
@@ -409,6 +441,7 @@ async fn preserves_interrupted_input_for_the_next_provider_request() {
             &state,
             "ops".to_owned(),
             &ToolRegistry::new(),
+            TOOL_EXECUTION,
             backend.as_ref(),
         )
         .await
@@ -450,7 +483,14 @@ async fn closes_unfinished_tool_calls_when_interrupted() {
     }
     let run_state = Arc::clone(&state);
     let run = tokio::spawn(async move {
-        run_agent_loop(&run_state, "pause".to_owned(), &tools, &backend).await
+        run_agent_loop(
+            &run_state,
+            "pause".to_owned(),
+            &tools,
+            TOOL_EXECUTION,
+            &backend,
+        )
+        .await
     });
 
     tokio::time::timeout(Duration::from_secs(1), started.wait())
@@ -544,7 +584,14 @@ async fn completes_finished_calls_when_interrupted_mid_batch() {
         .unwrap();
     let run_state = Arc::clone(&state);
     let run = tokio::spawn(async move {
-        run_agent_loop(&run_state, "run both".to_owned(), &tools, &backend).await
+        run_agent_loop(
+            &run_state,
+            "run both".to_owned(),
+            &tools,
+            TOOL_EXECUTION,
+            &backend,
+        )
+        .await
     });
 
     tokio::time::timeout(Duration::from_secs(1), paused.wait())
@@ -610,6 +657,7 @@ async fn returns_tool_failures_to_the_provider() {
         &state,
         "use a missing tool".to_owned(),
         &ToolRegistry::new(),
+        TOOL_EXECUTION,
         &backend,
     )
     .await
@@ -645,6 +693,7 @@ async fn emits_a_failed_terminal_event_when_the_provider_fails() {
         &state,
         "hello".to_owned(),
         &ToolRegistry::new(),
+        TOOL_EXECUTION,
         &FakeBackend::new([]),
     )
     .await

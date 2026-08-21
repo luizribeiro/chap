@@ -2,7 +2,7 @@ use crate::config::{Config, ConfiguredPlugin};
 use crate::consent::{ConsentStore, PluginConsentReview, consent_drift};
 use crate::session::{Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions};
 use crate::tool::ToolRegistry;
-use crate::{Tool, ToolDefinition};
+use crate::{ExecutionMode, Tool, ToolDefinition};
 use lockgate::{
     ConsentRecord, ConsentRequired, Host, HostBuilder, InvocationCtx, PluginConfig, PluginHandle,
     Prepared, Role, RoleError, RuntimeLimits,
@@ -18,7 +18,6 @@ mod provider;
 mod turn;
 
 const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
-const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
 type InnerHost = Host<()>;
@@ -88,12 +87,19 @@ pub struct Agent {
     inner: Arc<AgentInner>,
 }
 
+#[derive(Clone, Copy)]
+struct ToolExecutionConfig {
+    mode: ExecutionMode,
+    max_concurrency: usize,
+}
+
 pub(crate) struct AgentInner {
     lockgate: Arc<InnerHost>,
     plugins: BTreeMap<String, LoadedPlugin>,
     plugin_errors: BTreeMap<String, String>,
     sessions: SessionManager,
     tools: ToolRegistry,
+    tool_execution: ToolExecutionConfig,
 }
 
 impl AgentBuilder {
@@ -233,6 +239,10 @@ impl AgentBuilder {
             };
         let lockgate = resources.host.take().expect("initialized Lockgate host");
         let tools = resources.tools.take().expect("initialized tool registry");
+        let tool_execution = ToolExecutionConfig {
+            mode: config.tools().execution(),
+            max_concurrency: config.tools().max_concurrency().get(),
+        };
         Ok(Agent {
             inner: Arc::new(AgentInner {
                 lockgate,
@@ -240,6 +250,7 @@ impl AgentBuilder {
                 plugin_errors,
                 sessions: SessionManager::new(),
                 tools,
+                tool_execution,
             }),
         })
     }
@@ -548,7 +559,14 @@ impl AgentInner {
             return Err("session does not belong to this runtime".to_owned());
         }
         let backend = PluginBackend::new(self, session.provider());
-        run_agent_loop(&session.state, input, &self.tools, &backend).await
+        run_agent_loop(
+            &session.state,
+            input,
+            &self.tools,
+            self.tool_execution,
+            &backend,
+        )
+        .await
     }
 }
 
