@@ -7,19 +7,19 @@ use chap::provider::{
 use chap_plugin as chap;
 use serde::{Deserialize, Serialize};
 
-use crate::ReplayReasoning;
+use crate::{ReplayReasoning, Settings};
 
+/// Fragments compose by adding or overriding top-level fields; they never remove or rename them.
 pub(crate) fn encode_request(
-    model: &str,
-    replay_reasoning: ReplayReasoning,
+    settings: &Settings,
     request: CompletionRequest,
 ) -> Result<String, ProviderError> {
-    serde_json::to_string(&Request {
-        model,
+    let request = Request {
+        model: &settings.model,
         messages: request
             .messages
             .into_iter()
-            .map(|message| Message::from_provider(message, replay_reasoning))
+            .map(|message| Message::from_provider(message, settings.replay_reasoning))
             .collect(),
         tools: request
             .tools
@@ -27,12 +27,27 @@ pub(crate) fn encode_request(
             .map(Tool::try_from)
             .collect::<Result<_, _>>()?,
         stream: false,
-    })
-    .map_err(|error| {
-        ProviderError::Other(format!(
-            "failed to encode OpenAI-compatible request: {error}"
-        ))
-    })
+    };
+    let selected = settings.selected_effort();
+    if settings.request_body.0.is_empty() && selected.is_none_or(|level| level.body.0.is_empty()) {
+        return serde_json::to_string(&request).map_err(encoding_error);
+    }
+
+    let mut body = serde_json::to_value(request).map_err(encoding_error)?;
+    let object = body
+        .as_object_mut()
+        .expect("an OpenAI-compatible request encodes to an object");
+    object.extend(settings.request_body.0.clone());
+    if let Some(level) = selected {
+        object.extend(level.body.0.clone());
+    }
+    serde_json::to_string(&body).map_err(encoding_error)
+}
+
+fn encoding_error(error: serde_json::Error) -> ProviderError {
+    ProviderError::Other(format!(
+        "failed to encode OpenAI-compatible request: {error}"
+    ))
 }
 
 #[derive(Serialize)]
@@ -457,17 +472,37 @@ mod tests {
         })
     }
 
-    #[test]
-    fn encodes_a_minimal_request() {
-        let encoded = encode_request(
-            "example-model",
-            ReplayReasoning::Field,
+    fn settings(extra: serde_json::Value) -> Settings {
+        let mut value = serde_json::json!({
+            "base-url": "https://example.com/v1",
+            "model": "example-model",
+        });
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn encode_minimal_request(settings: &Settings) -> String {
+        encode_request(
+            settings,
             CompletionRequest {
                 messages: vec![provider::Message::User("hello".to_owned())],
                 tools: vec![],
             },
         )
-        .unwrap();
+        .unwrap()
+    }
+
+    #[test]
+    fn encodes_an_unconfigured_request_identically() {
+        let encoded = encode_minimal_request(&settings(serde_json::json!({})));
+
+        assert_eq!(
+            encoded,
+            r#"{"model":"example-model","messages":[{"role":"user","content":"hello"}],"stream":false}"#
+        );
 
         let encoded: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert_eq!(encoded["model"], "example-model");
@@ -475,6 +510,64 @@ mod tests {
         assert!(encoded.get("tools").is_none());
         assert_eq!(encoded["messages"][0]["role"], "user");
         assert_eq!(encoded["messages"][0]["content"], "hello");
+    }
+
+    #[test]
+    fn merges_request_body_members() {
+        let settings = settings(serde_json::json!({
+            "request-body": { "temperature": 0.25, "server-option": true },
+        }));
+        let encoded: serde_json::Value =
+            serde_json::from_str(&encode_minimal_request(&settings)).unwrap();
+
+        assert_eq!(encoded["temperature"], 0.25);
+        assert_eq!(encoded["server-option"], true);
+    }
+
+    #[test]
+    fn merges_the_default_effort_body() {
+        let settings = settings(serde_json::json!({
+            "effort-levels": [
+                { "name": "off", "body": { "server-effort": "none" } },
+                { "name": "medium", "body": { "server-effort": "medium" } },
+            ],
+            "default-effort": "medium",
+        }));
+        let encoded: serde_json::Value =
+            serde_json::from_str(&encode_minimal_request(&settings)).unwrap();
+
+        assert_eq!(encoded["server-effort"], "medium");
+    }
+
+    #[test]
+    fn default_effort_body_overrides_the_request_body() {
+        let settings = settings(serde_json::json!({
+            "request-body": { "temperature": 0.25 },
+            "effort-levels": [{ "name": "high", "body": { "temperature": 0.75 } }],
+            "default-effort": "high",
+        }));
+        let encoded: serde_json::Value =
+            serde_json::from_str(&encode_minimal_request(&settings)).unwrap();
+
+        assert_eq!(encoded["temperature"], 0.75);
+    }
+
+    #[test]
+    fn preserves_nested_effort_body_objects() {
+        let settings = settings(serde_json::json!({
+            "effort-levels": [{
+                "name": "off",
+                "body": { "chat_template_kwargs": { "enable_thinking": false } },
+            }],
+            "default-effort": "off",
+        }));
+        let encoded: serde_json::Value =
+            serde_json::from_str(&encode_minimal_request(&settings)).unwrap();
+
+        assert_eq!(
+            encoded["chat_template_kwargs"],
+            serde_json::json!({ "enable_thinking": false })
+        );
     }
 
     #[test]

@@ -28,9 +28,27 @@ impl Plugin for OpenAiCompatible {
 }
 
 #[derive(chap::serde::Deserialize, chap::schemars::JsonSchema)]
+#[serde(crate = "chap::serde", try_from = "SettingsInput")]
+#[schemars(crate = "chap::schemars")]
+struct Settings {
+    base_url: String,
+    model: String,
+    api_key_env: Option<String>,
+    replay_reasoning: ReplayReasoning,
+    /// Rungs this instance offers, least to most effort. Omit to expose no effort
+    /// control at all.
+    effort_levels: Vec<EffortLevel>,
+    /// The rung applied to requests. Must name one of `effort-levels`.
+    default_effort: Option<String>,
+    /// Merged into every request body verbatim, for server quirks that are not
+    /// per-rung.
+    request_body: BodyFragment,
+}
+
+#[derive(chap::serde::Deserialize, chap::schemars::JsonSchema)]
 #[serde(crate = "chap::serde", rename_all = "kebab-case", deny_unknown_fields)]
 #[schemars(crate = "chap::schemars", rename_all = "kebab-case")]
-struct Settings {
+struct SettingsInput {
     #[schemars(regex(pattern = r"\S"))]
     base_url: String,
     #[schemars(regex(pattern = r"\S"))]
@@ -39,6 +57,118 @@ struct Settings {
     #[serde(default = "replay_reasoning_by_default")]
     #[schemars(default = "replay_reasoning_by_default")]
     replay_reasoning: ReplayReasoning,
+    /// Rungs this instance offers, least to most effort. Omit to expose no effort
+    /// control at all.
+    #[serde(default)]
+    effort_levels: Vec<EffortLevel>,
+    /// The rung applied to requests. Must name one of `effort-levels`.
+    default_effort: Option<String>,
+    /// Merged into every request body verbatim, for server quirks that are not
+    /// per-rung.
+    #[serde(default)]
+    #[schemars(extend("propertyNames" = allowed_fragment_property_names()))]
+    request_body: BodyFragment,
+}
+
+impl TryFrom<SettingsInput> for Settings {
+    type Error = String;
+
+    fn try_from(settings: SettingsInput) -> Result<Self, Self::Error> {
+        for (index, level) in settings.effort_levels.iter().enumerate() {
+            if level.name.trim().is_empty() {
+                return Err("effort-level names must not be empty".to_owned());
+            }
+            if settings.effort_levels[..index]
+                .iter()
+                .any(|previous| previous.name == level.name)
+            {
+                return Err(format!(
+                    "effort-level names must be unique; duplicate `{}`",
+                    level.name
+                ));
+            }
+        }
+        if let Some(default_effort) = &settings.default_effort
+            && !settings
+                .effort_levels
+                .iter()
+                .any(|level| level.name == *default_effort)
+        {
+            return Err(format!(
+                "default-effort `{default_effort}` does not name an effort-level"
+            ));
+        }
+
+        Ok(Self {
+            base_url: settings.base_url,
+            model: settings.model,
+            api_key_env: settings.api_key_env,
+            replay_reasoning: settings.replay_reasoning,
+            effort_levels: settings.effort_levels,
+            default_effort: settings.default_effort,
+            request_body: settings.request_body,
+        })
+    }
+}
+
+impl Settings {
+    fn selected_effort(&self) -> Option<&EffortLevel> {
+        self.default_effort.as_deref().map(|name| {
+            self.effort_levels
+                .iter()
+                .find(|level| level.name == name)
+                .expect("settings validation ensures the default effort exists")
+        })
+    }
+}
+
+#[derive(Clone, chap::serde::Deserialize, chap::schemars::JsonSchema)]
+#[serde(crate = "chap::serde", deny_unknown_fields)]
+#[schemars(crate = "chap::schemars")]
+struct EffortLevel {
+    /// The name an operator and, later, a caller sees. CHAP never interprets it.
+    #[schemars(regex(pattern = r"\S"))]
+    name: String,
+    #[allow(dead_code)]
+    description: Option<String>,
+    #[serde(default)]
+    #[schemars(extend("propertyNames" = allowed_fragment_property_names()))]
+    body: BodyFragment,
+}
+
+/// A raw JSON object merged into the request body. The keys belong to the
+/// server, not to CHAP, and are sent unmodified.
+#[derive(Clone, Default, chap::serde::Deserialize, chap::schemars::JsonSchema)]
+#[serde(crate = "chap::serde", transparent)]
+#[schemars(crate = "chap::schemars")]
+struct BodyFragment(
+    #[serde(deserialize_with = "deserialize_body_fragment")]
+    serde_json::Map<String, serde_json::Value>,
+);
+
+const OWNED_REQUEST_FIELDS: [&str; 4] = ["model", "messages", "tools", "stream"];
+
+fn allowed_fragment_property_names() -> serde_json::Value {
+    serde_json::json!({ "not": { "enum": OWNED_REQUEST_FIELDS } })
+}
+
+fn deserialize_body_fragment<'de, D>(
+    deserializer: D,
+) -> Result<serde_json::Map<String, serde_json::Value>, D::Error>
+where
+    D: chap::serde::Deserializer<'de>,
+{
+    let body: serde_json::Map<String, serde_json::Value> =
+        chap::serde::Deserialize::deserialize(deserializer)?;
+    if let Some(field) = OWNED_REQUEST_FIELDS
+        .iter()
+        .find(|field| body.contains_key(**field))
+    {
+        return Err(chap::serde::de::Error::custom(format!(
+            "request body fragments cannot set plugin-owned field `{field}`"
+        )));
+    }
+    Ok(body)
 }
 
 #[derive(
@@ -61,8 +191,7 @@ const fn replay_reasoning_by_default() -> ReplayReasoning {
 impl Provider for OpenAiCompatible {
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, ProviderError> {
         let settings = &self.settings;
-        let request =
-            chat_completions::encode_request(&settings.model, settings.replay_reasoning, request)?;
+        let request = chat_completions::encode_request(settings, request)?;
         let url = format!(
             "{}/chat/completions",
             settings.base_url.trim_end_matches('/')
@@ -114,21 +243,24 @@ fn parse_retry_after(value: Option<&str>) -> Option<u64> {
 mod tests {
     use super::*;
 
-    fn settings(replay_reasoning: Option<&str>) -> Result<Settings, serde_json::Error> {
-        let mut settings = serde_json::json!({
+    fn settings_with(extra: serde_json::Value) -> Result<Settings, serde_json::Error> {
+        let mut value = serde_json::json!({
             "base-url": "https://example.com/v1",
             "model": "example-model",
         });
-        if let Some(replay_reasoning) = replay_reasoning {
-            settings["replay-reasoning"] = replay_reasoning.into();
-        }
-        serde_json::from_value(settings)
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(value)
     }
 
     #[test]
     fn defaults_reasoning_replay_to_off() {
         assert_eq!(
-            settings(None).unwrap().replay_reasoning,
+            settings_with(serde_json::json!({}))
+                .unwrap()
+                .replay_reasoning,
             ReplayReasoning::Off
         );
     }
@@ -140,12 +272,87 @@ mod tests {
             ("think-tags", ReplayReasoning::ThinkTags),
             ("off", ReplayReasoning::Off),
         ] {
-            assert_eq!(settings(Some(value)).unwrap().replay_reasoning, expected);
+            assert_eq!(
+                settings_with(serde_json::json!({ "replay-reasoning": value }))
+                    .unwrap()
+                    .replay_reasoning,
+                expected
+            );
         }
     }
 
     #[test]
     fn rejects_an_unknown_reasoning_replay_mode() {
-        assert!(settings(Some("unknown")).is_err());
+        assert!(settings_with(serde_json::json!({ "replay-reasoning": "unknown" })).is_err());
+    }
+
+    #[test]
+    fn accepts_no_effort_control() {
+        let settings = settings_with(serde_json::json!({})).unwrap();
+
+        assert!(settings.effort_levels.is_empty());
+        assert!(settings.default_effort.is_none());
+        assert!(settings.request_body.0.is_empty());
+    }
+
+    #[test]
+    fn rejects_an_unknown_default_effort() {
+        let error = settings_with(serde_json::json!({
+            "effort-levels": [{ "name": "low" }],
+            "default-effort": "high",
+        }))
+        .err()
+        .unwrap();
+
+        assert!(error.to_string().contains("does not name an effort-level"));
+    }
+
+    #[test]
+    fn rejects_duplicate_or_empty_effort_level_names() {
+        for (levels, expected) in [
+            (
+                serde_json::json!([{ "name": "low" }, { "name": "low" }]),
+                "must be unique",
+            ),
+            (serde_json::json!([{ "name": "" }]), "must not be empty"),
+        ] {
+            let error = settings_with(serde_json::json!({ "effort-levels": levels }))
+                .err()
+                .unwrap();
+
+            assert!(error.to_string().contains(expected));
+        }
+    }
+
+    #[test]
+    fn rejects_plugin_owned_fields_in_fragments() {
+        for extra in [
+            serde_json::json!({ "request-body": { "messages": [] } }),
+            serde_json::json!({
+                "effort-levels": [{ "name": "high", "body": { "model": "other" } }],
+            }),
+        ] {
+            let error = settings_with(extra).err().unwrap();
+
+            assert!(error.to_string().contains("plugin-owned field"));
+        }
+    }
+
+    #[test]
+    fn settings_schema_forbids_plugin_owned_fields_in_fragments() {
+        let generator = chap::schemars::generate::SchemaSettings::draft2020_12()
+            .for_deserialize()
+            .into_generator();
+        let schema = serde_json::to_value(generator.into_root_schema_for::<Settings>()).unwrap();
+        let expected = serde_json::json!({ "not": { "enum": OWNED_REQUEST_FIELDS } });
+
+        assert_eq!(
+            schema["properties"]["request-body"]["propertyNames"],
+            expected
+        );
+        assert_eq!(
+            schema["$defs"]["EffortLevel"]["properties"]["body"]["propertyNames"],
+            expected
+        );
     }
 }
