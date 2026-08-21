@@ -1,7 +1,8 @@
 //! Wire format for the OpenAI Chat Completions API.
 
 use chap::provider::{
-    self, AssistantContent, Completion, CompletionRequest, FinishReason, ProviderError, Usage,
+    self, AssistantContent, Completion, CompletionRequest, FinishReason, ProviderError, RateLimit,
+    Usage,
 };
 use chap_plugin as chap;
 use serde::{Deserialize, Serialize};
@@ -149,15 +150,36 @@ struct FunctionDefinition {
     parameters: serde_json::Value,
 }
 
-pub(crate) fn parse_response(status: u16, body: &str) -> Result<Completion, ProviderError> {
+pub(crate) struct ResponseMetadata {
+    pub(crate) status: u16,
+    pub(crate) retry_after: Option<u64>,
+}
+
+pub(crate) fn parse_response(
+    metadata: ResponseMetadata,
+    body: &str,
+) -> Result<Completion, ProviderError> {
+    let ResponseMetadata {
+        status,
+        retry_after,
+    } = metadata;
     if !(200..300).contains(&status) {
-        let message = serde_json::from_str::<ErrorResponse>(body)
-            .ok()
-            .map(|response| response.error.message)
-            .unwrap_or_else(|| body.chars().take(500).collect());
-        return Err(ProviderError::Other(format!(
-            "OpenAI-compatible server returned HTTP {status}: {message}"
-        )));
+        let (provider_message, code) = serde_json::from_str::<ErrorResponse>(body)
+            .map(|response| (response.error.message, response.error.code))
+            .unwrap_or_else(|_| (body.chars().take(500).collect(), None));
+        let context_too_long = looks_like_context_length(code.as_deref(), &provider_message);
+        let message =
+            format!("OpenAI-compatible server returned HTTP {status}: {provider_message}");
+        return Err(match status {
+            429 => ProviderError::RateLimited(RateLimit {
+                retry_after,
+                message,
+            }),
+            401 | 403 => ProviderError::Unauthorized(message),
+            400 | 413 if context_too_long => ProviderError::ContextTooLong(message),
+            500..=599 => ProviderError::Unavailable(message),
+            _ => ProviderError::Other(message),
+        });
     }
     let Response { choices, usage } = serde_json::from_str(body).map_err(|error| {
         ProviderError::Other(format!("invalid OpenAI-compatible response: {error}"))
@@ -177,11 +199,14 @@ pub(crate) fn parse_response(status: u16, body: &str) -> Result<Completion, Prov
         })
     }));
     if content.is_empty() {
-        let message = match choice.message.refusal {
-            Some(refusal) => format!("OpenAI-compatible server refused the request: {refusal}"),
-            None => "OpenAI-compatible server returned a completion without content".to_owned(),
-        };
-        return Err(ProviderError::Other(message));
+        return Err(match choice.message.refusal {
+            Some(refusal) => ProviderError::Refused(format!(
+                "OpenAI-compatible server refused the request: {refusal}"
+            )),
+            None => ProviderError::Other(
+                "OpenAI-compatible server returned a completion without content".to_owned(),
+            ),
+        });
     }
     Ok(Completion {
         content,
@@ -283,11 +308,45 @@ struct ErrorResponse {
 #[derive(Deserialize)]
 struct ErrorBody {
     message: String,
+    code: Option<String>,
+}
+
+fn looks_like_context_length(code: Option<&str>, message: &str) -> bool {
+    if code == Some("context_length_exceeded") {
+        return true;
+    }
+
+    // Misclassification changes host recovery, so keep the message fallback deliberately narrow.
+    let message = message.to_ascii_lowercase();
+    message.contains("context length") || message.contains("context window")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn response_metadata(status: u16) -> ResponseMetadata {
+        ResponseMetadata {
+            status,
+            retry_after: None,
+        }
+    }
+
+    fn parse_api_error(
+        metadata: ResponseMetadata,
+        message: &str,
+        code: Option<&str>,
+    ) -> ProviderError {
+        let body = serde_json::json!({
+            "error": {
+                "message": message,
+                "code": code,
+            }
+        })
+        .to_string();
+
+        parse_response(metadata, &body).unwrap_err()
+    }
 
     fn parse_completion_with_usage(usage: Option<&str>) -> Completion {
         let usage = usage
@@ -297,7 +356,7 @@ mod tests {
             r#"{{"choices":[{{"message":{{"role":"assistant","content":"hello"}},"finish_reason":"stop"}}]{usage}}}"#
         );
 
-        parse_response(200, &body).unwrap()
+        parse_response(response_metadata(200), &body).unwrap()
     }
 
     #[test]
@@ -373,7 +432,7 @@ mod tests {
     #[test]
     fn extracts_the_first_completion() {
         let body = r#"{"choices":[{"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]}"#;
-        let completion = parse_response(200, body).unwrap();
+        let completion = parse_response(response_metadata(200), body).unwrap();
 
         assert!(matches!(
             completion.content.as_slice(),
@@ -488,7 +547,7 @@ mod tests {
     #[test]
     fn extracts_tool_calls() {
         let body = r#"{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Paris\"}"}}]},"finish_reason":"tool_calls"}]}"#;
-        let completion = parse_response(200, body).unwrap();
+        let completion = parse_response(response_metadata(200), body).unwrap();
 
         assert!(matches!(
             completion.content.as_slice(),
@@ -502,7 +561,7 @@ mod tests {
 
     #[test]
     fn rejects_responses_without_choices() {
-        let error = parse_response(200, r#"{"choices":[]}"#).unwrap_err();
+        let error = parse_response(response_metadata(200), r#"{"choices":[]}"#).unwrap_err();
         assert!(matches!(
             error,
             ProviderError::Other(message)
@@ -511,13 +570,99 @@ mod tests {
     }
 
     #[test]
-    fn reports_structured_api_errors() {
-        let body = r#"{"error":{"message":"unknown model"}}"#;
-        let error = parse_response(404, body).unwrap_err();
+    fn classifies_rate_limits_with_retry_after() {
+        for (header, expected) in [
+            (Some("30"), Some(30)),
+            (Some("Wed, 21 Oct 2015 07:28:00 GMT"), None),
+            (None, None),
+        ] {
+            let error = parse_api_error(
+                ResponseMetadata {
+                    status: 429,
+                    retry_after: crate::parse_retry_after(header),
+                },
+                "slow down",
+                None,
+            );
+            assert!(matches!(
+                error,
+                ProviderError::RateLimited(RateLimit {
+                    retry_after,
+                    message,
+                }) if retry_after == expected
+                    && message == "OpenAI-compatible server returned HTTP 429: slow down"
+            ));
+        }
+    }
+
+    #[test]
+    fn classifies_authentication_and_authorization_errors() {
+        for status in [401, 403] {
+            let error = parse_api_error(response_metadata(status), "invalid key", None);
+            assert!(matches!(
+                error,
+                ProviderError::Unauthorized(message)
+                    if message
+                        == format!(
+                            "OpenAI-compatible server returned HTTP {status}: invalid key"
+                        )
+            ));
+        }
+    }
+
+    #[test]
+    fn classifies_structured_context_length_errors() {
+        for status in [400, 413] {
+            let error = parse_api_error(
+                response_metadata(status),
+                "request is too large",
+                Some("context_length_exceeded"),
+            );
+            assert!(matches!(error, ProviderError::ContextTooLong(_)));
+        }
+    }
+
+    #[test]
+    fn classifies_context_window_messages_without_a_code() {
+        let error = parse_api_error(
+            response_metadata(400),
+            "This model's CONTEXT WINDOW is too small",
+            None,
+        );
+        assert!(matches!(error, ProviderError::ContextTooLong(_)));
+    }
+
+    #[test]
+    fn leaves_ordinary_bad_requests_unclassified() {
+        let error = parse_api_error(response_metadata(400), "unknown model", None);
+        assert!(matches!(error, ProviderError::Other(_)));
+    }
+
+    #[test]
+    fn classifies_server_errors_as_unavailable() {
+        let error = parse_api_error(response_metadata(503), "try later", None);
+        assert!(matches!(error, ProviderError::Unavailable(_)));
+    }
+
+    #[test]
+    fn leaves_other_statuses_unclassified() {
+        let error = parse_api_error(response_metadata(404), "unknown model", None);
         assert!(matches!(
             error,
             ProviderError::Other(message)
                 if message == "OpenAI-compatible server returned HTTP 404: unknown model"
+        ));
+    }
+
+    #[test]
+    fn classifies_refusals() {
+        let body = r#"{"choices":[{"message":{"role":"assistant","content":null,"refusal":"I cannot help with that"},"finish_reason":"stop"}]}"#;
+        let error = parse_response(response_metadata(200), body).unwrap_err();
+        assert!(matches!(
+            error,
+            ProviderError::Refused(message)
+                if message
+                    == "OpenAI-compatible server refused the request: I cannot help with that"
         ));
     }
 }

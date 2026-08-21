@@ -55,19 +55,32 @@ impl Provider for OpenAiCompatible {
             .body(request.into_bytes())
             .send()
             .await
-            .map_err(|error| ProviderError::Other(error.to_string()))?;
-        let status = response.status();
+            .map_err(|error| ProviderError::Unavailable(error.to_string()))?;
+        let metadata = chat_completions::ResponseMetadata {
+            status: response.status(),
+            retry_after: parse_retry_after(
+                response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|value| value.to_str().ok()),
+            ),
+        };
         let body = response
             .text()
             .map_err(|error| ProviderError::Other(error.to_string()))?;
-        chat_completions::parse_response(status, &body)
+        chat_completions::parse_response(metadata, &body)
     }
 }
 
 fn read_environment_variable(name: &str) -> Result<String, ProviderError> {
     std::env::var(name).map_err(|_| {
-        ProviderError::Other(format!(
+        ProviderError::Unauthorized(format!(
             "environment variable `{name}` is not available to the plugin"
         ))
     })
+}
+
+fn parse_retry_after(value: Option<&str>) -> Option<u64> {
+    // Retry-After also permits an HTTP-date; omit that form rather than add date parsing here.
+    value?.parse().ok()
 }
