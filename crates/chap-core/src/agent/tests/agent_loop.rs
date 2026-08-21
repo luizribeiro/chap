@@ -33,19 +33,15 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
         .unwrap();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([
-        ProviderCompletion {
-            content: vec![
-                AssistantContent::Text("Let me check.".to_owned()),
-                AssistantContent::ToolCall(ToolCall {
-                    id: "call-1".to_owned(),
-                    name: "echo".to_owned(),
-                    arguments: r#"{"message":"hello"}"#.to_owned(),
-                }),
-            ],
-        },
-        ProviderCompletion {
-            content: vec![AssistantContent::Text("The tool said hello.".to_owned())],
-        },
+        completion(vec![
+            AssistantContent::Text("Let me check.".to_owned()),
+            AssistantContent::ToolCall(ToolCall {
+                id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: r#"{"message":"hello"}"#.to_owned(),
+            }),
+        ]),
+        text_completion("The tool said hello."),
     ]);
     let mut tools = ToolRegistry::new();
     tools.register(EchoTool).unwrap();
@@ -133,12 +129,11 @@ async fn runs_independent_tool_calls_concurrently() {
         .create(SessionOptions::new("test-provider"))
         .unwrap();
     let backend = FakeBackend::new([
-        ProviderCompletion {
-            content: vec![tool_call("call-1", "first"), tool_call("call-2", "second")],
-        },
-        ProviderCompletion {
-            content: vec![AssistantContent::Text("done".to_owned())],
-        },
+        completion(vec![
+            tool_call("call-1", "first"),
+            tool_call("call-2", "second"),
+        ]),
+        text_completion("done"),
     ]);
     let first_release = Arc::new(Notify::new());
     let second_release = Arc::new(Notify::new());
@@ -189,12 +184,11 @@ async fn records_tool_results_in_call_order_regardless_of_completion_order() {
         .unwrap();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([
-        ProviderCompletion {
-            content: vec![tool_call("call-1", "slow"), tool_call("call-2", "fast")],
-        },
-        ProviderCompletion {
-            content: vec![AssistantContent::Text("done".to_owned())],
-        },
+        completion(vec![
+            tool_call("call-1", "slow"),
+            tool_call("call-2", "fast"),
+        ]),
+        text_completion("done"),
     ]);
     let fast_finished = Arc::new(Notify::new());
     let mut tools = ToolRegistry::new();
@@ -257,15 +251,11 @@ async fn runs_the_batch_sequentially_when_a_tool_requires_it() {
         .unwrap();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([
-        ProviderCompletion {
-            content: vec![
-                tool_call("call-1", "parallel"),
-                tool_call("call-2", "sequential"),
-            ],
-        },
-        ProviderCompletion {
-            content: vec![AssistantContent::Text("done".to_owned())],
-        },
+        completion(vec![
+            tool_call("call-1", "parallel"),
+            tool_call("call-2", "sequential"),
+        ]),
+        text_completion("done"),
     ]);
     let active = Arc::new(AtomicUsize::new(0));
     let overlapped = Arc::new(AtomicBool::new(false));
@@ -319,12 +309,8 @@ async fn applies_steering_before_the_next_provider_request() {
         .unwrap();
     let mut events = state.subscribe();
     let backend = Arc::new(PausedBackend::new([
-        ProviderCompletion {
-            content: vec![AssistantContent::Text("My first answer.".to_owned())],
-        },
-        ProviderCompletion {
-            content: vec![AssistantContent::Text("My revised answer.".to_owned())],
-        },
+        text_completion("My first answer."),
+        text_completion("My revised answer."),
     ]));
     let first_request = backend.first_request.notified();
     let run_state = Arc::clone(&state);
@@ -388,12 +374,8 @@ async fn preserves_interrupted_input_for_the_next_provider_request() {
         .unwrap();
     let mut events = state.subscribe();
     let backend = Arc::new(PausedBackend::new([
-        ProviderCompletion {
-            content: vec![AssistantContent::Text("too late".to_owned())],
-        },
-        ProviderCompletion {
-            content: vec![AssistantContent::Text("welcome back".to_owned())],
-        },
+        text_completion("too late"),
+        text_completion("welcome back"),
     ]));
     let first_request = backend.first_request.notified();
     let run_state = Arc::clone(&state);
@@ -464,12 +446,10 @@ async fn closes_unfinished_tool_calls_when_interrupted() {
         .create(SessionOptions::new("test-provider"))
         .unwrap();
     let mut events = state.subscribe();
-    let backend = FakeBackend::new([ProviderCompletion {
-        content: vec![
-            tool_call("call-1", "pause-1"),
-            tool_call("call-2", "pause-2"),
-        ],
-    }]);
+    let backend = FakeBackend::new([completion(vec![
+        tool_call("call-1", "pause-1"),
+        tool_call("call-2", "pause-2"),
+    ])]);
     let started = Arc::new(Barrier::new(3));
     let mut tools = ToolRegistry::new();
     for name in ["pause-1", "pause-2"] {
@@ -563,9 +543,10 @@ async fn completes_finished_calls_when_interrupted_mid_batch() {
         .create(SessionOptions::new("test-provider"))
         .unwrap();
     let mut events = state.subscribe();
-    let backend = FakeBackend::new([ProviderCompletion {
-        content: vec![tool_call("call-1", "finish"), tool_call("call-2", "pause")],
-    }]);
+    let backend = FakeBackend::new([completion(vec![
+        tool_call("call-1", "finish"),
+        tool_call("call-2", "pause"),
+    ])]);
     let paused = Arc::new(Barrier::new(2));
     let mut tools = ToolRegistry::new();
     tools
@@ -639,18 +620,12 @@ async fn returns_tool_failures_to_the_provider() {
         .unwrap();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([
-        ProviderCompletion {
-            content: vec![AssistantContent::ToolCall(ToolCall {
-                id: "call-1".to_owned(),
-                name: "missing".to_owned(),
-                arguments: "{}".to_owned(),
-            })],
-        },
-        ProviderCompletion {
-            content: vec![AssistantContent::Text(
-                "I could not run that tool.".to_owned(),
-            )],
-        },
+        completion(vec![AssistantContent::ToolCall(ToolCall {
+            id: "call-1".to_owned(),
+            name: "missing".to_owned(),
+            arguments: "{}".to_owned(),
+        })]),
+        text_completion("I could not run that tool."),
     ]);
 
     let response = run_agent_loop(
@@ -719,6 +694,14 @@ async fn receive_event_kinds(events: &mut SessionEvents, count: usize) -> Vec<Se
         kinds.push(event.kind);
     }
     kinds
+}
+
+fn completion(content: Vec<AssistantContent>) -> ProviderCompletion {
+    ProviderCompletion { content }
+}
+
+fn text_completion(text: &str) -> ProviderCompletion {
+    completion(vec![AssistantContent::Text(text.to_owned())])
 }
 
 fn tool_call(id: &str, name: &str) -> AssistantContent {
