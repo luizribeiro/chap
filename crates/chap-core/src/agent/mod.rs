@@ -1,6 +1,8 @@
 use crate::config::{Config, ConfiguredPlugin};
 use crate::consent::{ConsentStore, PluginConsentReview, consent_drift};
-use crate::session::{Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions};
+use crate::session::{
+    RunError, Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions,
+};
 use crate::tool::ToolRegistry;
 use crate::{ExecutionMode, Tool, ToolDefinition};
 use lockgate::{
@@ -561,9 +563,11 @@ enum PluginLoad {
 }
 
 impl AgentInner {
-    async fn run_turn(&self, session: &Session, input: String) -> Result<String, String> {
+    async fn run_turn(&self, session: &Session, input: String) -> Result<String, RunError> {
         if !self.sessions.owns(&session.state) {
-            return Err("session does not belong to this runtime".to_owned());
+            return Err(RunError::Other(
+                "session does not belong to this runtime".to_owned(),
+            ));
         }
         let backend = PluginBackend::new(self, session.provider());
         run_agent_loop(

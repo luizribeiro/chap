@@ -1,7 +1,7 @@
 use super::{MAX_PROVIDER_STEPS_PER_TURN, ToolExecutionConfig, provider::CompletionBackend};
 use crate::{
     session::{
-        ActiveRun, AssistantContent, Message, RunBoundary, RunUsage, SessionEventKind,
+        ActiveRun, AssistantContent, Message, RunBoundary, RunError, RunUsage, SessionEventKind,
         SessionState, Steering, ToolCall, ToolResult, Usage,
     },
     tool::{ExecutionMode, ToolRegistry},
@@ -15,9 +15,9 @@ pub(super) async fn run_agent_loop(
     tools: &ToolRegistry,
     tool_execution: ToolExecutionConfig,
     backend: &impl CompletionBackend,
-) -> Result<String, String> {
+) -> Result<String, RunError> {
     if input.trim().is_empty() {
-        return Err("turn input cannot be empty".to_owned());
+        return Err(RunError::Other("turn input cannot be empty".to_owned()));
     }
 
     let _run = session.turn_lock.lock().await;
@@ -46,14 +46,14 @@ pub(super) async fn run_agent_loop(
         }
         RunOutcome::Interrupted => {
             session.emit(SessionEventKind::RunInterrupted);
-            Err("run interrupted".to_owned())
+            Err(RunError::Other("run interrupted".to_owned()))
         }
     }
 }
 
 enum RunOutcome {
     Completed(String),
-    Failed(String),
+    Failed(RunError),
     Interrupted,
 }
 
@@ -61,7 +61,7 @@ impl From<Result<String, String>> for RunOutcome {
     fn from(result: Result<String, String>) -> Self {
         match result {
             Ok(response) => Self::Completed(response),
-            Err(error) => Self::Failed(error),
+            Err(error) => Self::Failed(RunError::Other(error)),
         }
     }
 }
@@ -81,7 +81,7 @@ async fn run_steps(
             _ = active_run.interrupted() => return RunOutcome::Interrupted,
             completion = backend.complete(messages) => match completion {
                 Ok(completion) => completion,
-                Err(error) => return RunOutcome::Failed(error.to_string()),
+                Err(error) => return RunOutcome::Failed(RunError::Provider(error)),
             },
         };
         session
@@ -174,9 +174,9 @@ async fn run_steps(
         append_steering(session, steering).await;
     }
 
-    RunOutcome::Failed(format!(
+    RunOutcome::Failed(RunError::Other(format!(
         "turn exceeded the limit of {MAX_PROVIDER_STEPS_PER_TURN} provider requests"
-    ))
+    )))
 }
 
 fn update_usage(session: &SessionState, total: &mut Usage, last_step: Usage) {

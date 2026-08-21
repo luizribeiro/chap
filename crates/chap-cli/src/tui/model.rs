@@ -195,7 +195,9 @@ pub(super) fn apply_event(
         }
         SessionEventKind::RunCompleted { .. } => Some(false),
         SessionEventKind::RunFailed { error } => {
-            transcript.messages.push(ChatMessage::error(error));
+            transcript
+                .messages
+                .push(ChatMessage::error(error.to_string()));
             Some(false)
         }
         SessionEventKind::RunInterrupted => {
@@ -232,7 +234,7 @@ fn shared_result(result: Result<String, String>) -> Result<Arc<str>, Arc<str>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chap_core::{RunUsage, Usage};
+    use chap_core::{ProviderError, RunError, RunUsage, Usage};
 
     #[test]
     fn applies_run_and_tool_events_to_the_transcript() {
@@ -310,7 +312,7 @@ mod tests {
             apply_event(
                 &mut transcript,
                 SessionEventKind::RunFailed {
-                    error: "broken".to_owned(),
+                    error: RunError::Provider(ProviderError::Unavailable("broken".to_owned())),
                 },
             ),
             Some(false)

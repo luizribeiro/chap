@@ -1,3 +1,4 @@
+use crate::ProviderError;
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt,
@@ -76,6 +77,21 @@ pub struct RunUsage {
     pub last_step: Usage,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RunError {
+    Provider(ProviderError),
+    Other(String),
+}
+
+impl fmt::Display for RunError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Provider(error) => error.fmt(formatter),
+            Self::Other(message) => formatter.write_str(message),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct SessionId(Uuid);
 
@@ -148,7 +164,7 @@ pub enum SessionEventKind {
         response: String,
     },
     RunFailed {
-        error: String,
+        error: RunError,
     },
     RunInterrupted,
 }
@@ -230,13 +246,13 @@ impl Session {
         self.state.subscribe()
     }
 
-    pub async fn send(&self, input: impl Into<String>) -> Result<String, String> {
+    pub async fn send(&self, input: impl Into<String>) -> Result<String, RunError> {
         let session = self.clone();
         let executor = Arc::clone(&self.executor);
         let input = input.into();
         tokio::spawn(async move { executor.send(&session, input).await })
             .await
-            .map_err(|error| format!("session run task failed: {error}"))?
+            .map_err(|error| RunError::Other(format!("session run task failed: {error}")))?
     }
 
     pub fn steer(&self, input: impl Into<String>) -> Result<SteeringId, String> {
@@ -257,7 +273,7 @@ impl Session {
 }
 
 pub(crate) type SessionFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>>;
+    Pin<Box<dyn Future<Output = Result<String, RunError>> + Send + 'a>>;
 
 pub(crate) trait SessionExecutor: Send + Sync {
     fn send<'a>(&'a self, session: &'a Session, input: String) -> SessionFuture<'a>;

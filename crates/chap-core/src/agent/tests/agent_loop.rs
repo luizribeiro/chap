@@ -1,10 +1,10 @@
 use super::super::{
-    ToolExecutionConfig,
+    MAX_PROVIDER_STEPS_PER_TURN, ToolExecutionConfig,
     provider::{CompletionBackend, CompletionFuture, ProviderCompletion},
     turn::run_agent_loop,
 };
 use crate::{
-    ExecutionMode, ProviderError, SessionOptions, Tool, ToolDefinition,
+    ExecutionMode, ProviderError, RunError, SessionOptions, Tool, ToolDefinition,
     session::{
         AssistantContent, Message, RunUsage, SessionEventKind, SessionEvents, SessionManager,
         ToolCall, Usage,
@@ -621,7 +621,10 @@ async fn preserves_interrupted_input_for_the_next_provider_request() {
     let steering_id = state.steer("queued detail".to_owned()).unwrap();
     state.interrupt().unwrap();
 
-    assert_eq!(run.await.unwrap(), Err("run interrupted".to_owned()));
+    assert_eq!(
+        run.await.unwrap(),
+        Err(RunError::Other("run interrupted".to_owned()))
+    );
     assert_eq!(
         receive_event_kinds(&mut events, 4).await,
         vec![
@@ -704,7 +707,10 @@ async fn closes_unfinished_tool_calls_when_interrupted() {
         .expect("both tools should start concurrently");
     state.interrupt().unwrap();
 
-    assert_eq!(run.await.unwrap(), Err("run interrupted".to_owned()));
+    assert_eq!(
+        run.await.unwrap(),
+        Err(RunError::Other("run interrupted".to_owned()))
+    );
     assert_eq!(
         receive_event_kinds(&mut events, 8).await,
         vec![
@@ -806,7 +812,10 @@ async fn completes_finished_calls_when_interrupted_mid_batch() {
         .expect("the unfinished tool should start");
     state.interrupt().unwrap();
 
-    assert_eq!(run.await.unwrap(), Err("run interrupted".to_owned()));
+    assert_eq!(
+        run.await.unwrap(),
+        Err(RunError::Other("run interrupted".to_owned()))
+    );
     let history = state.messages.read().await;
     let results = history
         .iter()
@@ -883,24 +892,28 @@ async fn returns_tool_failures_to_the_provider() {
 }
 
 #[tokio::test]
-async fn emits_a_failed_terminal_event_when_the_provider_fails() {
+async fn preserves_the_provider_error_in_the_failed_terminal_event() {
     let manager = SessionManager::new();
     let state = manager
         .create(SessionOptions::new("test-provider"))
         .unwrap();
     let mut events = state.subscribe();
 
+    let provider_error = ProviderError::RateLimited {
+        retry_after: Some(Duration::from_secs(30)),
+        message: "slow down".to_owned(),
+    };
     let error = run_agent_loop(
         &state,
         "hello".to_owned(),
         &ToolRegistry::new(),
         TOOL_EXECUTION,
-        &FakeBackend::new([]),
+        &FailingBackend(provider_error.clone()),
     )
     .await
     .unwrap_err();
 
-    assert_eq!(error, "fake provider ran out of completions");
+    assert_eq!(error, RunError::Provider(provider_error));
     assert_eq!(
         receive_event_kinds(&mut events, 2).await,
         vec![
@@ -909,6 +922,37 @@ async fn emits_a_failed_terminal_event_when_the_provider_fails() {
             },
             SessionEventKind::RunFailed { error },
         ]
+    );
+}
+
+#[tokio::test]
+async fn reports_the_provider_step_limit_as_other() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let backend = FakeBackend::new(
+        (0..MAX_PROVIDER_STEPS_PER_TURN)
+            .map(|index| completion(vec![tool_call(&format!("call-{index}"), "echo")])),
+    );
+    let mut tools = ToolRegistry::new();
+    tools.register(EchoTool).unwrap();
+
+    let error = run_agent_loop(
+        &state,
+        "keep going".to_owned(),
+        &tools,
+        TOOL_EXECUTION,
+        &backend,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        RunError::Other(format!(
+            "turn exceeded the limit of {MAX_PROVIDER_STEPS_PER_TURN} provider requests"
+        ))
     );
 }
 
@@ -967,6 +1011,15 @@ fn tool_call(id: &str, name: &str) -> AssistantContent {
 struct FakeBackend {
     completions: Mutex<VecDeque<ProviderCompletion>>,
     requests: Mutex<Vec<Vec<Message>>>,
+}
+
+struct FailingBackend(ProviderError);
+
+impl CompletionBackend for FailingBackend {
+    fn complete(&self, _messages: Vec<Message>) -> CompletionFuture<'_> {
+        let error = self.0.clone();
+        Box::pin(async move { Err(error) })
+    }
 }
 
 struct PausedBackend {

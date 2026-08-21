@@ -12,7 +12,7 @@ pub use lockgate::{
 };
 pub use provider::ProviderError;
 pub use session::{
-    RunUsage, Session, SessionEvent, SessionEventError, SessionEventKind, SessionEvents, SessionId,
-    SessionOptions, SteeringId, Usage,
+    RunError, RunUsage, Session, SessionEvent, SessionEventError, SessionEventKind, SessionEvents,
+    SessionId, SessionOptions, SteeringId, Usage,
 };
 pub use tool::{ExecutionMode, Tool, ToolDefinition};
