@@ -1,10 +1,17 @@
-use chap_core::{SessionEventKind, SteeringId};
+use chap_core::{SessionEventKind, SteeringId, Usage};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TranscriptModel {
     pub messages: Vec<ChatMessage>,
     pub pending_steering: Vec<PendingSteering>,
+    pub usage: Option<UsageModel>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UsageModel {
+    pub context_tokens: u64,
+    pub session: Usage,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -176,6 +183,16 @@ pub(super) fn apply_event(
             }
             None
         }
+        SessionEventKind::UsageUpdated { usage } => {
+            let model = transcript.usage.get_or_insert_default();
+            // chap drops reasoning from assistant messages instead of sending it back to the
+            // model. Counting output would include those billed tokens, so context reports the
+            // last request's measured input rather than forecasting the next request. If chap
+            // ever replays reasoning, this must become input plus output.
+            model.context_tokens = usage.last_step.input_tokens;
+            model.session.saturating_add_assign(usage.last_step);
+            None
+        }
         SessionEventKind::RunCompleted { .. } => Some(false),
         SessionEventKind::RunFailed { error } => {
             transcript.messages.push(ChatMessage::error(error));
@@ -215,6 +232,7 @@ fn shared_result(result: Result<String, String>) -> Result<Arc<str>, Arc<str>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chap_core::{RunUsage, Usage};
 
     #[test]
     fn applies_run_and_tool_events_to_the_transcript() {
@@ -337,6 +355,116 @@ mod tests {
                 ),
                 ChatMessage::status("run interrupted"),
             ]
+        );
+    }
+
+    #[test]
+    fn accumulates_usage_and_measures_context_from_input() {
+        let mut transcript = TranscriptModel::default();
+
+        assert_eq!(
+            apply_event(
+                &mut transcript,
+                SessionEventKind::UsageUpdated {
+                    usage: RunUsage {
+                        total: Usage {
+                            input_tokens: 12,
+                            cached_input_tokens: Some(4),
+                            output_tokens: 3,
+                            reasoning_tokens: Some(2),
+                        },
+                        last_step: Usage {
+                            input_tokens: 12,
+                            cached_input_tokens: Some(4),
+                            output_tokens: 3,
+                            reasoning_tokens: Some(2),
+                        },
+                    },
+                },
+            ),
+            None
+        );
+        assert_eq!(
+            transcript.usage,
+            Some(UsageModel {
+                context_tokens: 12,
+                session: Usage {
+                    input_tokens: 12,
+                    cached_input_tokens: Some(4),
+                    output_tokens: 3,
+                    reasoning_tokens: Some(2),
+                },
+            })
+        );
+
+        assert_eq!(
+            apply_event(
+                &mut transcript,
+                SessionEventKind::UsageUpdated {
+                    usage: RunUsage {
+                        total: Usage {
+                            input_tokens: 24,
+                            cached_input_tokens: Some(10),
+                            output_tokens: 102,
+                            reasoning_tokens: Some(5),
+                        },
+                        last_step: Usage {
+                            input_tokens: 12,
+                            cached_input_tokens: Some(6),
+                            output_tokens: 99,
+                            reasoning_tokens: Some(3),
+                        },
+                    },
+                },
+            ),
+            None
+        );
+        assert_eq!(
+            transcript.usage,
+            Some(UsageModel {
+                context_tokens: 12,
+                session: Usage {
+                    input_tokens: 24,
+                    cached_input_tokens: Some(10),
+                    output_tokens: 102,
+                    reasoning_tokens: Some(5),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn keeps_unreported_cached_input_absent_in_footer_usage() {
+        let mut transcript = TranscriptModel::default();
+
+        apply_event(
+            &mut transcript,
+            SessionEventKind::UsageUpdated {
+                usage: RunUsage {
+                    total: Usage {
+                        input_tokens: 900,
+                        output_tokens: 300,
+                        ..Usage::default()
+                    },
+                    last_step: Usage {
+                        input_tokens: 900,
+                        output_tokens: 300,
+                        ..Usage::default()
+                    },
+                },
+            },
+        );
+
+        assert_eq!(
+            transcript.usage,
+            Some(UsageModel {
+                context_tokens: 900,
+                session: Usage {
+                    input_tokens: 900,
+                    output_tokens: 300,
+                    ..Usage::default()
+                },
+            })
         );
     }
 }

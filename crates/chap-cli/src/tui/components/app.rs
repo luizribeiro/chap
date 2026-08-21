@@ -112,7 +112,7 @@ pub fn Chap(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
                     transcript.write().messages.push(ChatMessage::error(error));
                 },
             )
-            Footer(busy: busy.get())
+            Footer(busy: busy.get(), usage: transcript.read().usage)
         }
     }
 }
