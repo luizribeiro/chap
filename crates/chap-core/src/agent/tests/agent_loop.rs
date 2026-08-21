@@ -4,7 +4,7 @@ use super::super::{
     turn::run_agent_loop,
 };
 use crate::{
-    ExecutionMode, SessionOptions, Tool, ToolDefinition,
+    ExecutionMode, ProviderError, SessionOptions, Tool, ToolDefinition,
     session::{
         AssistantContent, Message, RunUsage, SessionEventKind, SessionEvents, SessionManager,
         ToolCall, Usage,
@@ -991,12 +991,9 @@ impl CompletionBackend for PausedBackend {
     fn complete(&self, messages: Vec<Message>) -> CompletionFuture<'_> {
         let is_first = self.requests.lock().unwrap().is_empty();
         self.requests.lock().unwrap().push(messages);
-        let completion = self
-            .completions
-            .lock()
-            .unwrap()
-            .pop_front()
-            .ok_or_else(|| "paused provider ran out of completions".to_owned());
+        let completion = self.completions.lock().unwrap().pop_front().ok_or_else(|| {
+            ProviderError::Other("paused provider ran out of completions".to_owned())
+        });
 
         Box::pin(async move {
             if is_first {
@@ -1020,12 +1017,10 @@ impl FakeBackend {
 impl CompletionBackend for FakeBackend {
     fn complete(&self, messages: Vec<Message>) -> CompletionFuture<'_> {
         self.requests.lock().unwrap().push(messages);
-        let completion = self
-            .completions
-            .lock()
-            .unwrap()
-            .pop_front()
-            .ok_or_else(|| "fake provider ran out of completions".to_owned());
+        let completion =
+            self.completions.lock().unwrap().pop_front().ok_or_else(|| {
+                ProviderError::Other("fake provider ran out of completions".to_owned())
+            });
         Box::pin(async move { completion })
     }
 }

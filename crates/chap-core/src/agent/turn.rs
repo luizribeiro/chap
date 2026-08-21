@@ -81,7 +81,7 @@ async fn run_steps(
             _ = active_run.interrupted() => return RunOutcome::Interrupted,
             completion = backend.complete(messages) => match completion {
                 Ok(completion) => completion,
-                Err(error) => return RunOutcome::Failed(error),
+                Err(error) => return RunOutcome::Failed(error.to_string()),
             },
         };
         session

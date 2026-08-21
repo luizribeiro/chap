@@ -1,12 +1,15 @@
 use super::{
-    super::AgentBuilder,
+    super::{
+        AgentBuilder,
+        provider::{CompletionBackend, PluginBackend},
+    },
     fixtures::{
         provider_component, provider_component_with_schema,
         provider_component_with_trapping_schema, test_directory, tool_component,
         tool_component_with_schema, unsupported_component,
     },
 };
-use crate::{ExecutionMode, SessionOptions, Tool, ToolDefinition};
+use crate::{ExecutionMode, ProviderError, SessionOptions, Tool, ToolDefinition};
 use lockgate::{ConsentRequired, DriftReport, Role};
 use std::{
     fs,
@@ -57,6 +60,37 @@ model = "example-model"
     let agent = builder.start().await.unwrap();
     assert!(agent.plugin_errors().next().is_none());
     assert!(agent.inner.plugins.contains_key("example.provider"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn classifies_a_trapping_provider_as_a_plugin_failure() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component("example.provider"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins.example]
+component = "provider.wasm"
+"#,
+    )
+    .unwrap();
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    builder.approve_plugin("example").await.unwrap();
+    let agent = builder.start().await.unwrap();
+    let backend = PluginBackend::new(&agent.inner, "example");
+
+    let error = backend.complete(Vec::new()).await.unwrap_err();
+
+    let ProviderError::Plugin(message) = error else {
+        panic!("a trapping provider should be a plugin failure");
+    };
+    assert!(message.contains("plugin trapped:"), "{message}");
     fs::remove_dir_all(directory).unwrap();
 }
 

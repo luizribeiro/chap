@@ -1,15 +1,15 @@
 use super::{AgentInner, PLUGIN_FUEL_PER_CALL, bindings};
 use crate::{
-    ToolDefinition,
+    ProviderError, ToolDefinition,
     session::{AssistantContent, Message, ToolCall, Usage},
 };
 use bindings::provider as provider_bindings;
 use bindings::types as provider_types;
 use lockgate::InvocationCtx;
-use std::{future::Future, pin::Pin};
+use std::{fmt, future::Future, pin::Pin, time::Duration};
 
 pub(super) type CompletionFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<ProviderCompletion, String>> + Send + 'a>>;
+    Pin<Box<dyn Future<Output = Result<ProviderCompletion, ProviderError>> + Send + 'a>>;
 
 pub(super) trait CompletionBackend: Sync {
     fn complete(&self, messages: Vec<Message>) -> CompletionFuture<'_>;
@@ -37,15 +37,17 @@ impl AgentInner {
         &self,
         provider: &str,
         messages: Vec<Message>,
-    ) -> Result<ProviderCompletion, String> {
+    ) -> Result<ProviderCompletion, ProviderError> {
         let plugin = self
             .plugins
             .get(provider)
             .filter(|plugin| plugin.provider)
-            .ok_or_else(|| format!("provider plugin `{provider}` is not configured"))?;
+            .ok_or_else(|| {
+                ProviderError::Plugin(format!("provider plugin `{provider}` is not configured"))
+            })?;
         self.lockgate
             .client::<provider_bindings::Role>(&plugin.handle)
-            .map_err(|error| format!("provider plugin `{provider}` failed: {error}"))?
+            .map_err(|error| plugin_error(provider, error))?
             .complete(
                 InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL),
                 provider_types::CompletionRequest {
@@ -59,21 +61,41 @@ impl AgentInner {
                 },
             )
             .await
-            .map_err(|error| format!("provider plugin `{provider}` failed: {error}"))?
-            .map_err(|error| format_provider_error(provider, error))
+            .map_err(|error| plugin_error(provider, error))?
+            .map_err(|error| map_provider_error(provider, error))
             .map(Into::into)
     }
 }
 
-fn format_provider_error(provider: &str, error: provider_types::ProviderError) -> String {
-    let message = match error {
-        provider_types::ProviderError::RateLimited(error) => error.message,
-        provider_types::ProviderError::ContextTooLong(message)
-        | provider_types::ProviderError::Unauthorized(message)
-        | provider_types::ProviderError::Unavailable(message)
-        | provider_types::ProviderError::Refused(message)
-        | provider_types::ProviderError::Other(message) => message,
-    };
+fn plugin_error(provider: &str, error: impl fmt::Display) -> ProviderError {
+    ProviderError::Plugin(format!("provider plugin `{provider}` failed: {error}"))
+}
+
+fn map_provider_error(provider: &str, error: provider_types::ProviderError) -> ProviderError {
+    match error {
+        provider_types::ProviderError::RateLimited(error) => ProviderError::RateLimited {
+            retry_after: error.retry_after.map(Duration::from_secs),
+            message: provider_message(provider, error.message),
+        },
+        provider_types::ProviderError::ContextTooLong(message) => {
+            ProviderError::ContextTooLong(provider_message(provider, message))
+        }
+        provider_types::ProviderError::Unauthorized(message) => {
+            ProviderError::Unauthorized(provider_message(provider, message))
+        }
+        provider_types::ProviderError::Unavailable(message) => {
+            ProviderError::Unavailable(provider_message(provider, message))
+        }
+        provider_types::ProviderError::Refused(message) => {
+            ProviderError::Refused(provider_message(provider, message))
+        }
+        provider_types::ProviderError::Other(message) => {
+            ProviderError::Other(provider_message(provider, message))
+        }
+    }
+}
+
+fn provider_message(provider: &str, message: String) -> String {
     format!("provider plugin `{provider}`: {message}")
 }
 
@@ -157,42 +179,63 @@ mod tests {
     use super::*;
 
     #[test]
-    fn formats_each_provider_error() {
+    fn maps_each_provider_error() {
         let errors = [
             (
                 provider_types::ProviderError::RateLimited(provider_types::RateLimit {
                     retry_after: Some(30),
                     message: "slow down".to_owned(),
                 }),
-                "slow down",
+                ProviderError::RateLimited {
+                    retry_after: Some(Duration::from_secs(30)),
+                    message: "provider plugin `example`: slow down".to_owned(),
+                },
+                "provider plugin `example`: slow down",
+            ),
+            (
+                provider_types::ProviderError::RateLimited(provider_types::RateLimit {
+                    retry_after: None,
+                    message: "slow down".to_owned(),
+                }),
+                ProviderError::RateLimited {
+                    retry_after: None,
+                    message: "provider plugin `example`: slow down".to_owned(),
+                },
+                "provider plugin `example`: slow down",
             ),
             (
                 provider_types::ProviderError::ContextTooLong("too many tokens".to_owned()),
-                "too many tokens",
+                ProviderError::ContextTooLong(
+                    "provider plugin `example`: too many tokens".to_owned(),
+                ),
+                "provider plugin `example`: too many tokens",
             ),
             (
                 provider_types::ProviderError::Unauthorized("invalid key".to_owned()),
-                "invalid key",
+                ProviderError::Unauthorized("provider plugin `example`: invalid key".to_owned()),
+                "provider plugin `example`: invalid key",
             ),
             (
                 provider_types::ProviderError::Unavailable("service is down".to_owned()),
-                "service is down",
+                ProviderError::Unavailable("provider plugin `example`: service is down".to_owned()),
+                "provider plugin `example`: service is down",
             ),
             (
                 provider_types::ProviderError::Refused("request declined".to_owned()),
-                "request declined",
+                ProviderError::Refused("provider plugin `example`: request declined".to_owned()),
+                "provider plugin `example`: request declined",
             ),
             (
                 provider_types::ProviderError::Other("invalid response".to_owned()),
-                "invalid response",
+                ProviderError::Other("provider plugin `example`: invalid response".to_owned()),
+                "provider plugin `example`: invalid response",
             ),
         ];
 
-        for (error, message) in errors {
-            assert_eq!(
-                format_provider_error("example", error),
-                format!("provider plugin `example`: {message}")
-            );
+        for (wire_error, expected, display) in errors {
+            let error = map_provider_error("example", wire_error);
+            assert_eq!(error.to_string(), display);
+            assert_eq!(error, expected);
         }
     }
 }
