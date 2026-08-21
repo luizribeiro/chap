@@ -22,7 +22,14 @@ pub(crate) enum Message {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum AssistantContent {
     Text(String),
+    Reasoning(Reasoning),
     ToolCall(ToolCall),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Reasoning {
+    pub(crate) text: String,
+    pub(crate) signature: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

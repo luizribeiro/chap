@@ -6,8 +6,8 @@ use super::super::{
 use crate::{
     ExecutionMode, ProviderError, RunError, SessionOptions, Tool, ToolDefinition,
     session::{
-        AssistantContent, Message, RunUsage, SessionEventKind, SessionEvents, SessionManager,
-        ToolCall, Usage,
+        AssistantContent, Message, Reasoning, RunUsage, SessionEventKind, SessionEvents,
+        SessionManager, ToolCall, Usage,
     },
     tool::ToolRegistry,
 };
@@ -121,6 +121,143 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
         Message::Assistant(ref content)
             if matches!(content.as_slice(), [AssistantContent::Text(text)] if text == "The tool said hello.")
     ));
+}
+
+#[tokio::test]
+async fn stores_reasoning_in_session_history() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let backend = FakeBackend::new([completion(vec![
+        reasoning("I should answer directly.", Some("opaque-signature")),
+        AssistantContent::Text("Hello.".to_owned()),
+    ])]);
+
+    assert_eq!(
+        run_agent_loop(
+            &state,
+            "hello".to_owned(),
+            &ToolRegistry::new(),
+            TOOL_EXECUTION,
+            &backend,
+        )
+        .await
+        .unwrap(),
+        "Hello."
+    );
+    assert_eq!(
+        state.messages.read().await.as_slice(),
+        [
+            Message::User("hello".to_owned()),
+            Message::Assistant(vec![
+                reasoning("I should answer directly.", Some("opaque-signature")),
+                AssistantContent::Text("Hello.".to_owned()),
+            ]),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn carries_reasoning_into_the_following_provider_request() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let backend = FakeBackend::new([
+        completion(vec![
+            reasoning("I need the tool.", Some("opaque-signature")),
+            tool_call("call-1", "echo"),
+        ]),
+        text_completion("done"),
+    ]);
+    let mut tools = ToolRegistry::new();
+    tools.register(EchoTool).unwrap();
+
+    assert_eq!(
+        run_agent_loop(&state, "hello".to_owned(), &tools, TOOL_EXECUTION, &backend)
+            .await
+            .unwrap(),
+        "done"
+    );
+    let requests = backend.requests.lock().unwrap();
+    assert_eq!(
+        requests[1][1],
+        Message::Assistant(vec![
+            reasoning("I need the tool.", Some("opaque-signature")),
+            tool_call("call-1", "echo"),
+        ])
+    );
+}
+
+#[tokio::test]
+async fn emits_only_text_from_a_completion_with_reasoning() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let mut events = state.subscribe();
+    let backend = FakeBackend::new([completion(vec![
+        reasoning("I should be concise.", None),
+        AssistantContent::Text("Hello.".to_owned()),
+    ])]);
+
+    assert_eq!(
+        run_agent_loop(
+            &state,
+            "hello".to_owned(),
+            &ToolRegistry::new(),
+            TOOL_EXECUTION,
+            &backend,
+        )
+        .await
+        .unwrap(),
+        "Hello."
+    );
+    assert_eq!(
+        receive_event_kinds(&mut events, 3).await,
+        vec![
+            SessionEventKind::RunStarted {
+                input: "hello".to_owned(),
+            },
+            SessionEventKind::AssistantMessage {
+                text: "Hello.".to_owned(),
+            },
+            SessionEventKind::RunCompleted {
+                response: "Hello.".to_owned(),
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn emits_no_assistant_message_for_reasoning_alone() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let mut events = state.subscribe();
+    let backend = FakeBackend::new([completion(vec![reasoning("Still thinking.", None)])]);
+
+    let error = run_agent_loop(
+        &state,
+        "hello".to_owned(),
+        &ToolRegistry::new(),
+        TOOL_EXECUTION,
+        &backend,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(
+        receive_event_kinds(&mut events, 2).await,
+        vec![
+            SessionEventKind::RunStarted {
+                input: "hello".to_owned(),
+            },
+            SessionEventKind::RunFailed { error },
+        ]
+    );
 }
 
 #[tokio::test]
@@ -1060,6 +1197,13 @@ fn tool_call(id: &str, name: &str) -> AssistantContent {
         id: id.to_owned(),
         name: name.to_owned(),
         arguments: "{}".to_owned(),
+    })
+}
+
+fn reasoning(text: &str, signature: Option<&str>) -> AssistantContent {
+    AssistantContent::Reasoning(Reasoning {
+        text: text.to_owned(),
+        signature: signature.map(str::to_owned),
     })
 }
 

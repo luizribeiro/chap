@@ -106,6 +106,7 @@ async fn run_steps(
             .iter()
             .filter_map(|content| match content {
                 AssistantContent::Text(_) => None,
+                AssistantContent::Reasoning(_) => None,
                 AssistantContent::ToolCall(call) => Some(call.clone()),
             })
             .collect::<Vec<_>>();
@@ -300,7 +301,7 @@ fn completion_text(content: &[AssistantContent]) -> Option<String> {
         .iter()
         .filter_map(|content| match content {
             AssistantContent::Text(text) => Some(text.as_str()),
-            AssistantContent::ToolCall(_) => None,
+            AssistantContent::Reasoning(_) | AssistantContent::ToolCall(_) => None,
         })
         .collect::<Vec<_>>();
     if text.is_empty() {

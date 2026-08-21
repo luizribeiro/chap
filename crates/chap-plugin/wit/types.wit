@@ -30,8 +30,18 @@ interface types {
     is-error: bool,
   }
 
+  record reasoning {
+    /// Display text for the model's thinking. May be empty when a provider
+    /// returns only an opaque blob.
+    text: string,
+    /// Opaque token a provider needs in order to accept this reasoning back on a
+    /// later request. The host never inspects it.
+    signature: option<string>,
+  }
+
   variant assistant-content {
     text(string),
+    reasoning(reasoning),
     tool-call(tool-call),
   }
 

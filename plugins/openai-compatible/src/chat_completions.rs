@@ -71,6 +71,9 @@ impl From<provider::Message> for Message {
                 for content in content {
                     match content {
                         AssistantContent::Text(content) => text.push(content),
+                        AssistantContent::Reasoning(_) => {
+                            // Reasoning replay requires provider-specific wire encoding.
+                        }
                         AssistantContent::ToolCall(call) => {
                             tool_calls.push(ToolCall::from(call));
                         }

@@ -1,7 +1,7 @@
 use super::{AgentInner, PLUGIN_FUEL_PER_CALL, bindings};
 use crate::{
     ProviderError, ToolDefinition,
-    session::{AssistantContent, Message, ToolCall, Usage},
+    session::{AssistantContent, Message, Reasoning, ToolCall, Usage},
 };
 use bindings::provider as provider_bindings;
 use bindings::types as provider_types;
@@ -136,6 +136,10 @@ impl From<AssistantContent> for provider_types::AssistantContent {
     fn from(content: AssistantContent) -> Self {
         match content {
             AssistantContent::Text(text) => Self::Text(text),
+            AssistantContent::Reasoning(reasoning) => Self::Reasoning(provider_types::Reasoning {
+                text: reasoning.text,
+                signature: reasoning.signature,
+            }),
             AssistantContent::ToolCall(call) => Self::ToolCall(provider_types::ToolCall {
                 id: call.id,
                 name: call.name,
@@ -163,6 +167,12 @@ impl From<provider_types::Completion> for ProviderCompletion {
                 .into_iter()
                 .map(|content| match content {
                     provider_types::AssistantContent::Text(text) => AssistantContent::Text(text),
+                    provider_types::AssistantContent::Reasoning(reasoning) => {
+                        AssistantContent::Reasoning(Reasoning {
+                            text: reasoning.text,
+                            signature: reasoning.signature,
+                        })
+                    }
                     provider_types::AssistantContent::ToolCall(call) => {
                         AssistantContent::ToolCall(ToolCall {
                             id: call.id,
