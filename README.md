@@ -107,6 +107,19 @@ and Lockgate resolves that URL's origin as the granted scope. The scheme and
 effective port are part of the origin. Kagi declares the literal origin
 `https://kagi.com` and therefore needs no configurable origin.
 
+### Token usage
+
+Provider plugins may report input and output token usage with each completion,
+plus optional cached-input and reasoning counters. Cached input is a subset of
+input, and reasoning is a subset of output, so neither is added to the totals.
+An absent subset counter means the server did not report it, distinct from zero;
+this is normal for local servers such as vLLM and llama.cpp.
+
+CHAP accumulates reported usage across every provider step. The footer shows the
+last request's input as measured context, not a forecast, with session-wide input
+and output totals and nonzero subset totals. Providers omitting optional `usage`
+remain supported: CHAP invents no counters and the footer stays hidden.
+
 ### Permission grants
 
 Lockgate v2 admits a component only after its exact resolved permission
