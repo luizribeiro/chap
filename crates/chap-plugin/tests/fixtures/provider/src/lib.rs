@@ -41,6 +41,7 @@ impl Provider for ProviderFixture {
         Ok(Completion {
             content: vec![AssistantContent::Text(format!("{}{}", self.prefix, input))],
             finish_reason: FinishReason::Stop,
+            usage: None,
         })
     }
 }

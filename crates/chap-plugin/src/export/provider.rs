@@ -2,7 +2,7 @@
 
 pub use crate::types::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message, ToolCall,
-    ToolDefinition, ToolResult,
+    ToolDefinition, ToolResult, Usage,
 };
 
 /// Produces model completions for CHAP agent turns.

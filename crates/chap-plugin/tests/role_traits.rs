@@ -24,6 +24,7 @@ impl Provider for Dummy {
         Ok(Completion {
             content: Vec::new(),
             finish_reason: FinishReason::Stop,
+            usage: None,
         })
     }
 }

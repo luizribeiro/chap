@@ -31,6 +31,7 @@ impl Provider for MultiRole {
                 })
                 .collect(),
             finish_reason: FinishReason::Stop,
+            usage: None,
         })
     }
 }

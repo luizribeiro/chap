@@ -1,6 +1,6 @@
 //! Wire format for the OpenAI Chat Completions API.
 
-use chap::provider::{self, AssistantContent, Completion, CompletionRequest, FinishReason};
+use chap::provider::{self, AssistantContent, Completion, CompletionRequest, FinishReason, Usage};
 use chap_plugin as chap;
 use serde::{Deserialize, Serialize};
 
@@ -148,10 +148,9 @@ pub(crate) fn parse_response(status: u16, body: &str) -> Result<Completion, Stri
             "OpenAI-compatible server returned HTTP {status}: {message}"
         ));
     }
-    let response: Response = serde_json::from_str(body)
+    let Response { choices, usage } = serde_json::from_str(body)
         .map_err(|error| format!("invalid OpenAI-compatible response: {error}"))?;
-    let choice = response
-        .choices
+    let choice = choices
         .into_iter()
         .next()
         .ok_or_else(|| "OpenAI-compatible server returned no completion choices".to_owned())?;
@@ -175,12 +174,49 @@ pub(crate) fn parse_response(status: u16, body: &str) -> Result<Completion, Stri
     Ok(Completion {
         content,
         finish_reason: finish_reason(choice.finish_reason),
+        usage: usage.map(Usage::from),
     })
 }
 
 #[derive(Deserialize)]
 struct Response {
     choices: Vec<Choice>,
+    usage: Option<ResponseUsage>,
+}
+
+#[derive(Deserialize)]
+struct ResponseUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+    prompt_tokens_details: Option<PromptTokensDetails>,
+    completion_tokens_details: Option<CompletionTokensDetails>,
+}
+
+#[derive(Deserialize)]
+struct PromptTokensDetails {
+    cached_tokens: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct CompletionTokensDetails {
+    reasoning_tokens: Option<u64>,
+}
+
+impl From<ResponseUsage> for Usage {
+    fn from(usage: ResponseUsage) -> Self {
+        Self {
+            input_tokens: usage.prompt_tokens,
+            cached_input_tokens: usage
+                .prompt_tokens_details
+                .and_then(|details| details.cached_tokens),
+            output_tokens: usage.completion_tokens,
+            reasoning_tokens: usage
+                .completion_tokens_details
+                .and_then(|details| details.reasoning_tokens),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -233,6 +269,17 @@ struct ErrorBody {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_completion_with_usage(usage: Option<&str>) -> Completion {
+        let usage = usage
+            .map(|usage| format!(r#", "usage": {usage}"#))
+            .unwrap_or_default();
+        let body = format!(
+            r#"{{"choices":[{{"message":{{"role":"assistant","content":"hello"}},"finish_reason":"stop"}}]{usage}}}"#
+        );
+
+        parse_response(200, &body).unwrap()
+    }
 
     #[test]
     fn encodes_a_minimal_request() {
@@ -314,6 +361,104 @@ mod tests {
             [AssistantContent::Text(text)] if text == "hello"
         ));
         assert!(matches!(completion.finish_reason, FinishReason::Stop));
+    }
+
+    #[test]
+    fn extracts_usage() {
+        let completion = parse_completion_with_usage(Some(
+            r#"{"prompt_tokens":53,"completion_tokens":58,"prompt_tokens_details":{"cached_tokens":20},"completion_tokens_details":{"reasoning_tokens":45},"total_tokens":111}"#,
+        ));
+
+        assert!(matches!(
+            completion.usage,
+            Some(Usage {
+                input_tokens: 53,
+                cached_input_tokens: Some(20),
+                output_tokens: 58,
+                reasoning_tokens: Some(45),
+            })
+        ));
+    }
+
+    #[test]
+    fn leaves_absent_usage_details_unreported() {
+        let completion =
+            parse_completion_with_usage(Some(r#"{"prompt_tokens":12,"completion_tokens":34}"#));
+
+        assert!(matches!(
+            completion.usage,
+            Some(Usage {
+                input_tokens: 12,
+                cached_input_tokens: None,
+                output_tokens: 34,
+                reasoning_tokens: None,
+            })
+        ));
+    }
+
+    #[test]
+    fn leaves_null_usage_details_unreported() {
+        let completion = parse_completion_with_usage(Some(
+            r#"{"prompt_tokens":12,"completion_tokens":34,"prompt_tokens_details":null,"completion_tokens_details":null}"#,
+        ));
+
+        assert!(matches!(
+            completion.usage,
+            Some(Usage {
+                input_tokens: 12,
+                cached_input_tokens: None,
+                output_tokens: 34,
+                reasoning_tokens: None,
+            })
+        ));
+    }
+
+    #[test]
+    fn reports_no_usage_when_omitted() {
+        let completion = parse_completion_with_usage(None);
+
+        assert!(completion.usage.is_none());
+    }
+
+    #[test]
+    fn reports_no_usage_when_null() {
+        let completion = parse_completion_with_usage(Some("null"));
+
+        assert!(completion.usage.is_none());
+    }
+
+    #[test]
+    fn leaves_missing_usage_counters_unreported() {
+        let completion = parse_completion_with_usage(Some(
+            r#"{"prompt_tokens":12,"prompt_tokens_details":{},"completion_tokens_details":{}}"#,
+        ));
+
+        assert!(matches!(
+            completion.usage,
+            Some(Usage {
+                input_tokens: 12,
+                cached_input_tokens: None,
+                output_tokens: 0,
+                reasoning_tokens: None,
+            })
+        ));
+    }
+
+    #[test]
+    fn ignores_unknown_usage_fields() {
+        let completion = parse_completion_with_usage(Some(
+            r#"{"prompt_tokens":12,"completion_tokens":34,"service_tier":"default"}"#,
+        ));
+
+        assert!(matches!(
+            completion.usage,
+            Some(Usage {
+                input_tokens: 12,
+                cached_input_tokens: None,
+                output_tokens: 34,
+                reasoning_tokens: None,
+            })
+        ));
     }
 
     #[test]

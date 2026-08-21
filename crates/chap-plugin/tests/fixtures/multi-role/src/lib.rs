@@ -44,6 +44,7 @@ impl Provider for MultiRoleFixture {
             return Ok(Completion {
                 content: vec![AssistantContent::Text(format!("{}{}", self.prefix, output))],
                 finish_reason: FinishReason::Stop,
+                usage: None,
             });
         }
 
@@ -54,6 +55,7 @@ impl Provider for MultiRoleFixture {
                 arguments: r#"{"value":"round-trip"}"#.to_owned(),
             })],
             finish_reason: FinishReason::ToolCalls,
+            usage: None,
         })
     }
 }

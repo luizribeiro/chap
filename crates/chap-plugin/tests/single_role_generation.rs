@@ -30,6 +30,7 @@ impl Provider for SingleRole {
                 })
                 .collect(),
             finish_reason: FinishReason::Stop,
+            usage: None,
         })
     }
 }

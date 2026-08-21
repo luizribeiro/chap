@@ -54,8 +54,22 @@ interface types {
     other(string),
   }
 
+  record usage {
+    /// The whole prompt, including cached input tokens.
+    input-tokens: u64,
+    /// The portion of input-tokens served from cache. Absent when the provider
+    /// did not report this counter, which is distinct from a reported zero.
+    cached-input-tokens: option<u64>,
+    /// The whole completion, including reasoning tokens.
+    output-tokens: u64,
+    /// The portion of output-tokens spent on reasoning. Absent when the provider
+    /// did not report this counter, which is distinct from a reported zero.
+    reasoning-tokens: option<u64>,
+  }
+
   record completion {
     content: list<assistant-content>,
     finish-reason: finish-reason,
+    usage: option<usage>,
   }
 }
