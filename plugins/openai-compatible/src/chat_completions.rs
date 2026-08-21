@@ -190,11 +190,34 @@ pub(crate) fn parse_response(
     let choice = choices.into_iter().next().ok_or_else(|| {
         ProviderError::Other("OpenAI-compatible server returned no completion choices".to_owned())
     })?;
+    let Choice {
+        message,
+        finish_reason: completion_finish_reason,
+    } = choice;
+    let ResponseMessage {
+        content: text,
+        reasoning_content,
+        reasoning,
+        reasoning_text,
+        tool_calls,
+        refusal,
+    } = message;
     let mut content = Vec::new();
-    if let Some(text) = choice.message.content {
+    if let Some(text) = [reasoning_content, reasoning, reasoning_text]
+        .into_iter()
+        .flatten()
+        .find(|text| !text.is_empty())
+    {
+        content.push(AssistantContent::Reasoning(provider::Reasoning {
+            text,
+            // Chat Completions has no replay-token concept.
+            signature: None,
+        }));
+    }
+    if let Some(text) = text {
         content.push(AssistantContent::Text(text));
     }
-    content.extend(choice.message.tool_calls.into_iter().map(|call| {
+    content.extend(tool_calls.into_iter().map(|call| {
         AssistantContent::ToolCall(provider::ToolCall {
             id: call.id,
             name: call.function.name,
@@ -202,7 +225,7 @@ pub(crate) fn parse_response(
         })
     }));
     if content.is_empty() {
-        return Err(match choice.message.refusal {
+        return Err(match refusal {
             Some(refusal) => ProviderError::Refused(format!(
                 "OpenAI-compatible server refused the request: {refusal}"
             )),
@@ -213,7 +236,7 @@ pub(crate) fn parse_response(
     }
     Ok(Completion {
         content,
-        finish_reason: finish_reason(choice.finish_reason),
+        finish_reason: finish_reason(completion_finish_reason),
         usage: usage.map(Usage::from),
     })
 }
@@ -276,6 +299,9 @@ struct Choice {
 #[derive(Deserialize)]
 struct ResponseMessage {
     content: Option<String>,
+    reasoning_content: Option<String>,
+    reasoning: Option<String>,
+    reasoning_text: Option<String>,
     #[serde(default)]
     tool_calls: Vec<ResponseToolCall>,
     #[serde(default)]
@@ -362,6 +388,18 @@ mod tests {
         parse_response(response_metadata(200), &body).unwrap()
     }
 
+    fn parse_completion_message(message: serde_json::Value) -> Result<Completion, ProviderError> {
+        let body = serde_json::json!({
+            "choices": [{
+                "message": message,
+                "finish_reason": "stop",
+            }],
+        })
+        .to_string();
+
+        parse_response(response_metadata(200), &body)
+    }
+
     #[test]
     fn encodes_a_minimal_request() {
         let encoded = encode_request(
@@ -442,6 +480,94 @@ mod tests {
             [AssistantContent::Text(text)] if text == "hello"
         ));
         assert!(matches!(completion.finish_reason, FinishReason::Stop));
+    }
+
+    #[test]
+    fn extracts_each_supported_reasoning_field() {
+        for message in [
+            serde_json::json!({"reasoning_content": "think"}),
+            serde_json::json!({"reasoning": "think"}),
+            serde_json::json!({"reasoning_text": "think"}),
+        ] {
+            let completion = parse_completion_message(message).unwrap();
+
+            assert!(matches!(
+                completion.content.as_slice(),
+                [AssistantContent::Reasoning(reasoning)]
+                    if reasoning.text == "think" && reasoning.signature.is_none()
+            ));
+        }
+    }
+
+    #[test]
+    fn takes_the_first_nonempty_reasoning_field() {
+        let completion = parse_completion_message(serde_json::json!({
+            "reasoning_content": "first",
+            "reasoning": "second",
+            "reasoning_text": "third",
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            completion.content.as_slice(),
+            [AssistantContent::Reasoning(reasoning)] if reasoning.text == "first"
+        ));
+    }
+
+    #[test]
+    fn treats_empty_reasoning_as_absent() {
+        let completion = parse_completion_message(serde_json::json!({
+            "content": "hello",
+            "reasoning_content": "",
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            completion.content.as_slice(),
+            [AssistantContent::Text(text)] if text == "hello"
+        ));
+    }
+
+    #[test]
+    fn places_reasoning_before_response_text() {
+        let completion = parse_completion_message(serde_json::json!({
+            "content": "answer",
+            "reasoning_content": "think",
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            completion.content.as_slice(),
+            [
+                AssistantContent::Reasoning(reasoning),
+                AssistantContent::Text(text),
+            ] if reasoning.text == "think" && text == "answer"
+        ));
+    }
+
+    #[test]
+    fn accepts_a_reasoning_only_response() {
+        let completion = parse_completion_message(serde_json::json!({
+            "content": null,
+            "reasoning_content": "think",
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            completion.content.as_slice(),
+            [AssistantContent::Reasoning(reasoning)] if reasoning.text == "think"
+        ));
+    }
+
+    #[test]
+    fn rejects_a_response_without_reasoning_text_or_tool_calls() {
+        let error = parse_completion_message(serde_json::json!({"content": null})).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ProviderError::Other(message)
+                if message == "OpenAI-compatible server returned a completion without content"
+        ));
     }
 
     #[test]
