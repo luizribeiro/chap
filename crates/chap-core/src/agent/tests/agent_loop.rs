@@ -3,7 +3,7 @@ use super::super::{
     turn::run_agent_loop,
 };
 use crate::{
-    SessionOptions, Tool, ToolDefinition,
+    ExecutionMode, SessionOptions, Tool, ToolDefinition,
     session::{
         AssistantContent, Message, SessionEventKind, SessionEvents, SessionManager, ToolCall,
     },
@@ -11,9 +11,13 @@ use crate::{
 };
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
+    time::Duration,
 };
-use tokio::sync::Notify;
+use tokio::sync::{Barrier, Notify};
 
 #[tokio::test]
 async fn resumes_a_turn_after_executing_a_tool_call() {
@@ -108,6 +112,173 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
         Message::Assistant(ref content)
             if matches!(content.as_slice(), [AssistantContent::Text(text)] if text == "The tool said hello.")
     ));
+}
+
+#[tokio::test]
+async fn runs_independent_tool_calls_concurrently() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let backend = FakeBackend::new([
+        ProviderCompletion {
+            content: vec![tool_call("call-1", "first"), tool_call("call-2", "second")],
+        },
+        ProviderCompletion {
+            content: vec![AssistantContent::Text("done".to_owned())],
+        },
+    ]);
+    let first_release = Arc::new(Notify::new());
+    let second_release = Arc::new(Notify::new());
+    let mut tools = ToolRegistry::new();
+    tools
+        .register(CoordinatedTool {
+            name: "first",
+            mode: ExecutionMode::Parallel,
+            behavior: ToolBehavior::SignalThenWait {
+                signal: Arc::clone(&second_release),
+                wait_for: Arc::clone(&first_release),
+            },
+        })
+        .unwrap();
+    tools
+        .register(CoordinatedTool {
+            name: "second",
+            mode: ExecutionMode::Parallel,
+            behavior: ToolBehavior::SignalThenWait {
+                signal: first_release,
+                wait_for: second_release,
+            },
+        })
+        .unwrap();
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(1),
+        run_agent_loop(&state, "run both".to_owned(), &tools, &backend),
+    )
+    .await
+    .expect("parallel tools should not deadlock")
+    .unwrap();
+
+    assert_eq!(response, "done");
+}
+
+#[tokio::test]
+async fn records_tool_results_in_call_order_regardless_of_completion_order() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let mut events = state.subscribe();
+    let backend = FakeBackend::new([
+        ProviderCompletion {
+            content: vec![tool_call("call-1", "slow"), tool_call("call-2", "fast")],
+        },
+        ProviderCompletion {
+            content: vec![AssistantContent::Text("done".to_owned())],
+        },
+    ]);
+    let fast_finished = Arc::new(Notify::new());
+    let mut tools = ToolRegistry::new();
+    tools
+        .register(CoordinatedTool {
+            name: "slow",
+            mode: ExecutionMode::Parallel,
+            behavior: ToolBehavior::WaitFor(Arc::clone(&fast_finished)),
+        })
+        .unwrap();
+    tools
+        .register(CoordinatedTool {
+            name: "fast",
+            mode: ExecutionMode::Parallel,
+            behavior: ToolBehavior::Signal(fast_finished),
+        })
+        .unwrap();
+
+    assert_eq!(
+        run_agent_loop(&state, "run both".to_owned(), &tools, &backend)
+            .await
+            .unwrap(),
+        "done"
+    );
+
+    {
+        let requests = backend.requests.lock().unwrap();
+        let result_ids = requests[1]
+            .iter()
+            .filter_map(|message| match message {
+                Message::ToolResult(result) => Some(result.call_id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(result_ids, ["call-1", "call-2"]);
+    }
+
+    let finished_ids = receive_event_kinds(&mut events, 9)
+        .await
+        .into_iter()
+        .filter_map(|kind| match kind {
+            SessionEventKind::ToolFinished { call_id, .. } => Some(call_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(finished_ids, ["call-2", "call-1"]);
+}
+
+#[tokio::test]
+async fn runs_the_batch_sequentially_when_a_tool_requires_it() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let mut events = state.subscribe();
+    let backend = FakeBackend::new([
+        ProviderCompletion {
+            content: vec![
+                tool_call("call-1", "parallel"),
+                tool_call("call-2", "sequential"),
+            ],
+        },
+        ProviderCompletion {
+            content: vec![AssistantContent::Text("done".to_owned())],
+        },
+    ]);
+    let active = Arc::new(AtomicUsize::new(0));
+    let overlapped = Arc::new(AtomicBool::new(false));
+    let mut tools = ToolRegistry::new();
+    for (name, mode) in [
+        ("parallel", ExecutionMode::Parallel),
+        ("sequential", ExecutionMode::Sequential),
+    ] {
+        tools
+            .register(CoordinatedTool {
+                name,
+                mode,
+                behavior: ToolBehavior::TrackOverlap {
+                    active: Arc::clone(&active),
+                    overlapped: Arc::clone(&overlapped),
+                },
+            })
+            .unwrap();
+    }
+
+    assert_eq!(
+        run_agent_loop(&state, "run both".to_owned(), &tools, &backend)
+            .await
+            .unwrap(),
+        "done"
+    );
+
+    assert!(!overlapped.load(Ordering::SeqCst));
+    let started_ids = receive_event_kinds(&mut events, 9)
+        .await
+        .into_iter()
+        .filter_map(|kind| match kind {
+            SessionEventKind::ToolStarted { call_id, .. } => Some(call_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(started_ids, ["call-1", "call-2"]);
 }
 
 #[tokio::test]
@@ -261,62 +432,156 @@ async fn closes_unfinished_tool_calls_when_interrupted() {
         .unwrap();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([ProviderCompletion {
-        content: vec![AssistantContent::ToolCall(ToolCall {
-            id: "call-1".to_owned(),
-            name: "pause".to_owned(),
-            arguments: "{}".to_owned(),
-        })],
+        content: vec![
+            tool_call("call-1", "pause-1"),
+            tool_call("call-2", "pause-2"),
+        ],
     }]);
-    let started = Arc::new(Notify::new());
-    let tool_started = started.notified();
+    let started = Arc::new(Barrier::new(3));
     let mut tools = ToolRegistry::new();
-    tools
-        .register(PausedTool {
-            started: Arc::clone(&started),
-        })
-        .unwrap();
+    for name in ["pause-1", "pause-2"] {
+        tools
+            .register(CoordinatedTool {
+                name,
+                mode: ExecutionMode::Parallel,
+                behavior: ToolBehavior::Pause(Arc::clone(&started)),
+            })
+            .unwrap();
+    }
     let run_state = Arc::clone(&state);
     let run = tokio::spawn(async move {
         run_agent_loop(&run_state, "pause".to_owned(), &tools, &backend).await
     });
 
-    tool_started.await;
+    tokio::time::timeout(Duration::from_secs(1), started.wait())
+        .await
+        .expect("both tools should start concurrently");
     state.interrupt().unwrap();
 
     assert_eq!(run.await.unwrap(), Err("run interrupted".to_owned()));
     assert_eq!(
-        receive_event_kinds(&mut events, 5).await,
+        receive_event_kinds(&mut events, 8).await,
         vec![
             SessionEventKind::RunStarted {
                 input: "pause".to_owned(),
             },
             SessionEventKind::ToolRequested {
                 call_id: "call-1".to_owned(),
-                name: "pause".to_owned(),
+                name: "pause-1".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+            SessionEventKind::ToolRequested {
+                call_id: "call-2".to_owned(),
+                name: "pause-2".to_owned(),
                 arguments: "{}".to_owned(),
             },
             SessionEventKind::ToolStarted {
                 call_id: "call-1".to_owned(),
-                name: "pause".to_owned(),
+                name: "pause-1".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+            SessionEventKind::ToolStarted {
+                call_id: "call-2".to_owned(),
+                name: "pause-2".to_owned(),
                 arguments: "{}".to_owned(),
             },
             SessionEventKind::ToolInterrupted {
                 call_id: "call-1".to_owned(),
-                name: "pause".to_owned(),
+                name: "pause-1".to_owned(),
+            },
+            SessionEventKind::ToolInterrupted {
+                call_id: "call-2".to_owned(),
+                name: "pause-2".to_owned(),
             },
             SessionEventKind::RunInterrupted,
         ]
     );
     let history = state.messages.read().await;
-    assert_eq!(history.len(), 3);
-    assert!(matches!(
-        history.last(),
-        Some(Message::ToolResult(result))
-            if result.call_id == "call-1"
-                && result.name == "pause"
-                && result.output == "run interrupted before tool completion"
-                && result.is_error
-    ));
+    let results = history
+        .iter()
+        .filter_map(|message| match message {
+            Message::ToolResult(result) => Some(result),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(results.len(), 2);
+    for (result, (call_id, name)) in results
+        .iter()
+        .zip([("call-1", "pause-1"), ("call-2", "pause-2")])
+    {
+        assert_eq!(result.call_id, call_id);
+        assert_eq!(result.name, name);
+        assert_eq!(result.output, "run interrupted before tool completion");
+        assert!(result.is_error);
+    }
+}
+
+#[tokio::test]
+async fn completes_finished_calls_when_interrupted_mid_batch() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let mut events = state.subscribe();
+    let backend = FakeBackend::new([ProviderCompletion {
+        content: vec![tool_call("call-1", "finish"), tool_call("call-2", "pause")],
+    }]);
+    let paused = Arc::new(Barrier::new(2));
+    let mut tools = ToolRegistry::new();
+    tools
+        .register(CoordinatedTool {
+            name: "finish",
+            mode: ExecutionMode::Parallel,
+            behavior: ToolBehavior::Immediate,
+        })
+        .unwrap();
+    tools
+        .register(CoordinatedTool {
+            name: "pause",
+            mode: ExecutionMode::Parallel,
+            behavior: ToolBehavior::Pause(Arc::clone(&paused)),
+        })
+        .unwrap();
+    let run_state = Arc::clone(&state);
+    let run = tokio::spawn(async move {
+        run_agent_loop(&run_state, "run both".to_owned(), &tools, &backend).await
+    });
+
+    tokio::time::timeout(Duration::from_secs(1), paused.wait())
+        .await
+        .expect("the unfinished tool should start");
+    state.interrupt().unwrap();
+
+    assert_eq!(run.await.unwrap(), Err("run interrupted".to_owned()));
+    let history = state.messages.read().await;
+    let results = history
+        .iter()
+        .filter_map(|message| match message {
+            Message::ToolResult(result) => Some(result),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].call_id, "call-1");
+    assert_eq!(results[0].output, "finish");
+    assert!(!results[0].is_error);
+    assert_eq!(results[1].call_id, "call-2");
+    assert_eq!(results[1].output, "run interrupted before tool completion");
+    assert!(results[1].is_error);
+
+    let kinds = receive_event_kinds(&mut events, 8).await;
+    assert!(kinds.iter().any(|kind| matches!(
+        kind,
+        SessionEventKind::ToolFinished { call_id, .. } if call_id == "call-1"
+    )));
+    assert!(kinds.iter().any(|kind| matches!(
+        kind,
+        SessionEventKind::ToolInterrupted { call_id, .. } if call_id == "call-2"
+    )));
+    assert!(!kinds.iter().any(|kind| matches!(
+        kind,
+        SessionEventKind::ToolInterrupted { call_id, .. } if call_id == "call-1"
+    )));
 }
 
 #[tokio::test]
@@ -407,6 +672,14 @@ async fn receive_event_kinds(events: &mut SessionEvents, count: usize) -> Vec<Se
     kinds
 }
 
+fn tool_call(id: &str, name: &str) -> AssistantContent {
+    AssistantContent::ToolCall(ToolCall {
+        id: id.to_owned(),
+        name: name.to_owned(),
+        arguments: "{}".to_owned(),
+    })
+}
+
 struct FakeBackend {
     completions: Mutex<VecDeque<ProviderCompletion>>,
     requests: Mutex<Vec<Vec<Message>>>,
@@ -475,17 +748,38 @@ impl CompletionBackend for FakeBackend {
 
 struct EchoTool;
 
-struct PausedTool {
-    started: Arc<Notify>,
+struct CoordinatedTool {
+    name: &'static str,
+    mode: ExecutionMode,
+    behavior: ToolBehavior,
 }
 
-impl Tool for PausedTool {
+enum ToolBehavior {
+    Immediate,
+    Pause(Arc<Barrier>),
+    Signal(Arc<Notify>),
+    SignalThenWait {
+        signal: Arc<Notify>,
+        wait_for: Arc<Notify>,
+    },
+    TrackOverlap {
+        active: Arc<AtomicUsize>,
+        overlapped: Arc<AtomicBool>,
+    },
+    WaitFor(Arc<Notify>),
+}
+
+impl Tool for CoordinatedTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: "pause".to_owned(),
-            description: "Waits forever".to_owned(),
+            name: self.name.to_owned(),
+            description: "Coordinates test execution".to_owned(),
             parameters: r#"{"type":"object"}"#.to_owned(),
         }
+    }
+
+    fn execution_mode(&self) -> ExecutionMode {
+        self.mode
     }
 
     fn execute(
@@ -494,8 +788,27 @@ impl Tool for PausedTool {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
     {
         Box::pin(async move {
-            self.started.notify_one();
-            std::future::pending().await
+            match &self.behavior {
+                ToolBehavior::Immediate => {}
+                ToolBehavior::Pause(started) => {
+                    started.wait().await;
+                    std::future::pending::<()>().await;
+                }
+                ToolBehavior::Signal(signal) => signal.notify_one(),
+                ToolBehavior::SignalThenWait { signal, wait_for } => {
+                    signal.notify_one();
+                    wait_for.notified().await;
+                }
+                ToolBehavior::TrackOverlap { active, overlapped } => {
+                    if active.fetch_add(1, Ordering::SeqCst) != 0 {
+                        overlapped.store(true, Ordering::SeqCst);
+                    }
+                    tokio::task::yield_now().await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                }
+                ToolBehavior::WaitFor(notification) => notification.notified().await,
+            }
+            Ok(self.name.to_owned())
         })
     }
 }

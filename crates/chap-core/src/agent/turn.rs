@@ -1,11 +1,13 @@
-use super::{MAX_PROVIDER_STEPS_PER_TURN, provider::CompletionBackend};
+use super::{MAX_CONCURRENT_TOOL_CALLS, MAX_PROVIDER_STEPS_PER_TURN, provider::CompletionBackend};
 use crate::{
     session::{
         ActiveRun, AssistantContent, Message, RunBoundary, SessionEventKind, SessionState,
         Steering, ToolCall, ToolResult,
     },
-    tool::ToolRegistry,
+    tool::{ExecutionMode, ToolRegistry},
 };
+use futures::{StreamExt, stream::FuturesUnordered};
+use tokio::sync::Semaphore;
 
 pub(super) async fn run_agent_loop(
     session: &SessionState,
@@ -121,37 +123,43 @@ async fn run_steps(
             });
         }
 
-        for (index, call) in tool_calls.iter().cloned().enumerate() {
-            session.emit(SessionEventKind::ToolStarted {
-                call_id: call.id.clone(),
-                name: call.name.clone(),
-                arguments: call.arguments.clone(),
-            });
-            let result = tokio::select! {
-                biased;
-                _ = active_run.interrupted() => {
-                    interrupt_tools(session, &tool_calls[index..]).await;
-                    return RunOutcome::Interrupted;
+        let mode = resolve_batch_mode(tools, &tool_calls, ExecutionMode::default());
+        let limit = match mode {
+            ExecutionMode::Parallel => MAX_CONCURRENT_TOOL_CALLS,
+            ExecutionMode::Sequential => 1,
+        };
+        let slots = execute_tool_calls(session, tools, &tool_calls, active_run, limit).await;
+        let mut interrupted = false;
+        for (call, slot) in tool_calls.iter().zip(slots) {
+            match slot {
+                Some(result) => {
+                    session
+                        .messages
+                        .write()
+                        .await
+                        .push(Message::ToolResult(result));
                 }
-                result = execute_tool(tools, call) => result,
-            };
-            let event_result = if result.is_error {
-                Err(result.output.clone())
-            } else {
-                Ok(result.output.clone())
-            };
-            let call_id = result.call_id.clone();
-            let name = result.name.clone();
-            session
-                .messages
-                .write()
-                .await
-                .push(Message::ToolResult(result));
-            session.emit(SessionEventKind::ToolFinished {
-                call_id,
-                name,
-                result: event_result,
-            });
+                None => {
+                    interrupted = true;
+                    session
+                        .messages
+                        .write()
+                        .await
+                        .push(Message::ToolResult(ToolResult {
+                            call_id: call.id.clone(),
+                            name: call.name.clone(),
+                            output: "run interrupted before tool completion".to_owned(),
+                            is_error: true,
+                        }));
+                    session.emit(SessionEventKind::ToolInterrupted {
+                        call_id: call.id.clone(),
+                        name: call.name.clone(),
+                    });
+                }
+            }
+        }
+        if interrupted {
+            return RunOutcome::Interrupted;
         }
 
         let Some(steering) = session.take_steering() else {
@@ -165,23 +173,74 @@ async fn run_steps(
     ))
 }
 
-async fn interrupt_tools(session: &SessionState, calls: &[ToolCall]) {
-    {
-        let mut messages = session.messages.write().await;
-        messages.extend(calls.iter().map(|call| {
-            Message::ToolResult(ToolResult {
-                call_id: call.id.clone(),
-                name: call.name.clone(),
-                output: "run interrupted before tool completion".to_owned(),
-                is_error: true,
-            })
-        }));
+async fn execute_tool_calls(
+    session: &SessionState,
+    tools: &ToolRegistry,
+    calls: &[ToolCall],
+    active_run: &mut ActiveRun<'_>,
+    limit: usize,
+) -> Vec<Option<ToolResult>> {
+    let semaphore = Semaphore::new(limit);
+    let mut slots = (0..calls.len()).map(|_| None).collect::<Vec<_>>();
+    let mut pending = calls
+        .iter()
+        .enumerate()
+        .map(|(index, call)| {
+            let semaphore = &semaphore;
+            async move {
+                let _permit = semaphore
+                    .acquire()
+                    .await
+                    .expect("semaphore is never closed");
+                session.emit(SessionEventKind::ToolStarted {
+                    call_id: call.id.clone(),
+                    name: call.name.clone(),
+                    arguments: call.arguments.clone(),
+                });
+                (index, execute_tool(tools, call.clone()).await)
+            }
+        })
+        .collect::<FuturesUnordered<_>>();
+
+    loop {
+        tokio::select! {
+            biased;
+            _ = active_run.interrupted() => break,
+            next = pending.next() => match next {
+                Some((index, result)) => {
+                    let event_result = if result.is_error {
+                        Err(result.output.clone())
+                    } else {
+                        Ok(result.output.clone())
+                    };
+                    session.emit(SessionEventKind::ToolFinished {
+                        call_id: result.call_id.clone(),
+                        name: result.name.clone(),
+                        result: event_result,
+                    });
+                    slots[index] = Some(result);
+                }
+                None => break,
+            },
+        }
     }
-    for call in calls {
-        session.emit(SessionEventKind::ToolInterrupted {
-            call_id: call.id.clone(),
-            name: call.name.clone(),
-        });
+
+    slots
+}
+
+fn resolve_batch_mode(
+    tools: &ToolRegistry,
+    calls: &[ToolCall],
+    session_mode: ExecutionMode,
+) -> ExecutionMode {
+    if session_mode == ExecutionMode::Sequential
+        || calls
+            .iter()
+            .any(|call| tools.execution_mode(&call.name) == ExecutionMode::Sequential)
+    {
+        ExecutionMode::Sequential
+    } else {
+        ExecutionMode::Parallel
     }
 }
 

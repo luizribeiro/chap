@@ -20,6 +20,7 @@ publish = false
 
 [workspace.dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
+futures = "0.3.31"
 iocraft = { git = "https://github.com/luizribeiro/iocraft.git", rev = "619ee083dd84dc0070758221dee6a3936c7897de" }
 lockgate = { git = "https://github.com/luizribeiro/lockgate.git", branch = "main" }
 lockgate-http = { git = "https://github.com/luizribeiro/lockgate.git", branch = "main" }

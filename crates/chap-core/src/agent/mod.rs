@@ -18,6 +18,7 @@ mod provider;
 mod turn;
 
 const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
+const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
 type InnerHost = Host<()>;

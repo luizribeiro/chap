@@ -59,7 +59,6 @@ impl ToolRegistry {
         self.tools.values().map(|tool| tool.definition()).collect()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn execution_mode(&self, name: &str) -> ExecutionMode {
         self.tools
             .get(name)
