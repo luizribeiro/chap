@@ -7,13 +7,20 @@ use chap::provider::{
 use chap_plugin as chap;
 use serde::{Deserialize, Serialize};
 
+use crate::ReplayReasoning;
+
 pub(crate) fn encode_request(
     model: &str,
+    replay_reasoning: ReplayReasoning,
     request: CompletionRequest,
 ) -> Result<String, ProviderError> {
     serde_json::to_string(&Request {
         model,
-        messages: request.messages.into_iter().map(Message::from).collect(),
+        messages: request
+            .messages
+            .into_iter()
+            .map(|message| Message::from_provider(message, replay_reasoning))
+            .collect(),
         tools: request
             .tools
             .into_iter()
@@ -50,6 +57,8 @@ enum Message {
     Assistant {
         #[serde(skip_serializing_if = "Option::is_none")]
         content: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reasoning_content: Option<String>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<ToolCall>,
     },
@@ -60,27 +69,49 @@ enum Message {
     },
 }
 
-impl From<provider::Message> for Message {
-    fn from(message: provider::Message) -> Self {
+impl Message {
+    fn from_provider(message: provider::Message, replay_reasoning: ReplayReasoning) -> Self {
         match message {
             provider::Message::System(content) => Self::System { content },
             provider::Message::User(content) => Self::User { content },
             provider::Message::Assistant(content) => {
                 let mut text = Vec::new();
+                let mut reasoning = Vec::new();
                 let mut tool_calls = Vec::new();
                 for content in content {
                     match content {
                         AssistantContent::Text(content) => text.push(content),
-                        AssistantContent::Reasoning(_) => {
-                            // Reasoning replay requires provider-specific wire encoding.
+                        AssistantContent::Reasoning(content) => {
+                            if !content.text.is_empty() {
+                                reasoning.push(content.text);
+                            }
                         }
                         AssistantContent::ToolCall(call) => {
                             tool_calls.push(ToolCall::from(call));
                         }
                     }
                 }
+                let text = (!text.is_empty()).then(|| text.join("\n"));
+                let reasoning = (!reasoning.is_empty()).then(|| reasoning.join("\n"));
+                let (content, reasoning_content) = match replay_reasoning {
+                    ReplayReasoning::Field => (text, reasoning),
+                    ReplayReasoning::ThinkTags => (
+                        match (reasoning, text) {
+                            (Some(reasoning), Some(text)) => {
+                                Some(format!("<think>\n{reasoning}\n</think>\n\n{text}"))
+                            }
+                            (Some(reasoning), None) => {
+                                Some(format!("<think>\n{reasoning}\n</think>"))
+                            }
+                            (None, text) => text,
+                        },
+                        None,
+                    ),
+                    ReplayReasoning::Off => (text, None),
+                };
                 Self::Assistant {
-                    content: (!text.is_empty()).then(|| text.join("\n")),
+                    content,
+                    reasoning_content,
                     tool_calls,
                 }
             }
@@ -400,10 +431,37 @@ mod tests {
         parse_response(response_metadata(200), &body)
     }
 
+    fn encode_assistant(
+        content: Vec<AssistantContent>,
+        replay_reasoning: ReplayReasoning,
+    ) -> serde_json::Value {
+        serde_json::to_value(Message::from_provider(
+            provider::Message::Assistant(content),
+            replay_reasoning,
+        ))
+        .unwrap()
+    }
+
+    fn reasoning(text: &str) -> AssistantContent {
+        AssistantContent::Reasoning(provider::Reasoning {
+            text: text.to_owned(),
+            signature: None,
+        })
+    }
+
+    fn assistant_tool_call() -> AssistantContent {
+        AssistantContent::ToolCall(provider::ToolCall {
+            id: "call-1".to_owned(),
+            name: "weather".to_owned(),
+            arguments: r#"{"city":"Paris"}"#.to_owned(),
+        })
+    }
+
     #[test]
     fn encodes_a_minimal_request() {
         let encoded = encode_request(
             "example-model",
+            ReplayReasoning::Field,
             CompletionRequest {
                 messages: vec![provider::Message::User("hello".to_owned())],
                 tools: vec![],
@@ -438,7 +496,7 @@ mod tests {
             }),
         ]
         .into_iter()
-        .map(Message::from)
+        .map(|message| Message::from_provider(message, ReplayReasoning::Field))
         .collect::<Vec<_>>();
 
         let encoded = serde_json::to_value(messages).unwrap();
@@ -450,6 +508,91 @@ mod tests {
         assert_eq!(encoded[4]["role"], "tool");
         assert_eq!(encoded[4]["tool_call_id"], "call-1");
         assert_eq!(encoded[4]["content"], "sunny");
+    }
+
+    #[test]
+    fn field_encodes_reasoning_separately_from_content() {
+        let encoded = encode_assistant(
+            vec![
+                reasoning("think"),
+                AssistantContent::Text("answer".to_owned()),
+            ],
+            ReplayReasoning::Field,
+        );
+
+        assert_eq!(encoded["reasoning_content"], "think");
+        assert_eq!(encoded["content"], "answer");
+    }
+
+    #[test]
+    fn think_tags_encodes_reasoning_in_content_only() {
+        let encoded = encode_assistant(
+            vec![
+                reasoning("think"),
+                AssistantContent::Text("answer".to_owned()),
+            ],
+            ReplayReasoning::ThinkTags,
+        );
+
+        assert_eq!(encoded["content"], "<think>\nthink\n</think>\n\nanswer");
+        assert!(encoded.get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn off_omits_reasoning_from_the_message() {
+        let encoded = encode_assistant(vec![reasoning("think")], ReplayReasoning::Off);
+
+        assert!(encoded.get("reasoning_content").is_none());
+        assert!(encoded.get("content").is_none());
+    }
+
+    #[test]
+    fn joins_multiple_reasoning_parts_under_think_tags() {
+        let encoded = encode_assistant(
+            vec![reasoning("first"), reasoning("second")],
+            ReplayReasoning::ThinkTags,
+        );
+
+        assert_eq!(encoded["content"], "<think>\nfirst\nsecond\n</think>");
+        assert!(encoded.get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn preserves_text_and_tool_calls_in_every_reasoning_replay_mode() {
+        for (replay_reasoning, expected_content) in [
+            (ReplayReasoning::Field, "hello"),
+            (
+                ReplayReasoning::ThinkTags,
+                "<think>\nthink\n</think>\n\nhello",
+            ),
+            (ReplayReasoning::Off, "hello"),
+        ] {
+            let encoded = encode_assistant(
+                vec![
+                    reasoning("think"),
+                    AssistantContent::Text("hello".to_owned()),
+                    assistant_tool_call(),
+                ],
+                replay_reasoning,
+            );
+
+            assert_eq!(encoded["content"], expected_content);
+            assert_eq!(encoded["tool_calls"][0]["id"], "call-1");
+        }
+    }
+
+    #[test]
+    fn omits_empty_reasoning_in_every_replay_mode() {
+        for replay_reasoning in [
+            ReplayReasoning::Field,
+            ReplayReasoning::ThinkTags,
+            ReplayReasoning::Off,
+        ] {
+            let encoded = encode_assistant(vec![reasoning("")], replay_reasoning);
+
+            assert!(encoded.get("reasoning_content").is_none());
+            assert!(encoded.get("content").is_none());
+        }
     }
 
     #[test]
