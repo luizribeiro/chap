@@ -1,6 +1,6 @@
 use super::super::{
     MAX_PROVIDER_STEPS_PER_TURN, ToolExecutionConfig,
-    provider::{CompletionBackend, CompletionFuture, ProviderCompletion},
+    provider::{CompletionBackend, CompletionFuture, FinishReason, ProviderCompletion},
     turn::run_agent_loop,
 };
 use crate::{
@@ -926,6 +926,33 @@ async fn preserves_the_provider_error_in_the_failed_terminal_event() {
 }
 
 #[tokio::test]
+async fn explains_when_an_empty_completion_reached_the_output_limit() {
+    assert_eq!(
+        empty_completion_error(FinishReason::Length).await,
+        RunError::Other("model reached its output limit before producing a response".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn keeps_the_empty_completion_error_for_a_stop_finish_reason() {
+    assert_eq!(
+        empty_completion_error(FinishReason::Stop).await,
+        RunError::Other("provider returned a completion without text".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn includes_an_other_finish_reason_in_the_empty_completion_error() {
+    assert_eq!(
+        empty_completion_error(FinishReason::Other("content_filter".to_owned())).await,
+        RunError::Other(
+            "provider returned a completion without text (finish reason: content_filter)"
+                .to_owned()
+        )
+    );
+}
+
+#[tokio::test]
 async fn reports_the_provider_step_limit_as_other() {
     let manager = SessionManager::new();
     let state = manager
@@ -969,6 +996,7 @@ async fn receive_event_kinds(events: &mut SessionEvents, count: usize) -> Vec<Se
 fn completion(content: Vec<AssistantContent>) -> ProviderCompletion {
     ProviderCompletion {
         content,
+        finish_reason: FinishReason::Stop,
         usage: None,
     }
 }
@@ -998,6 +1026,33 @@ fn completion_with_detailed_usage(
     let mut completion = completion(content);
     completion.usage = Some(usage);
     completion
+}
+
+fn completion_with_finish_reason(
+    content: Vec<AssistantContent>,
+    finish_reason: FinishReason,
+) -> ProviderCompletion {
+    let mut completion = completion(content);
+    completion.finish_reason = finish_reason;
+    completion
+}
+
+async fn empty_completion_error(finish_reason: FinishReason) -> RunError {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let backend = FakeBackend::new([completion_with_finish_reason(Vec::new(), finish_reason)]);
+
+    run_agent_loop(
+        &state,
+        "hello".to_owned(),
+        &ToolRegistry::new(),
+        TOOL_EXECUTION,
+        &backend,
+    )
+    .await
+    .unwrap_err()
 }
 
 fn tool_call(id: &str, name: &str) -> AssistantContent {

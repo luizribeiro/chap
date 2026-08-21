@@ -102,7 +102,16 @@ fn provider_message(provider: &str, message: String) -> String {
 #[derive(Clone, Debug)]
 pub(super) struct ProviderCompletion {
     pub(super) content: Vec<AssistantContent>,
+    pub(super) finish_reason: FinishReason,
     pub(super) usage: Option<Usage>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum FinishReason {
+    Stop,
+    ToolCalls,
+    Length,
+    Other(String),
 }
 
 impl From<Message> for provider_types::Message {
@@ -163,6 +172,12 @@ impl From<provider_types::Completion> for ProviderCompletion {
                     }
                 })
                 .collect(),
+            finish_reason: match completion.finish_reason {
+                provider_types::FinishReason::Stop => FinishReason::Stop,
+                provider_types::FinishReason::ToolCalls => FinishReason::ToolCalls,
+                provider_types::FinishReason::Length => FinishReason::Length,
+                provider_types::FinishReason::Other(reason) => FinishReason::Other(reason),
+            },
             usage: completion.usage.map(|usage| Usage {
                 input_tokens: usage.input_tokens,
                 cached_input_tokens: usage.cached_input_tokens,

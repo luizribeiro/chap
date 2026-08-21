@@ -1,4 +1,7 @@
-use super::{MAX_PROVIDER_STEPS_PER_TURN, ToolExecutionConfig, provider::CompletionBackend};
+use super::{
+    MAX_PROVIDER_STEPS_PER_TURN, ToolExecutionConfig,
+    provider::{CompletionBackend, FinishReason},
+};
 use crate::{
     session::{
         ActiveRun, AssistantContent, Message, RunBoundary, RunError, RunUsage, SessionEventKind,
@@ -114,7 +117,7 @@ async fn run_steps(
                 }
                 RunBoundary::Complete => {
                     return text
-                        .ok_or_else(|| "provider returned a completion without text".to_owned())
+                        .ok_or_else(|| completion_without_text_error(&completion.finish_reason))
                         .into();
                 }
                 RunBoundary::Interrupted => return RunOutcome::Interrupted,
@@ -304,4 +307,18 @@ fn completion_text(content: &[AssistantContent]) -> Option<String> {
         return None;
     }
     Some(text.join("\n"))
+}
+
+fn completion_without_text_error(finish_reason: &FinishReason) -> String {
+    match finish_reason {
+        FinishReason::Length => {
+            "model reached its output limit before producing a response".to_owned()
+        }
+        FinishReason::Other(reason) => {
+            format!("provider returned a completion without text (finish reason: {reason})")
+        }
+        FinishReason::Stop | FinishReason::ToolCalls => {
+            "provider returned a completion without text".to_owned()
+        }
+    }
 }
