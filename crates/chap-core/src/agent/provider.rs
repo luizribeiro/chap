@@ -1,7 +1,7 @@
 use super::{AgentInner, PLUGIN_FUEL_PER_CALL, bindings};
 use crate::{
     ToolDefinition,
-    session::{AssistantContent, Message, ToolCall},
+    session::{AssistantContent, Message, ToolCall, Usage},
 };
 use bindings::provider as provider_bindings;
 use bindings::types as provider_types;
@@ -68,6 +68,7 @@ impl AgentInner {
 #[derive(Clone, Debug)]
 pub(super) struct ProviderCompletion {
     pub(super) content: Vec<AssistantContent>,
+    pub(super) usage: Option<Usage>,
 }
 
 impl From<Message> for provider_types::Message {
@@ -128,6 +129,12 @@ impl From<provider_types::Completion> for ProviderCompletion {
                     }
                 })
                 .collect(),
+            usage: completion.usage.map(|usage| Usage {
+                input_tokens: usage.input_tokens,
+                cached_input_tokens: usage.cached_input_tokens,
+                output_tokens: usage.output_tokens,
+                reasoning_tokens: usage.reasoning_tokens,
+            }),
         }
     }
 }

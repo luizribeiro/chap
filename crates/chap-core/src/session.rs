@@ -40,6 +40,40 @@ pub(crate) struct ToolResult {
     pub(crate) is_error: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Usage {
+    pub input_tokens: u64,
+    pub cached_input_tokens: Option<u64>,
+    pub output_tokens: u64,
+    pub reasoning_tokens: Option<u64>,
+}
+
+impl Usage {
+    /// Saturating-adds another measurement into this usage total. Optional
+    /// subset totals stay absent until a measurement reports them, so an
+    /// unreported counter remains distinct from a reported zero.
+    pub fn saturating_add_assign(&mut self, usage: Self) {
+        self.input_tokens = self.input_tokens.saturating_add(usage.input_tokens);
+        saturating_add_optional_assign(&mut self.cached_input_tokens, usage.cached_input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(usage.output_tokens);
+        saturating_add_optional_assign(&mut self.reasoning_tokens, usage.reasoning_tokens);
+    }
+}
+
+fn saturating_add_optional_assign(total: &mut Option<u64>, value: Option<u64>) {
+    if let Some(value) = value {
+        *total = Some(total.unwrap_or_default().saturating_add(value));
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RunUsage {
+    /// Accumulated across every provider step of the run so far.
+    pub total: Usage,
+    /// The latest provider step alone.
+    pub last_step: Usage,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct SessionId(Uuid);
 
@@ -104,6 +138,9 @@ pub enum SessionEventKind {
     ToolInterrupted {
         call_id: String,
         name: String,
+    },
+    UsageUpdated {
+        usage: RunUsage,
     },
     RunCompleted {
         response: String,

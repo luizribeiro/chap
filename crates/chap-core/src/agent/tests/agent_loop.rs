@@ -6,7 +6,8 @@ use super::super::{
 use crate::{
     ExecutionMode, SessionOptions, Tool, ToolDefinition,
     session::{
-        AssistantContent, Message, SessionEventKind, SessionEvents, SessionManager, ToolCall,
+        AssistantContent, Message, RunUsage, SessionEventKind, SessionEvents, SessionManager,
+        ToolCall, Usage,
     },
     tool::ToolRegistry,
 };
@@ -120,6 +121,223 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
         Message::Assistant(ref content)
             if matches!(content.as_slice(), [AssistantContent::Text(text)] if text == "The tool said hello.")
     ));
+}
+
+#[tokio::test]
+async fn accumulates_usage_across_provider_steps() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let mut events = state.subscribe();
+    let backend = FakeBackend::new([
+        completion_with_detailed_usage(
+            vec![tool_call("call-1", "echo")],
+            Usage {
+                input_tokens: 12,
+                cached_input_tokens: Some(5),
+                output_tokens: 4,
+                reasoning_tokens: Some(2),
+            },
+        ),
+        completion_with_detailed_usage(
+            vec![AssistantContent::Text("done".to_owned())],
+            Usage {
+                input_tokens: 20,
+                cached_input_tokens: None,
+                output_tokens: 3,
+                reasoning_tokens: None,
+            },
+        ),
+    ]);
+    let mut tools = ToolRegistry::new();
+    tools.register(EchoTool).unwrap();
+
+    assert_eq!(
+        run_agent_loop(&state, "hello".to_owned(), &tools, TOOL_EXECUTION, &backend)
+            .await
+            .unwrap(),
+        "done"
+    );
+    assert_eq!(
+        receive_event_kinds(&mut events, 8).await,
+        vec![
+            SessionEventKind::RunStarted {
+                input: "hello".to_owned(),
+            },
+            SessionEventKind::UsageUpdated {
+                usage: RunUsage {
+                    total: Usage {
+                        input_tokens: 12,
+                        cached_input_tokens: Some(5),
+                        output_tokens: 4,
+                        reasoning_tokens: Some(2),
+                    },
+                    last_step: Usage {
+                        input_tokens: 12,
+                        cached_input_tokens: Some(5),
+                        output_tokens: 4,
+                        reasoning_tokens: Some(2),
+                    },
+                },
+            },
+            SessionEventKind::ToolRequested {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+            SessionEventKind::ToolStarted {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+            SessionEventKind::ToolFinished {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                result: Ok("{}".to_owned()),
+            },
+            SessionEventKind::UsageUpdated {
+                usage: RunUsage {
+                    total: Usage {
+                        input_tokens: 32,
+                        cached_input_tokens: Some(5),
+                        output_tokens: 7,
+                        reasoning_tokens: Some(2),
+                    },
+                    last_step: Usage {
+                        input_tokens: 20,
+                        cached_input_tokens: None,
+                        output_tokens: 3,
+                        reasoning_tokens: None,
+                    },
+                },
+            },
+            SessionEventKind::AssistantMessage {
+                text: "done".to_owned(),
+            },
+            SessionEventKind::RunCompleted {
+                response: "done".to_owned(),
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn emits_no_usage_events_when_unreported() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let mut events = state.subscribe();
+    let backend = FakeBackend::new([
+        completion(vec![tool_call("call-1", "echo")]),
+        text_completion("done"),
+    ]);
+    let mut tools = ToolRegistry::new();
+    tools.register(EchoTool).unwrap();
+
+    assert_eq!(
+        run_agent_loop(&state, "hello".to_owned(), &tools, TOOL_EXECUTION, &backend)
+            .await
+            .unwrap(),
+        "done"
+    );
+    assert_eq!(
+        receive_event_kinds(&mut events, 6).await,
+        vec![
+            SessionEventKind::RunStarted {
+                input: "hello".to_owned(),
+            },
+            SessionEventKind::ToolRequested {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+            SessionEventKind::ToolStarted {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+            SessionEventKind::ToolFinished {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                result: Ok("{}".to_owned()),
+            },
+            SessionEventKind::AssistantMessage {
+                text: "done".to_owned(),
+            },
+            SessionEventKind::RunCompleted {
+                response: "done".to_owned(),
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn emits_usage_with_unreported_subset_counters() {
+    let manager = SessionManager::new();
+    let state = manager
+        .create(SessionOptions::new("test-provider"))
+        .unwrap();
+    let mut events = state.subscribe();
+    let backend = FakeBackend::new([
+        completion_with_usage(vec![tool_call("call-1", "echo")], 12, 4),
+        text_completion("done"),
+    ]);
+    let mut tools = ToolRegistry::new();
+    tools.register(EchoTool).unwrap();
+
+    assert_eq!(
+        run_agent_loop(&state, "hello".to_owned(), &tools, TOOL_EXECUTION, &backend)
+            .await
+            .unwrap(),
+        "done"
+    );
+    assert_eq!(
+        receive_event_kinds(&mut events, 7).await,
+        vec![
+            SessionEventKind::RunStarted {
+                input: "hello".to_owned(),
+            },
+            SessionEventKind::UsageUpdated {
+                usage: RunUsage {
+                    total: Usage {
+                        input_tokens: 12,
+                        cached_input_tokens: None,
+                        output_tokens: 4,
+                        reasoning_tokens: None,
+                    },
+                    last_step: Usage {
+                        input_tokens: 12,
+                        cached_input_tokens: None,
+                        output_tokens: 4,
+                        reasoning_tokens: None,
+                    },
+                },
+            },
+            SessionEventKind::ToolRequested {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+            SessionEventKind::ToolStarted {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+            SessionEventKind::ToolFinished {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                result: Ok("{}".to_owned()),
+            },
+            SessionEventKind::AssistantMessage {
+                text: "done".to_owned(),
+            },
+            SessionEventKind::RunCompleted {
+                response: "done".to_owned(),
+            },
+        ]
+    );
 }
 
 #[tokio::test]
@@ -697,11 +915,37 @@ async fn receive_event_kinds(events: &mut SessionEvents, count: usize) -> Vec<Se
 }
 
 fn completion(content: Vec<AssistantContent>) -> ProviderCompletion {
-    ProviderCompletion { content }
+    ProviderCompletion {
+        content,
+        usage: None,
+    }
 }
 
 fn text_completion(text: &str) -> ProviderCompletion {
     completion(vec![AssistantContent::Text(text.to_owned())])
+}
+
+fn completion_with_usage(
+    content: Vec<AssistantContent>,
+    input_tokens: u64,
+    output_tokens: u64,
+) -> ProviderCompletion {
+    let mut completion = completion(content);
+    completion.usage = Some(Usage {
+        input_tokens,
+        output_tokens,
+        ..Usage::default()
+    });
+    completion
+}
+
+fn completion_with_detailed_usage(
+    content: Vec<AssistantContent>,
+    usage: Usage,
+) -> ProviderCompletion {
+    let mut completion = completion(content);
+    completion.usage = Some(usage);
+    completion
 }
 
 fn tool_call(id: &str, name: &str) -> AssistantContent {

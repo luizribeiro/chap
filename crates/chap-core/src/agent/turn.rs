@@ -1,8 +1,8 @@
 use super::{MAX_PROVIDER_STEPS_PER_TURN, ToolExecutionConfig, provider::CompletionBackend};
 use crate::{
     session::{
-        ActiveRun, AssistantContent, Message, RunBoundary, SessionEventKind, SessionState,
-        Steering, ToolCall, ToolResult,
+        ActiveRun, AssistantContent, Message, RunBoundary, RunUsage, SessionEventKind,
+        SessionState, Steering, ToolCall, ToolResult, Usage,
     },
     tool::{ExecutionMode, ToolRegistry},
 };
@@ -73,6 +73,7 @@ async fn run_steps(
     backend: &impl CompletionBackend,
     active_run: &mut ActiveRun<'_>,
 ) -> RunOutcome {
+    let mut total_usage = Usage::default();
     for _ in 0..MAX_PROVIDER_STEPS_PER_TURN {
         let messages = session.messages.read().await.clone();
         let completion = tokio::select! {
@@ -88,6 +89,9 @@ async fn run_steps(
             .write()
             .await
             .push(Message::Assistant(completion.content.clone()));
+        if let Some(usage) = completion.usage {
+            update_usage(session, &mut total_usage, usage);
+        }
 
         let text = completion_text(&completion.content);
         if let Some(text) = &text {
@@ -173,6 +177,16 @@ async fn run_steps(
     RunOutcome::Failed(format!(
         "turn exceeded the limit of {MAX_PROVIDER_STEPS_PER_TURN} provider requests"
     ))
+}
+
+fn update_usage(session: &SessionState, total: &mut Usage, last_step: Usage) {
+    total.saturating_add_assign(last_step);
+    session.emit(SessionEventKind::UsageUpdated {
+        usage: RunUsage {
+            total: *total,
+            last_step,
+        },
+    });
 }
 
 async fn execute_tool_calls(

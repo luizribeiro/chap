@@ -10,7 +10,7 @@ pub use lockgate::{
     ConsentManifest, ConsentRecord, DriftChange, DriftKind, DriftReport, GrantReview,
 };
 pub use session::{
-    Session, SessionEvent, SessionEventError, SessionEventKind, SessionEvents, SessionId,
-    SessionOptions, SteeringId,
+    RunUsage, Session, SessionEvent, SessionEventError, SessionEventKind, SessionEvents, SessionId,
+    SessionOptions, SteeringId, Usage,
 };
 pub use tool::{ExecutionMode, Tool, ToolDefinition};
