@@ -274,7 +274,14 @@ impl AgentBuilder {
             if !plugin.tools {
                 continue;
             }
-            for tool in PluginTool::load(id, Arc::clone(lockgate), plugin.handle.clone()).await? {
+            for tool in PluginTool::load(
+                id,
+                Arc::clone(lockgate),
+                plugin.handle.clone(),
+                config.execution_mode(id),
+            )
+            .await?
+            {
                 resources
                     .tools
                     .as_mut()

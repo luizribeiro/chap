@@ -33,6 +33,8 @@ pub struct ToolsConfig {
 pub struct ConfiguredPlugin {
     component: PathBuf,
     #[serde(default)]
+    execution: Option<ExecutionMode>,
+    #[serde(default)]
     settings: toml::Table,
 }
 
@@ -54,6 +56,12 @@ impl Config {
 
     pub(crate) fn plugin(&self, id: &str) -> Option<&ConfiguredPlugin> {
         self.plugins.get(id)
+    }
+
+    pub(crate) fn execution_mode(&self, id: &str) -> ExecutionMode {
+        self.plugin(id)
+            .and_then(|plugin| plugin.execution)
+            .unwrap_or_default()
     }
 
     pub(crate) fn tools(&self) -> &ToolsConfig {
@@ -169,6 +177,20 @@ execution = "sequential"
         .unwrap();
 
         assert_eq!(config.tools.execution, ExecutionMode::Sequential);
+    }
+
+    #[test]
+    fn parses_plugin_execution_override() {
+        let config: Config = toml::from_str(
+            r#"
+[plugins.kagi]
+component = "kagi.wasm"
+execution = "sequential"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.execution_mode("kagi"), ExecutionMode::Sequential);
     }
 
     #[test]

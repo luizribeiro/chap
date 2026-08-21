@@ -101,9 +101,8 @@ world fixture {{
     with_plugin_sections(bytes, id)
 }
 
-fn module_with_schema(module: &[u8], schema: &str, empty_tool_definitions: bool) -> Vec<u8> {
+fn module_with_schema(module: &[u8], schema: &str, tool_definitions: bool) -> Vec<u8> {
     let definitions_result = (16 + schema.len() + 3) & !3;
-    assert!(definitions_result + 12 <= 65_536);
     let mut wat = wasmprinter::print_bytes(module).unwrap();
     wat = wat.replacen("(memory (;0;) 0)", "(memory (;0;) 1)", 1);
     wat = wat.replacen(
@@ -111,7 +110,7 @@ fn module_with_schema(module: &[u8], schema: &str, empty_tool_definitions: bool)
         "(func (;0;) (type 0) (result i32)\n    i32.const 0\n  )",
         1,
     );
-    if empty_tool_definitions {
+    if tool_definitions {
         wat = wat.replacen(
             "(func (;2;) (type 0) (result i32)\n    unreachable\n  )",
             &format!("(func (;2;) (type 0) (result i32)\n    i32.const {definitions_result}\n  )"),
@@ -125,11 +124,46 @@ fn module_with_schema(module: &[u8], schema: &str, empty_tool_definitions: bool)
         wat_bytes(&result),
         wat_bytes(schema.as_bytes())
     );
-    if empty_tool_definitions {
+    if tool_definitions {
+        let name = "fixture-tool";
+        let description = "A fixture tool";
+        let parameters = r#"{"type":"object"}"#;
+        let definition = definitions_result + 12;
+        let name_offset = definition + 24;
+        let description_offset = name_offset + name.len();
+        let parameters_offset = description_offset + description.len();
+        assert!(parameters_offset + parameters.len() <= 65_536);
+
+        let mut list_result = vec![0; 12];
+        list_result[4..8].copy_from_slice(&(definition as u32).to_le_bytes());
+        list_result[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        let mut definition_record = Vec::with_capacity(24);
+        for (offset, value) in [
+            (name_offset, name),
+            (description_offset, description),
+            (parameters_offset, parameters),
+        ] {
+            definition_record.extend_from_slice(&(offset as u32).to_le_bytes());
+            definition_record.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        }
         data.push_str(&format!(
             "(data (i32.const {definitions_result}) \"{}\")\n",
-            wat_bytes(&[0; 12])
+            wat_bytes(&list_result)
         ));
+        data.push_str(&format!(
+            "(data (i32.const {definition}) \"{}\")\n",
+            wat_bytes(&definition_record)
+        ));
+        for (offset, value) in [
+            (name_offset, name),
+            (description_offset, description),
+            (parameters_offset, parameters),
+        ] {
+            data.push_str(&format!(
+                "(data (i32.const {offset}) \"{}\")\n",
+                wat_bytes(value.as_bytes())
+            ));
+        }
     }
     data.push(')');
     wat.truncate(wat.strip_suffix(")\n").unwrap().len());

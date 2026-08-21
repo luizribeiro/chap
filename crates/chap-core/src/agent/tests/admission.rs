@@ -6,7 +6,7 @@ use super::{
         tool_component_with_schema, unsupported_component,
     },
 };
-use crate::{SessionOptions, Tool, ToolDefinition};
+use crate::{ExecutionMode, SessionOptions, Tool, ToolDefinition};
 use lockgate::{ConsentRequired, DriftReport, Role};
 use std::{
     fs,
@@ -333,7 +333,37 @@ component = "tools.wasm"
     let agent = builder.start().await.unwrap();
 
     assert!(agent.plugin_errors().next().is_none());
-    assert!(agent.tool_definitions().is_empty());
+    assert_eq!(agent.tool_definitions()[0].name, "fixture-tool");
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn plugin_execution_override_makes_loaded_tools_sequential() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("tools.wasm"),
+        tool_component("example.tools"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins."example.tools"]
+component = "tools.wasm"
+execution = "sequential"
+"#,
+    )
+    .unwrap();
+
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    builder.approve_plugin("example.tools").await.unwrap();
+    let agent = builder.start().await.unwrap();
+
+    assert_eq!(
+        agent.inner.tools.execution_mode("fixture-tool"),
+        ExecutionMode::Sequential
+    );
     fs::remove_dir_all(directory).unwrap();
 }
 
