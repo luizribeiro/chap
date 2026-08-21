@@ -15,7 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-const SERVER_TIMEOUT: Duration = Duration::from_secs(10);
+// Bounds a hang and must outlast parallel component compilation and admission; when it expires,
+// the listener closes and the client sees a connection refusal rather than a timeout.
+const SERVER_TIMEOUT: Duration = Duration::from_secs(60);
 const INVOCATION_TIMEOUT: Duration = Duration::from_secs(20);
 const RESPONSE_BODY: &str = r#"{"id":"chatcmpl-mock","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"mocked response"},"finish_reason":"stop"}]}"#;
 
