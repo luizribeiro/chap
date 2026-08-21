@@ -1,7 +1,7 @@
 package chap:agent@0.2.0;
 
 interface provider {
-  use types.{completion, completion-request};
+  use types.{completion, completion-request, provider-error};
 
-  complete: async func(request: completion-request) -> result<completion, string>;
+  complete: async func(request: completion-request) -> result<completion, provider-error>;
 }

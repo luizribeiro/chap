@@ -1,5 +1,5 @@
 use chap::provider::{
-    AssistantContent, Completion, CompletionRequest, FinishReason, Message, ToolCall,
+    AssistantContent, Completion, CompletionRequest, FinishReason, Message, ProviderError, ToolCall,
 };
 use chap::tools::ToolDefinition;
 use chap::{MetadataSource, Needs, Plugin, Provider, Tools};
@@ -31,7 +31,7 @@ impl Plugin for MultiRoleFixture {
 }
 
 impl Provider for MultiRoleFixture {
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, String> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, ProviderError> {
         if let Some(output) = request
             .messages
             .into_iter()

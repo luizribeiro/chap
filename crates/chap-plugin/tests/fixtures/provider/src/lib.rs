@@ -1,4 +1,6 @@
-use chap::provider::{AssistantContent, Completion, CompletionRequest, FinishReason, Message};
+use chap::provider::{
+    AssistantContent, Completion, CompletionRequest, FinishReason, Message, ProviderError,
+};
 use chap::{MetadataSource, Needs, Plugin, Provider};
 use chap_plugin as chap;
 
@@ -28,7 +30,7 @@ impl Plugin for ProviderFixture {
 }
 
 impl Provider for ProviderFixture {
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, String> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, ProviderError> {
         let input = request
             .messages
             .into_iter()
@@ -37,7 +39,9 @@ impl Provider for ProviderFixture {
                 Message::User(input) => Some(input),
                 _ => None,
             })
-            .ok_or_else(|| "provider fixture expected a user message".to_owned())?;
+            .ok_or_else(|| {
+                ProviderError::Other("provider fixture expected a user message".to_owned())
+            })?;
         Ok(Completion {
             content: vec![AssistantContent::Text(format!("{}{}", self.prefix, input))],
             finish_reason: FinishReason::Stop,

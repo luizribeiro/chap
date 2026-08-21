@@ -54,6 +54,26 @@ interface types {
     other(string),
   }
 
+  record rate-limit {
+    /// Seconds the provider asked the caller to wait, when it said so.
+    retry-after: option<u64>,
+    message: string,
+  }
+
+  variant provider-error {
+    rate-limited(rate-limit),
+    /// The request exceeded the model's context window.
+    context-too-long(string),
+    /// Credentials are missing, invalid, or lack access to the model.
+    unauthorized(string),
+    /// The upstream service was unreachable or failed internally.
+    unavailable(string),
+    /// The model declined to answer.
+    refused(string),
+    /// Anything else, including transport and decoding failures.
+    other(string),
+  }
+
   record usage {
     /// The whole prompt, including cached input tokens.
     input-tokens: u64,

@@ -45,7 +45,7 @@ fn provider_bridge(plugin: &Ident) -> TokenStream {
                 request: ::chap_plugin::types::CompletionRequest,
             ) -> ::core::result::Result<
                 ::chap_plugin::types::Completion,
-                ::chap_plugin::alloc::string::String,
+                ::chap_plugin::types::ProviderError,
             > {
                 let object = <#plugin as ::chap_plugin::Plugin>::new(
                     <#plugin as ::chap_plugin::__lockgate::Plugin>::settings(),

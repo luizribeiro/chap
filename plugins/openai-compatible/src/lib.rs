@@ -1,4 +1,4 @@
-use chap::provider::{Completion, CompletionRequest};
+use chap::provider::{Completion, CompletionRequest, ProviderError};
 use chap_plugin as chap;
 use chap_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, env, net};
 
@@ -35,7 +35,7 @@ struct Settings {
 }
 
 impl Provider for OpenAiCompatible {
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, String> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, ProviderError> {
         let settings = &self.settings;
         let request = chat_completions::encode_request(&settings.model, request)?;
         let url = format!(
@@ -50,19 +50,24 @@ impl Provider for OpenAiCompatible {
         let response = chap::http::Client::new()
             .post(&url)
             .header("content-type", "application/json")
-            .map_err(|error| error.to_string())?
+            .map_err(|error| ProviderError::Other(error.to_string()))?
             .bearer(api_key.as_deref().filter(|api_key| !api_key.is_empty()))
             .body(request.into_bytes())
             .send()
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| ProviderError::Other(error.to_string()))?;
         let status = response.status();
-        let body = response.text().map_err(|error| error.to_string())?;
+        let body = response
+            .text()
+            .map_err(|error| ProviderError::Other(error.to_string()))?;
         chat_completions::parse_response(status, &body)
     }
 }
 
-fn read_environment_variable(name: &str) -> Result<String, String> {
-    std::env::var(name)
-        .map_err(|_| format!("environment variable `{name}` is not available to the plugin"))
+fn read_environment_variable(name: &str) -> Result<String, ProviderError> {
+    std::env::var(name).map_err(|_| {
+        ProviderError::Other(format!(
+            "environment variable `{name}` is not available to the plugin"
+        ))
+    })
 }

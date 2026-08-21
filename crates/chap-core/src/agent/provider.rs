@@ -60,9 +60,21 @@ impl AgentInner {
             )
             .await
             .map_err(|error| format!("provider plugin `{provider}` failed: {error}"))?
-            .map_err(|error| format!("provider plugin `{provider}`: {error}"))
+            .map_err(|error| format_provider_error(provider, error))
             .map(Into::into)
     }
+}
+
+fn format_provider_error(provider: &str, error: provider_types::ProviderError) -> String {
+    let message = match error {
+        provider_types::ProviderError::RateLimited(error) => error.message,
+        provider_types::ProviderError::ContextTooLong(message)
+        | provider_types::ProviderError::Unauthorized(message)
+        | provider_types::ProviderError::Unavailable(message)
+        | provider_types::ProviderError::Refused(message)
+        | provider_types::ProviderError::Other(message) => message,
+    };
+    format!("provider plugin `{provider}`: {message}")
 }
 
 #[derive(Clone, Debug)]
@@ -136,6 +148,51 @@ impl From<provider_types::Completion> for ProviderCompletion {
                 output_tokens: usage.output_tokens,
                 reasoning_tokens: usage.reasoning_tokens,
             }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_each_provider_error() {
+        let errors = [
+            (
+                provider_types::ProviderError::RateLimited(provider_types::RateLimit {
+                    retry_after: Some(30),
+                    message: "slow down".to_owned(),
+                }),
+                "slow down",
+            ),
+            (
+                provider_types::ProviderError::ContextTooLong("too many tokens".to_owned()),
+                "too many tokens",
+            ),
+            (
+                provider_types::ProviderError::Unauthorized("invalid key".to_owned()),
+                "invalid key",
+            ),
+            (
+                provider_types::ProviderError::Unavailable("service is down".to_owned()),
+                "service is down",
+            ),
+            (
+                provider_types::ProviderError::Refused("request declined".to_owned()),
+                "request declined",
+            ),
+            (
+                provider_types::ProviderError::Other("invalid response".to_owned()),
+                "invalid response",
+            ),
+        ];
+
+        for (error, message) in errors {
+            assert_eq!(
+                format_provider_error("example", error),
+                format!("provider plugin `example`: {message}")
+            );
         }
     }
 }

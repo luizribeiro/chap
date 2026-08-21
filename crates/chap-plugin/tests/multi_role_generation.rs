@@ -1,4 +1,6 @@
-use chap::provider::{AssistantContent, Completion, CompletionRequest, FinishReason, Message};
+use chap::provider::{
+    AssistantContent, Completion, CompletionRequest, FinishReason, Message, ProviderError,
+};
 use chap::tools::ToolDefinition;
 use chap::{MetadataSource, Needs, NoSettings, Plugin, Provider, Tools};
 use chap_plugin as chap;
@@ -20,7 +22,7 @@ impl Plugin for MultiRole {
 }
 
 impl Provider for MultiRole {
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, String> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, ProviderError> {
         Ok(Completion {
             content: request
                 .messages

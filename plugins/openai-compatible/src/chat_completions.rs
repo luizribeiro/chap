@@ -1,10 +1,15 @@
 //! Wire format for the OpenAI Chat Completions API.
 
-use chap::provider::{self, AssistantContent, Completion, CompletionRequest, FinishReason, Usage};
+use chap::provider::{
+    self, AssistantContent, Completion, CompletionRequest, FinishReason, ProviderError, Usage,
+};
 use chap_plugin as chap;
 use serde::{Deserialize, Serialize};
 
-pub(crate) fn encode_request(model: &str, request: CompletionRequest) -> Result<String, String> {
+pub(crate) fn encode_request(
+    model: &str,
+    request: CompletionRequest,
+) -> Result<String, ProviderError> {
     serde_json::to_string(&Request {
         model,
         messages: request.messages.into_iter().map(Message::from).collect(),
@@ -15,7 +20,11 @@ pub(crate) fn encode_request(model: &str, request: CompletionRequest) -> Result<
             .collect::<Result<_, _>>()?,
         stream: false,
     })
-    .map_err(|error| format!("failed to encode OpenAI-compatible request: {error}"))
+    .map_err(|error| {
+        ProviderError::Other(format!(
+            "failed to encode OpenAI-compatible request: {error}"
+        ))
+    })
 }
 
 #[derive(Serialize)]
@@ -115,7 +124,7 @@ struct Tool {
 }
 
 impl TryFrom<provider::ToolDefinition> for Tool {
-    type Error = String;
+    type Error = ProviderError;
 
     fn try_from(tool: provider::ToolDefinition) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -124,7 +133,9 @@ impl TryFrom<provider::ToolDefinition> for Tool {
                 name: tool.name,
                 description: tool.description,
                 parameters: serde_json::from_str(&tool.parameters).map_err(|error| {
-                    format!("tool parameters must be valid JSON Schema: {error}")
+                    ProviderError::Other(format!(
+                        "tool parameters must be valid JSON Schema: {error}"
+                    ))
                 })?,
             },
         })
@@ -138,22 +149,22 @@ struct FunctionDefinition {
     parameters: serde_json::Value,
 }
 
-pub(crate) fn parse_response(status: u16, body: &str) -> Result<Completion, String> {
+pub(crate) fn parse_response(status: u16, body: &str) -> Result<Completion, ProviderError> {
     if !(200..300).contains(&status) {
         let message = serde_json::from_str::<ErrorResponse>(body)
             .ok()
             .map(|response| response.error.message)
             .unwrap_or_else(|| body.chars().take(500).collect());
-        return Err(format!(
+        return Err(ProviderError::Other(format!(
             "OpenAI-compatible server returned HTTP {status}: {message}"
-        ));
+        )));
     }
-    let Response { choices, usage } = serde_json::from_str(body)
-        .map_err(|error| format!("invalid OpenAI-compatible response: {error}"))?;
-    let choice = choices
-        .into_iter()
-        .next()
-        .ok_or_else(|| "OpenAI-compatible server returned no completion choices".to_owned())?;
+    let Response { choices, usage } = serde_json::from_str(body).map_err(|error| {
+        ProviderError::Other(format!("invalid OpenAI-compatible response: {error}"))
+    })?;
+    let choice = choices.into_iter().next().ok_or_else(|| {
+        ProviderError::Other("OpenAI-compatible server returned no completion choices".to_owned())
+    })?;
     let mut content = Vec::new();
     if let Some(text) = choice.message.content {
         content.push(AssistantContent::Text(text));
@@ -166,10 +177,11 @@ pub(crate) fn parse_response(status: u16, body: &str) -> Result<Completion, Stri
         })
     }));
     if content.is_empty() {
-        return Err(match choice.message.refusal {
+        let message = match choice.message.refusal {
             Some(refusal) => format!("OpenAI-compatible server refused the request: {refusal}"),
             None => "OpenAI-compatible server returned a completion without content".to_owned(),
-        });
+        };
+        return Err(ProviderError::Other(message));
     }
     Ok(Completion {
         content,
@@ -491,19 +503,21 @@ mod tests {
     #[test]
     fn rejects_responses_without_choices() {
         let error = parse_response(200, r#"{"choices":[]}"#).unwrap_err();
-        assert_eq!(
+        assert!(matches!(
             error,
-            "OpenAI-compatible server returned no completion choices"
-        );
+            ProviderError::Other(message)
+                if message == "OpenAI-compatible server returned no completion choices"
+        ));
     }
 
     #[test]
     fn reports_structured_api_errors() {
         let body = r#"{"error":{"message":"unknown model"}}"#;
         let error = parse_response(404, body).unwrap_err();
-        assert_eq!(
+        assert!(matches!(
             error,
-            "OpenAI-compatible server returned HTTP 404: unknown model"
-        );
+            ProviderError::Other(message)
+                if message == "OpenAI-compatible server returned HTTP 404: unknown model"
+        ));
     }
 }

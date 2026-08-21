@@ -2,7 +2,7 @@
 
 use chap::{
     Needs, NoSettings, Plugin, Provider, Tools,
-    provider::{Completion, CompletionRequest, FinishReason},
+    provider::{Completion, CompletionRequest, FinishReason, ProviderError},
     tools::ToolDefinition,
 };
 use chap_plugin as chap;
@@ -20,7 +20,7 @@ impl Plugin for Dummy {
 }
 
 impl Provider for Dummy {
-    async fn complete(&self, _request: CompletionRequest) -> Result<Completion, String> {
+    async fn complete(&self, _request: CompletionRequest) -> Result<Completion, ProviderError> {
         Ok(Completion {
             content: Vec::new(),
             finish_reason: FinishReason::Stop,
