@@ -100,15 +100,16 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 fn proxy_field(field: &Field) -> syn::Result<TokenStream> {
     let name = field.ident.as_ref().expect("named fields were checked");
     let ty = &field.ty;
-    let docs = field
-        .attrs
-        .iter()
-        .filter(|attribute| attribute.path().is_ident("doc"));
+    let forwarded_attributes = field.attrs.iter().filter(|attribute| {
+        ["doc", "serde", "schemars"]
+            .iter()
+            .any(|name| attribute.path().is_ident(name))
+    });
     let non_empty =
         is_named_type(ty, "String").then(|| quote!(#[schemars(regex(pattern = r"\S"))]));
 
     Ok(quote! {
-        #(#docs)*
+        #(#forwarded_attributes)*
         #non_empty
         #name: #ty,
     })

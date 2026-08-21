@@ -8,6 +8,16 @@ struct Settings {
     api_key: Option<String>,
 }
 
+#[derive(Debug, PartialEq, chap::Settings)]
+struct AttributedSettings {
+    /// Provider deployment identifier.
+    #[serde(rename = "deployment")]
+    #[schemars(length(max = 40))]
+    model: String,
+    #[serde(default)]
+    retries: u32,
+}
+
 struct TestPlugin;
 
 impl chap::Plugin for TestPlugin {
@@ -21,6 +31,24 @@ impl chap::Plugin for TestPlugin {
 }
 
 impl chap::__lockgate::Plugin for TestPlugin {
+    const ID: &'static str = <Self as chap::Plugin>::ID;
+    const NEEDS: chap::Needs = <Self as chap::Plugin>::NEEDS;
+    type Settings = <Self as chap::Plugin>::Settings;
+}
+
+struct AttributedTestPlugin;
+
+impl chap::Plugin for AttributedTestPlugin {
+    const ID: &'static str = "attributed-settings-test";
+    const NEEDS: chap::Needs = chap::Needs::NOTHING;
+    type Settings = AttributedSettings;
+
+    fn new(_settings: Self::Settings) -> Self {
+        Self
+    }
+}
+
+impl chap::__lockgate::Plugin for AttributedTestPlugin {
     const ID: &'static str = <Self as chap::Plugin>::ID;
     const NEEDS: chap::Needs = <Self as chap::Plugin>::NEEDS;
     type Settings = <Self as chap::Plugin>::Settings;
@@ -66,6 +94,30 @@ fn rejects_snake_case_and_unknown_fields() {
         "surprise": true
     }"#;
     assert!(serde_json::from_str::<Settings>(unknown).is_err());
+}
+
+#[test]
+fn forwards_serde_field_attributes() {
+    let settings: AttributedSettings = serde_json::from_str(
+        r#"{
+            "deployment": "example-model"
+        }"#,
+    )
+    .unwrap();
+
+    assert_eq!(settings.model, "example-model");
+    assert_eq!(settings.retries, 0);
+}
+
+#[test]
+fn forwards_field_schema_attributes_and_docs() {
+    let schema: serde_json::Value =
+        serde_json::from_str(&chap::__private::settings_schema::<AttributedTestPlugin>()).unwrap();
+    let deployment = &schema["properties"]["deployment"];
+
+    assert_eq!(deployment["description"], "Provider deployment identifier.");
+    assert_eq!(deployment["maxLength"], 40);
+    assert_eq!(deployment["pattern"], r"\S");
 }
 
 #[test]
