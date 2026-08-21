@@ -53,7 +53,9 @@ enum ReplayReasoning {
 }
 
 const fn replay_reasoning_by_default() -> ReplayReasoning {
-    ReplayReasoning::Field
+    // Replaying reasoning_content alongside tool definitions makes at least one Qwen-family
+    // server emit multiple replies per turn. Operators can opt in where their server handles it.
+    ReplayReasoning::Off
 }
 
 impl Provider for OpenAiCompatible {
@@ -124,11 +126,22 @@ mod tests {
     }
 
     #[test]
-    fn defaults_reasoning_replay_to_field() {
+    fn defaults_reasoning_replay_to_off() {
         assert_eq!(
             settings(None).unwrap().replay_reasoning,
-            ReplayReasoning::Field
+            ReplayReasoning::Off
         );
+    }
+
+    #[test]
+    fn parses_each_explicit_reasoning_replay_mode() {
+        for (value, expected) in [
+            ("field", ReplayReasoning::Field),
+            ("think-tags", ReplayReasoning::ThinkTags),
+            ("off", ReplayReasoning::Off),
+        ] {
+            assert_eq!(settings(Some(value)).unwrap().replay_reasoning, expected);
+        }
     }
 
     #[test]
