@@ -13,4 +13,4 @@ pub use session::{
     Session, SessionEvent, SessionEventError, SessionEventKind, SessionEvents, SessionId,
     SessionOptions, SteeringId,
 };
-pub use tool::{Tool, ToolDefinition};
+pub use tool::{ExecutionMode, Tool, ToolDefinition};

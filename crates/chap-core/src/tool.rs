@@ -1,5 +1,15 @@
 use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
+use serde::Deserialize;
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ExecutionMode {
+    #[default]
+    Parallel,
+    Sequential,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolDefinition {
     pub name: String,
@@ -10,6 +20,10 @@ pub struct ToolDefinition {
 
 pub trait Tool: Send + Sync {
     fn definition(&self) -> ToolDefinition;
+
+    fn execution_mode(&self) -> ExecutionMode {
+        ExecutionMode::default()
+    }
 
     fn execute(
         &self,
@@ -43,6 +57,13 @@ impl ToolRegistry {
 
     pub(crate) fn definitions(&self) -> Vec<ToolDefinition> {
         self.tools.values().map(|tool| tool.definition()).collect()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn execution_mode(&self, name: &str) -> ExecutionMode {
+        self.tools
+            .get(name)
+            .map_or(ExecutionMode::default(), |tool| tool.execution_mode())
     }
 
     pub(crate) async fn execute(&self, name: &str, arguments: String) -> Result<String, String> {
@@ -83,6 +104,29 @@ mod tests {
                 description: "A test tool".to_owned(),
                 parameters: self.parameters.to_owned(),
             }
+        }
+
+        fn execute(
+            &self,
+            arguments: String,
+        ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + '_>> {
+            Box::pin(async move { Ok(arguments) })
+        }
+    }
+
+    struct SequentialTool;
+
+    impl Tool for SequentialTool {
+        fn definition(&self) -> ToolDefinition {
+            ToolDefinition {
+                name: "sequential".to_owned(),
+                description: "A sequential test tool".to_owned(),
+                parameters: r#"{"type":"object"}"#.to_owned(),
+            }
+        }
+
+        fn execution_mode(&self) -> ExecutionMode {
+            ExecutionMode::Sequential
         }
 
         fn execute(
@@ -136,5 +180,36 @@ mod tests {
             .unwrap_err();
 
         assert!(error.contains("tool `broken` has invalid JSON Schema"));
+    }
+
+    #[test]
+    fn defaults_tool_execution_to_parallel() {
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(TestTool {
+                name: "echo",
+                parameters: r#"{"type":"object"}"#,
+            })
+            .unwrap();
+
+        assert_eq!(registry.execution_mode("echo"), ExecutionMode::Parallel);
+    }
+
+    #[test]
+    fn reports_sequential_tool_execution() {
+        let mut registry = ToolRegistry::new();
+        registry.register(SequentialTool).unwrap();
+
+        assert_eq!(
+            registry.execution_mode("sequential"),
+            ExecutionMode::Sequential
+        );
+    }
+
+    #[test]
+    fn defaults_unknown_tool_execution_to_parallel() {
+        let registry = ToolRegistry::new();
+
+        assert_eq!(registry.execution_mode("unknown"), ExecutionMode::Parallel);
     }
 }
