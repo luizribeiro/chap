@@ -29,11 +29,18 @@ pub struct ToolsConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct PluginToolsConfig {
+    #[serde(default)]
+    execution: ExecutionMode,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfiguredPlugin {
     component: PathBuf,
     #[serde(default)]
-    execution: Option<ExecutionMode>,
+    tools: Option<PluginToolsConfig>,
     #[serde(default)]
     settings: toml::Table,
 }
@@ -60,7 +67,8 @@ impl Config {
 
     pub(crate) fn execution_mode(&self, id: &str) -> ExecutionMode {
         self.plugin(id)
-            .and_then(|plugin| plugin.execution)
+            .and_then(|plugin| plugin.tools.as_ref())
+            .map(|tools| tools.execution)
             .unwrap_or_default()
     }
 
@@ -103,6 +111,10 @@ impl ConfiguredPlugin {
 
     pub(crate) fn settings(&self) -> Value {
         toml_to_json(toml::Value::Table(self.settings.clone()))
+    }
+
+    pub(crate) fn has_tools_config(&self) -> bool {
+        self.tools.is_some()
     }
 }
 
@@ -180,17 +192,46 @@ execution = "sequential"
     }
 
     #[test]
-    fn parses_plugin_execution_override() {
+    fn parses_plugin_tools_execution_override() {
         let config: Config = toml::from_str(
             r#"
 [plugins.kagi]
 component = "kagi.wasm"
+
+[plugins.kagi.tools]
 execution = "sequential"
 "#,
         )
         .unwrap();
 
         assert_eq!(config.execution_mode("kagi"), ExecutionMode::Sequential);
+    }
+
+    #[test]
+    fn defaults_plugin_execution_when_the_tools_section_is_absent() {
+        let config: Config = toml::from_str(
+            r#"
+[plugins.kagi]
+component = "kagi.wasm"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.execution_mode("kagi"), ExecutionMode::Parallel);
+    }
+
+    #[test]
+    fn rejects_top_level_plugin_execution() {
+        let error = toml::from_str::<Config>(
+            r#"
+[plugins.kagi]
+component = "kagi.wasm"
+execution = "sequential"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("unknown field `execution`"));
     }
 
     #[test]

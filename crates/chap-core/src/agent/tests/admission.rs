@@ -416,8 +416,13 @@ async fn plugin_execution_override_makes_loaded_tools_sequential() {
     fs::write(
         &config_path,
         r#"
+[tools]
+execution = "parallel"
+
 [plugins."example.tools"]
 component = "tools.wasm"
+
+[plugins."example.tools".tools]
 execution = "sequential"
 "#,
     )
@@ -430,6 +435,44 @@ execution = "sequential"
     assert_eq!(
         agent.inner.tools.execution_mode("fixture-tool"),
         ExecutionMode::Sequential
+    );
+    assert_eq!(agent.inner.tool_execution.mode, ExecutionMode::Parallel);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn rejects_tools_config_for_a_provider_only_plugin() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component("example.provider"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.toml");
+    fs::write(
+        &config_path,
+        r#"
+[plugins."example.provider"]
+component = "provider.wasm"
+
+[plugins."example.provider".tools]
+execution = "sequential"
+"#,
+    )
+    .unwrap();
+
+    let error = AgentBuilder::load(&config_path)
+        .unwrap()
+        .start()
+        .await
+        .err()
+        .unwrap();
+
+    assert!(error.contains("plugin `example.provider`"), "{error}");
+    assert!(error.contains("`tools` section"), "{error}");
+    assert!(
+        error.contains("does not export the tools interface"),
+        "{error}"
     );
     fs::remove_dir_all(directory).unwrap();
 }

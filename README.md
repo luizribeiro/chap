@@ -74,11 +74,13 @@ one call at a time. In parallel mode, any call whose tool resolves to sequential
 makes the whole batch sequential; otherwise `max-concurrency` limits the number
 of calls in flight. The limit must be at least 1 and has no fixed upper bound.
 
-A plugin entry can tighten all tools loaded from that plugin:
+A plugin's `tools` section can tighten all tools loaded from that plugin:
 
 ```toml
 [plugins.stateful-tools]
 component = "./stateful-tools.wasm"
+
+[plugins.stateful-tools.tools]
 execution = "sequential"
 ```
 

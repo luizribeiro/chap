@@ -383,7 +383,9 @@ impl AgentBuilder {
             )
             .await
             .map_err(|error| Self::load_error(id, &path, error))?;
-        Self::validate_supported_role(id, &path, prepared.inspection().exported_interfaces())?;
+        let exported_interfaces = prepared.inspection().exported_interfaces();
+        Self::validate_supported_role(id, &path, exported_interfaces)?;
+        Self::validate_role_config(id, plugin, exported_interfaces)?;
         Ok(prepared)
     }
 
@@ -428,6 +430,21 @@ impl AgentBuilder {
             role_package(<bindings::provider::Role as Role>::INTERFACE),
             describe_exports(exported_interfaces),
         ))
+    }
+
+    fn validate_role_config(
+        id: &str,
+        plugin: &ConfiguredPlugin,
+        exported_interfaces: &[String],
+    ) -> Result<(), String> {
+        if plugin.has_tools_config()
+            && !exports_interface::<bindings::tools::Role>(exported_interfaces)
+        {
+            return Err(format!(
+                "plugin `{id}` configures a `tools` section, but its component does not export the tools interface"
+            ));
+        }
+        Ok(())
     }
 
     fn plugin_bytes(
@@ -482,19 +499,17 @@ impl AgentBuilder {
 
 fn supported_roles(interfaces: &[String]) -> Vec<&'static str> {
     let mut roles = Vec::new();
-    if interfaces
-        .iter()
-        .any(|interface| interface == <bindings::provider::Role as Role>::INTERFACE)
-    {
+    if exports_interface::<bindings::provider::Role>(interfaces) {
         roles.push("provider");
     }
-    if interfaces
-        .iter()
-        .any(|interface| interface == <bindings::tools::Role as Role>::INTERFACE)
-    {
+    if exports_interface::<bindings::tools::Role>(interfaces) {
         roles.push("tool");
     }
     roles
+}
+
+fn exports_interface<R: Role>(interfaces: &[String]) -> bool {
+    interfaces.iter().any(|interface| interface == R::INTERFACE)
 }
 
 fn role_package(interface: &str) -> String {
