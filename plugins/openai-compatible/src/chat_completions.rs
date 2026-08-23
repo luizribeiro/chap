@@ -538,6 +538,27 @@ mod tests {
         assert_eq!(encoded["messages"][0]["content"], "hello");
     }
 
+    /// The encoding tests below pass an explicit mode, so only this one would notice the
+    /// default drifting away from one that puts reasoning back on the wire.
+    #[test]
+    fn replays_reasoning_on_an_unconfigured_request() {
+        let encoded = encode_request(
+            &settings(serde_json::json!({})),
+            CompletionRequest {
+                messages: vec![provider::Message::Assistant(vec![
+                    reasoning("think"),
+                    AssistantContent::Text("answer".to_owned()),
+                ])],
+                tools: vec![],
+            },
+        )
+        .unwrap();
+
+        let encoded: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(encoded["messages"][0]["reasoning_content"], "think");
+        assert_eq!(encoded["messages"][0]["content"], "answer");
+    }
+
     #[test]
     fn merges_request_body_members() {
         let settings = settings(serde_json::json!({

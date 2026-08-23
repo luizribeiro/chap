@@ -199,9 +199,12 @@ struct ReasoningDelimiters {
 }
 
 const fn replay_reasoning_by_default() -> ReplayReasoning {
-    // Replaying reasoning_content alongside tool definitions makes at least one Qwen-family
-    // server emit multiple replies per turn. Operators can opt in where their server handles it.
-    ReplayReasoning::Off
+    // Dropping reasoning hands the model a transcript of its own turns that it never wrote.
+    // Of the two ways to send it back, `reasoning_content` is the field a server supporting
+    // replay reads, and one that does not ignores it. Inline replay has no such escape hatch:
+    // it lands in `content`, where every server re-tokenizes it and the model imitates the
+    // shape it finds there.
+    ReplayReasoning::Field
 }
 
 impl Provider for OpenAiCompatible {
@@ -272,12 +275,12 @@ mod tests {
     }
 
     #[test]
-    fn defaults_reasoning_replay_to_off() {
+    fn defaults_reasoning_replay_to_field() {
         assert_eq!(
             settings_with(serde_json::json!({}))
                 .unwrap()
                 .replay_reasoning,
-            ReplayReasoning::Off
+            ReplayReasoning::Field
         );
     }
 
