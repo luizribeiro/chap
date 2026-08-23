@@ -1,6 +1,7 @@
 use chap::provider::{Completion, CompletionRequest, ProviderError};
 use chap_plugin as chap;
 use chap_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, env, net};
+use std::ops::Deref;
 
 mod chat_completions;
 
@@ -27,23 +28,19 @@ impl Plugin for OpenAiCompatible {
     }
 }
 
+/// Settings whose cross-field rules hold. Nothing else in the crate constructs one, so a
+/// value in hand is what lets `selected_effort` resolve without a fallback.
 #[derive(chap::serde::Deserialize, chap::schemars::JsonSchema)]
 #[serde(crate = "chap::serde", try_from = "SettingsInput")]
 #[schemars(crate = "chap::schemars")]
-struct Settings {
-    base_url: String,
-    model: String,
-    api_key_env: Option<String>,
-    replay_reasoning: ReplayReasoning,
-    reasoning_delimiters: Option<ReasoningDelimiters>,
-    /// Rungs this instance offers, least to most effort. Omit to expose no effort
-    /// control at all.
-    effort_levels: Vec<EffortLevel>,
-    /// The rung applied to requests. Must name one of `effort-levels`.
-    default_effort: Option<String>,
-    /// Merged into every request body verbatim, for server quirks that are not
-    /// per-rung.
-    request_body: BodyFragment,
+struct Settings(SettingsInput);
+
+impl Deref for Settings {
+    type Target = SettingsInput;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 #[derive(chap::serde::Deserialize, chap::schemars::JsonSchema)]
@@ -106,16 +103,7 @@ impl TryFrom<SettingsInput> for Settings {
             ));
         }
 
-        Ok(Self {
-            base_url: settings.base_url,
-            model: settings.model,
-            api_key_env: settings.api_key_env,
-            replay_reasoning: settings.replay_reasoning,
-            reasoning_delimiters: settings.reasoning_delimiters,
-            effort_levels: settings.effort_levels,
-            default_effort: settings.default_effort,
-            request_body: settings.request_body,
-        })
+        Ok(Self(settings))
     }
 }
 
