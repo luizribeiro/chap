@@ -35,8 +35,7 @@ impl chap::__lockgate::Plugin for TestPlugin {
 
 #[test]
 fn lockgate_schema_preserves_chap_settings_conventions() {
-    fn assert_plugin_settings<T: chap::serde::de::DeserializeOwned + chap::schemars::JsonSchema>() {
-    }
+    fn assert_plugin_settings<T: serde::de::DeserializeOwned + schemars::JsonSchema>() {}
     assert_plugin_settings::<Settings>();
 
     let schema: serde_json::Value =

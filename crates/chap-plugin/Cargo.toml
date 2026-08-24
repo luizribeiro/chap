@@ -14,8 +14,8 @@ http = ["dep:lockgate-http"]
 lockgate-http = { workspace = true, optional = true }
 lockgate-plugin = { workspace = true }
 chap-plugin-macros = { workspace = true }
-
-[dev-dependencies]
 schemars.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
 serde_json.workspace = true

@@ -1,4 +1,6 @@
-use crate::{MetadataSource, Needs, SettingsPolicy, schemars, serde};
+use crate::{MetadataSource, Needs, SettingsPolicy};
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 
 /// Common authoring contract for every CHAP plugin.
 pub trait Plugin: Sized {
@@ -22,7 +24,7 @@ pub trait Plugin: Sized {
     const SETTINGS_POLICY: SettingsPolicy = SettingsPolicy::Closed;
 
     /// Validated settings used to construct one invocation object.
-    type Settings: serde::de::DeserializeOwned + schemars::JsonSchema;
+    type Settings: DeserializeOwned + JsonSchema;
 
     /// Constructs fresh plugin state for one role invocation.
     fn new(settings: Self::Settings) -> Self;

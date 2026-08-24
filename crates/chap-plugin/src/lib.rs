@@ -17,8 +17,8 @@ pub use chap_plugin_macros::plugin;
 #[doc(hidden)]
 pub use lockgate_plugin::{self as __lockgate, __private, __wit_bindgen, alloc};
 pub use lockgate_plugin::{
-    Deserialize, EnvVarName, HttpOrigin, JsonSchema, MetadataSource, Need, Needs, NoSettings,
-    Permission, ScopeRef, ScopedPermission, SettingsPolicy, export, generate, schemars, serde,
+    EnvVarName, HttpOrigin, MetadataSource, Need, Needs, NoSettings, Permission, ScopeRef,
+    ScopedPermission, SettingsPolicy, export, generate,
 };
 
 pub use cap::{env, net};
