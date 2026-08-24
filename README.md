@@ -49,16 +49,16 @@ its component and settings:
     "openai": {
       "component": "./target/wasm32-wasip2/release/chap_openai_compatible.wasm",
       "settings": {
-        "base-url": "http://127.0.0.1:8080/v1",
+        "base_url": "http://127.0.0.1:8080/v1",
         "model": "example-model",
-        "api-key-env": "OPENAI_API_KEY"
+        "api_key_env": "OPENAI_API_KEY"
       }
     }
   }
 }
 ```
 
-`api-key-env` is optional and names the environment variable holding the API
+`api_key_env` is optional and names the environment variable holding the API
 key. The plugin declares an `env.read` grant for it, so the access appears in
 `chap grants review`; the value itself never appears in `chap.json` and is never
 read by the host. If it is omitted, the plugin requests no environment grant
@@ -73,14 +73,14 @@ concurrency limit in `chap.json`:
 {
   "tools": {
     "execution": "parallel",
-    "max-concurrency": 8
+    "max_concurrency": 8
   }
 }
 ```
 
 The values shown are the defaults. `"execution": "sequential"` runs every batch
 one call at a time. In parallel mode, any call whose tool resolves to sequential
-makes the whole batch sequential; otherwise `max-concurrency` limits the number
+makes the whole batch sequential; otherwise `max_concurrency` limits the number
 of calls in flight. The limit must be at least 1 and has no fixed upper bound.
 
 A plugin's `tools` section can tighten all tools loaded from that plugin:
@@ -103,7 +103,7 @@ Plugin overrides are tighten-only: `sequential` can restrict a plugin, while
 knows whether a tool has shared internal state; an operator does not, so operator
 configuration may narrow scheduling but never widen it.
 
-Raise `max-concurrency` deliberately. Each in-flight plugin call keeps a live
+Raise `max_concurrency` deliberately. Each in-flight plugin call keeps a live
 wasmtime `Store` with its own memory allowance under `RuntimeLimits::default()`,
 so higher limits have a real memory cost.
 
@@ -118,7 +118,7 @@ From the workspace root, run the complete native and WASI test suites with:
 cargo test-all
 ```
 
-The OpenAI-compatible plugin declares network egress scoped from `base-url`,
+The OpenAI-compatible plugin declares network egress scoped from `base_url`,
 and Lockgate resolves that URL's origin as the granted scope. The scheme and
 effective port are part of the origin. Kagi declares the literal origin
 `https://kagi.com` and therefore needs no configurable origin.
@@ -156,7 +156,7 @@ cargo run -- plugins check
 `grants review` also accepts one instance id. `grants deny <instance-id>` removes
 that instance's approval. CHAP stores approvals in `consent.json` beside the
 selected `chap.json`; concrete scopes remain in `chap.json`. A permission
-expansion, such as changing `base-url` to point at a different origin, blocks
+expansion, such as changing `base_url` to point at a different origin, blocks
 admission until the new manifest is reviewed and approved. Narrowing or
 removing authority is reported as non-blocking drift.
 
@@ -176,12 +176,12 @@ surrounding plugin entry.
 At startup, the host passes the complete settings object through as JSON.
 Strings, numbers, booleans, arrays, and nested objects retain their JSON types.
 Secrets stay out of that object entirely: a setting such as
-`api-key-env` carries only the *name* of an environment variable, the plugin
+`api_key_env` carries only the *name* of an environment variable, the plugin
 declares an `env.read` need scoped from it, and Lockgate populates the
 component's environment with just the granted variables at admission. The plugin
 reads the key with `std::env::var`; the host never touches the value. That need
 is optional: an optional need whose setting is absent drops out of the resolved
-manifest, so a configuration without `api-key-env` is admitted with no
+manifest, so a configuration without `api_key_env` is admitted with no
 environment grant and the provider sends no authorization header. Lockgate
 validates the settings object at prepare time against the schema derived from
 the plugin's `type Settings`. The plugin then reads the validated typed value

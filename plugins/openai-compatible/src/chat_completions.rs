@@ -479,7 +479,7 @@ mod tests {
 
     fn settings(extra: serde_json::Value) -> Settings {
         let mut value = serde_json::json!({
-            "base-url": "https://example.com/v1",
+            "base_url": "https://example.com/v1",
             "model": "example-model",
         });
         value
@@ -541,7 +541,7 @@ mod tests {
     #[test]
     fn merges_request_body_members() {
         let settings = settings(serde_json::json!({
-            "request-body": { "temperature": 0.25, "server-option": true },
+            "request_body": { "temperature": 0.25, "server-option": true },
         }));
         let encoded: serde_json::Value =
             serde_json::from_str(&encode_minimal_request(&settings)).unwrap();
@@ -615,7 +615,7 @@ mod tests {
     #[test]
     fn inline_wraps_only_reasoning_in_operator_delimiters() {
         let settings = settings(serde_json::json!({
-            "replay-reasoning": {
+            "replay_reasoning": {
                 "inline": { "open": "<think>", "close": "</think>" },
             },
         }));

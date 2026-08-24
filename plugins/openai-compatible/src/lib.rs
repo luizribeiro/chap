@@ -20,8 +20,8 @@ impl Plugin for OpenAiCompatible {
     const LICENSE: MetadataSource = MetadataSource::Absent;
     const REPOSITORY: MetadataSource = MetadataSource::Absent;
     const HOMEPAGE: MetadataSource = MetadataSource::Absent;
-    const NEEDS: Needs = Needs::required(&[net::EGRESS.need(&[ScopeRef::setting("/base-url")])])
-        .optional(&[env::READ.need(&[ScopeRef::setting("/api-key-env")])]);
+    const NEEDS: Needs = Needs::required(&[net::EGRESS.need(&[ScopeRef::setting("/base_url")])])
+        .optional(&[env::READ.need(&[ScopeRef::setting("/api_key_env")])]);
     type Settings = Settings;
 
     fn new(settings: Self::Settings) -> Self {
@@ -30,8 +30,7 @@ impl Plugin for OpenAiCompatible {
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-#[schemars(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 struct Settings {
     #[schemars(regex(pattern = r"\S"))]
     base_url: String,
@@ -178,7 +177,7 @@ mod tests {
 
     fn settings_with(extra: serde_json::Value) -> Result<Settings, serde_json::Error> {
         let mut value = serde_json::json!({
-            "base-url": "https://example.com/v1",
+            "base_url": "https://example.com/v1",
             "model": "example-model",
         });
         value
@@ -206,7 +205,7 @@ mod tests {
             ("off", ReplayReasoningMode::Off),
         ] {
             assert_eq!(
-                settings_with(serde_json::json!({ "replay-reasoning": value }))
+                settings_with(serde_json::json!({ "replay_reasoning": value }))
                     .unwrap()
                     .replay_reasoning,
                 ReplayReasoning::Mode(expected)
@@ -216,13 +215,13 @@ mod tests {
 
     #[test]
     fn rejects_an_unknown_reasoning_replay_mode() {
-        assert!(settings_with(serde_json::json!({ "replay-reasoning": "unknown" })).is_err());
+        assert!(settings_with(serde_json::json!({ "replay_reasoning": "unknown" })).is_err());
     }
 
     #[test]
     fn parses_inline_reasoning_delimiters() {
         let settings = settings_with(serde_json::json!({
-            "replay-reasoning": {
+            "replay_reasoning": {
                 "inline": { "open": "<think>", "close": "</think>" },
             },
         }))
@@ -247,7 +246,7 @@ mod tests {
         ] {
             assert!(
                 settings_with(serde_json::json!({
-                    "replay-reasoning": { "inline": reasoning_delimiters },
+                    "replay_reasoning": { "inline": reasoning_delimiters },
                 }))
                 .is_err()
             );
@@ -264,7 +263,7 @@ mod tests {
     #[test]
     fn rejects_plugin_owned_fields_in_fragments() {
         let error = settings_with(serde_json::json!({
-            "request-body": { "messages": [] },
+            "request_body": { "messages": [] },
         }))
         .err()
         .unwrap();
@@ -281,7 +280,7 @@ mod tests {
         let expected = serde_json::json!({ "not": { "enum": OWNED_REQUEST_FIELDS } });
 
         assert_eq!(
-            schema["properties"]["request-body"]["propertyNames"],
+            schema["properties"]["request_body"]["propertyNames"],
             expected
         );
     }

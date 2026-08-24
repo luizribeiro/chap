@@ -3,8 +3,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 #[derive(Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-#[schemars(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 #[expect(dead_code)]
 struct Settings {
     #[schemars(regex(pattern = r"\S"))]
@@ -43,12 +42,12 @@ fn lockgate_schema_preserves_chap_settings_conventions() {
     let schema: serde_json::Value =
         serde_json::from_str(&chap::__private::settings_schema::<TestPlugin>()).unwrap();
     let required = schema["required"].as_array().unwrap();
-    for name in ["base-url", "egress-origin", "model"] {
+    for name in ["base_url", "egress_origin", "model"] {
         assert!(required.iter().any(|value| value == name), "{schema:#}");
         assert_eq!(schema["properties"][name]["pattern"], r"\S");
     }
-    assert!(!required.iter().any(|value| value == "api-key"));
-    assert!(schema["properties"]["api-key"].get("pattern").is_none());
+    assert!(!required.iter().any(|value| value == "api_key"));
+    assert!(schema["properties"]["api_key"].get("pattern").is_none());
     assert_eq!(schema["additionalProperties"], false);
     assert_eq!(schema["unevaluatedProperties"], false);
 }

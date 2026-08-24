@@ -28,7 +28,7 @@ impl Plugin for Kagi {
     const HOMEPAGE: MetadataSource = MetadataSource::Absent;
     const NEEDS: Needs = Needs::required(&[
         net::EGRESS.need(&[ScopeRef::literal("https://kagi.com")]),
-        env::READ.need(&[ScopeRef::setting("/api-key-env")]),
+        env::READ.need(&[ScopeRef::setting("/api_key_env")]),
     ]);
     type Settings = Settings;
 
@@ -159,8 +159,7 @@ fn parse_arguments<T: for<'de> Deserialize<'de>>(tool: &str, arguments: &str) ->
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-#[schemars(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 struct Settings {
     #[schemars(regex(pattern = r"\S"))]
     api_key_env: String,
@@ -404,7 +403,7 @@ mod tests {
 
     #[test]
     fn deserializes_typed_settings() {
-        let settings: Settings = serde_json::from_str(r#"{"api-key-env":"KAGI_API_KEY"}"#).unwrap();
+        let settings: Settings = serde_json::from_str(r#"{"api_key_env":"KAGI_API_KEY"}"#).unwrap();
 
         assert_eq!(settings.api_key_env, "KAGI_API_KEY");
     }
@@ -413,8 +412,8 @@ mod tests {
     fn rejects_invalid_settings() {
         for json in [
             "{}",
-            r#"{"api-key-env":42}"#,
-            r#"{"api-key-env":"KAGI_API_KEY","extra":true}"#,
+            r#"{"api_key_env":42}"#,
+            r#"{"api_key_env":"KAGI_API_KEY","extra":true}"#,
         ] {
             assert!(serde_json::from_str::<Settings>(json).is_err());
         }
@@ -432,10 +431,10 @@ mod tests {
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["unevaluatedProperties"], false);
         assert_eq!(schema["properties"].as_object().unwrap().len(), 1);
-        assert_eq!(schema["properties"]["api-key-env"]["type"], "string");
-        assert_eq!(schema["properties"]["api-key-env"]["pattern"], r"\S");
+        assert_eq!(schema["properties"]["api_key_env"]["type"], "string");
+        assert_eq!(schema["properties"]["api_key_env"]["pattern"], r"\S");
         assert!(schema["properties"].get("settings").is_none());
-        assert_eq!(schema["required"], serde_json::json!(["api-key-env"]));
+        assert_eq!(schema["required"], serde_json::json!(["api_key_env"]));
     }
 
     #[test]

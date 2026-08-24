@@ -289,7 +289,7 @@ async fn validates_settings_before_loading_tool_definitions() {
         &component,
         tool_component_with_schema(
             "example.tools",
-            r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["api-key"]}"#,
+            r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["api_key"]}"#,
         ),
     )
     .unwrap();
@@ -312,7 +312,7 @@ async fn validates_settings_before_loading_tool_definitions() {
     };
 
     assert!(error.contains("settings"), "{error}");
-    assert!(error.contains("api-key"), "{error}");
+    assert!(error.contains("api_key"), "{error}");
     assert!(error.contains("required"), "{error}");
     assert!(!error.contains("tool plugin"));
     fs::remove_dir_all(directory).unwrap();

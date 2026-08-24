@@ -18,7 +18,7 @@ async fn migrated_kagi_component_admits_and_classifies_as_tools_only() {
                     "kagi": {{
                         "component": {component:?},
                         "settings": {{
-                            "api-key-env": "CHAP_TEST_KAGI_API_KEY"
+                            "api_key_env": "CHAP_TEST_KAGI_API_KEY"
                         }}
                     }}
                 }}

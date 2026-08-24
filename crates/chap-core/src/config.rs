@@ -20,7 +20,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct ToolsConfig {
     #[serde(default)]
     execution: ExecutionMode,
@@ -29,7 +29,7 @@ pub struct ToolsConfig {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 struct PluginToolsConfig {
     #[serde(default)]
     execution: ExecutionMode,
@@ -134,7 +134,7 @@ mod tests {
                     "openai": {
                         "component": "./plugins/openai-compatible.wasm",
                         "settings": {
-                            "base-url": "https://api.example.com/v1",
+                            "base_url": "https://api.example.com/v1",
                             "model": "example-model"
                         }
                     }
@@ -150,7 +150,7 @@ mod tests {
             Path::new("./plugins/openai-compatible.wasm")
         );
         let settings = plugin.settings();
-        assert_eq!(settings["base-url"], "https://api.example.com/v1");
+        assert_eq!(settings["base_url"], "https://api.example.com/v1");
         assert_eq!(settings["model"], "example-model");
     }
 
@@ -233,7 +233,7 @@ mod tests {
         let error = serde_json::from_str::<Config>(
             r#"{
                 "tools": {
-                    "max-concurrency": 0
+                    "max_concurrency": 0
                 }
             }"#,
         )
@@ -264,7 +264,7 @@ mod tests {
                     "example": {
                         "component": "example.wasm",
                         "settings": {
-                            "api-key-env": "EXAMPLE_API_KEY"
+                            "api_key_env": "EXAMPLE_API_KEY"
                         }
                     }
                 }
@@ -273,7 +273,7 @@ mod tests {
         .unwrap();
 
         let settings = config.plugin("example").unwrap().settings();
-        assert_eq!(settings["api-key-env"], "EXAMPLE_API_KEY");
-        assert!(settings.get("api-key").is_none());
+        assert_eq!(settings["api_key_env"], "EXAMPLE_API_KEY");
+        assert!(settings.get("api_key").is_none());
     }
 }

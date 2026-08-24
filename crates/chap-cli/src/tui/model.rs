@@ -186,7 +186,7 @@ pub(super) fn apply_event(
         SessionEventKind::UsageUpdated { usage } => {
             let model = transcript.usage.get_or_insert_default();
             // Forecast the next prompt as latest input plus output; reasoning belongs in this
-            // figure iff it is replayed. Disabling `replay-reasoning` can overstate the forecast.
+            // figure iff it is replayed. Disabling `replay_reasoning` can overstate the forecast.
             model.context_tokens = usage
                 .last_step
                 .input_tokens

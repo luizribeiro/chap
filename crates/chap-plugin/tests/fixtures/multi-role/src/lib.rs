@@ -8,8 +8,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 #[derive(Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-#[schemars(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 struct Settings {
     #[schemars(regex(pattern = r"\S"))]
     prefix: String,

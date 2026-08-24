@@ -343,7 +343,7 @@ fn write_openai_config_without_an_api_key(path: &Path, component: &Path, origin:
 
 fn write_config(path: &Path, component: &Path, origin: &str, api_key_env: Option<&str>) {
     let api_key_setting = api_key_env
-        .map(|name| format!(r#", "api-key-env": "{name}""#))
+        .map(|name| format!(r#", "api_key_env": "{name}""#))
         .unwrap_or_default();
     std::fs::write(
         path,
@@ -353,7 +353,7 @@ fn write_config(path: &Path, component: &Path, origin: &str, api_key_env: Option
                     "openai": {{
                         "component": {component:?},
                         "settings": {{
-                            "base-url": "{origin}/v1",
+                            "base_url": "{origin}/v1",
                             "model": "mock-model"{api_key_setting}
                         }}
                     }}
