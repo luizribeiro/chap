@@ -50,7 +50,7 @@ fn provider_bridge(plugin: &Ident) -> TokenStream {
                 let object = <#plugin as ::chap_plugin::Plugin>::new(
                     <#plugin as ::chap_plugin::__lockgate::Plugin>::settings(),
                 );
-                <#plugin as ::chap_plugin::Provider>::complete(&object, request).await
+                <#plugin as ::chap_plugin::provider::Provider>::complete(&object, request).await
             }
         }
     }
@@ -58,7 +58,7 @@ fn provider_bridge(plugin: &Ident) -> TokenStream {
 
 fn provider_test_reference(plugin: &Ident) -> TokenStream {
     quote! {
-        let _ = <#plugin as ::chap_plugin::Provider>::complete;
+        let _ = <#plugin as ::chap_plugin::provider::Provider>::complete;
     }
 }
 
@@ -73,11 +73,11 @@ fn tools_bridge(plugin: &Ident) -> TokenStream {
                 let object = <#plugin as ::chap_plugin::Plugin>::new(
                     <#plugin as ::chap_plugin::__lockgate::Plugin>::settings(),
                 );
-                let definitions = <#plugin as ::chap_plugin::Tools>::definitions(&object)?;
+                let definitions = <#plugin as ::chap_plugin::tools::Tools>::definitions(&object)?;
                 Ok(definitions
                     .into_iter()
                     .map(|definition| ::chap_plugin::types::ToolRegistration {
-                        execution_mode: <#plugin as ::chap_plugin::Tools>::execution_mode(
+                        execution_mode: <#plugin as ::chap_plugin::tools::Tools>::execution_mode(
                             &object,
                             &definition.name,
                         ),
@@ -96,7 +96,7 @@ fn tools_bridge(plugin: &Ident) -> TokenStream {
                 let object = <#plugin as ::chap_plugin::Plugin>::new(
                     <#plugin as ::chap_plugin::__lockgate::Plugin>::settings(),
                 );
-                <#plugin as ::chap_plugin::Tools>::execute(&object, name, arguments).await
+                <#plugin as ::chap_plugin::tools::Tools>::execute(&object, name, arguments).await
             }
         }
     }
@@ -104,8 +104,8 @@ fn tools_bridge(plugin: &Ident) -> TokenStream {
 
 fn tools_test_reference(plugin: &Ident) -> TokenStream {
     quote! {
-        let _ = <#plugin as ::chap_plugin::Tools>::definitions;
-        let _ = <#plugin as ::chap_plugin::Tools>::execution_mode;
-        let _ = <#plugin as ::chap_plugin::Tools>::execute;
+        let _ = <#plugin as ::chap_plugin::tools::Tools>::definitions;
+        let _ = <#plugin as ::chap_plugin::tools::Tools>::execution_mode;
+        let _ = <#plugin as ::chap_plugin::tools::Tools>::execute;
     }
 }

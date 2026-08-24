@@ -1,5 +1,5 @@
-use chap_plugin::provider::{Completion, CompletionRequest, ProviderError};
-use chap_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, env, net};
+use chap_plugin::provider::{Completion, CompletionRequest, Provider, ProviderError};
+use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, env, net};
 use schemars::JsonSchema;
 use serde::Deserialize;
 

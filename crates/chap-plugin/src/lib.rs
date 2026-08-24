@@ -5,11 +5,11 @@
 //! either the `provider-plugin` or `tool-plugin` world.
 
 mod cap;
-mod export;
 #[cfg(feature = "http")]
 #[path = "http.rs"]
 mod http_reexport;
 mod plugin;
+mod roles;
 #[doc(hidden)]
 #[cfg(any(feature = "provider", feature = "tools"))]
 pub mod types;
@@ -23,10 +23,10 @@ pub use lockgate_plugin::{
 };
 
 pub use cap::{env, net};
-#[cfg(feature = "provider")]
-pub use export::{Provider, provider};
-#[cfg(feature = "tools")]
-pub use export::{Tools, tools};
 #[cfg(feature = "http")]
 pub use http_reexport::http;
 pub use plugin::Plugin;
+#[cfg(feature = "provider")]
+pub use roles::provider;
+#[cfg(feature = "tools")]
+pub use roles::tools;

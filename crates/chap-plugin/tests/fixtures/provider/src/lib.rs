@@ -1,7 +1,7 @@
 use chap_plugin::provider::{
-    AssistantContent, Completion, CompletionRequest, FinishReason, Message, ProviderError,
+    AssistantContent, Completion, CompletionRequest, FinishReason, Message, Provider, ProviderError,
 };
-use chap_plugin::{MetadataSource, Needs, Plugin, Provider};
+use chap_plugin::{MetadataSource, Needs, Plugin};
 use schemars::JsonSchema;
 use serde::Deserialize;
 

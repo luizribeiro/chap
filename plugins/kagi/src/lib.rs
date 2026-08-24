@@ -1,5 +1,5 @@
-use chap_plugin::tools::ToolDefinition;
-use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, Tools, env, net};
+use chap_plugin::tools::{ToolDefinition, Tools};
+use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, env, net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use url::Url;

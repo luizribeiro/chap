@@ -1,7 +1,7 @@
 use chap_plugin::provider::{
-    AssistantContent, Completion, CompletionRequest, FinishReason, Message, ProviderError,
+    AssistantContent, Completion, CompletionRequest, FinishReason, Message, Provider, ProviderError,
 };
-use chap_plugin::{MetadataSource, Needs, NoSettings, Plugin, Provider};
+use chap_plugin::{MetadataSource, Needs, NoSettings, Plugin};
 
 struct SingleRole;
 

@@ -1,8 +1,9 @@
 use chap_plugin::provider::{
-    AssistantContent, Completion, CompletionRequest, FinishReason, Message, ProviderError, ToolCall,
+    AssistantContent, Completion, CompletionRequest, FinishReason, Message, Provider,
+    ProviderError, ToolCall,
 };
-use chap_plugin::tools::ToolDefinition;
-use chap_plugin::{MetadataSource, Needs, Plugin, Provider, Tools};
+use chap_plugin::tools::{ToolDefinition, Tools};
+use chap_plugin::{MetadataSource, Needs, Plugin};
 use schemars::JsonSchema;
 use serde::Deserialize;
 

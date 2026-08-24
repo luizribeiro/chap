@@ -1,8 +1,8 @@
 use chap_plugin::provider::{
-    AssistantContent, Completion, CompletionRequest, FinishReason, Message, ProviderError,
+    AssistantContent, Completion, CompletionRequest, FinishReason, Message, Provider, ProviderError,
 };
-use chap_plugin::tools::ToolDefinition;
-use chap_plugin::{MetadataSource, Needs, NoSettings, Plugin, Provider, Tools};
+use chap_plugin::tools::{ToolDefinition, Tools};
+use chap_plugin::{MetadataSource, Needs, NoSettings, Plugin};
 
 struct MultiRole;
 
