@@ -28,8 +28,7 @@ impl Plugin for OpenAiCompatible {
     }
 }
 
-/// Settings whose cross-field rules hold. Nothing else in the crate constructs one, so a
-/// value in hand is what lets `selected_effort` resolve without a fallback.
+/// Settings whose cross-field rules hold.
 #[derive(chap::serde::Deserialize, chap::schemars::JsonSchema)]
 #[serde(crate = "chap::serde", try_from = "SettingsInput")]
 #[schemars(crate = "chap::schemars")]
@@ -56,14 +55,7 @@ struct SettingsInput {
     #[schemars(default = "replay_reasoning_by_default")]
     replay_reasoning: ReplayReasoning,
     reasoning_delimiters: Option<ReasoningDelimiters>,
-    /// Rungs this instance offers, least to most effort. Omit to expose no effort
-    /// control at all.
-    #[serde(default)]
-    effort_levels: Vec<EffortLevel>,
-    /// The rung applied to requests. Must name one of `effort-levels`.
-    default_effort: Option<String>,
-    /// Merged into every request body verbatim, for server quirks that are not
-    /// per-rung.
+    /// Merged into every request body verbatim for server quirks.
     #[serde(default)]
     #[schemars(extend("propertyNames" = allowed_fragment_property_names()))]
     request_body: BodyFragment,
@@ -78,58 +70,8 @@ impl TryFrom<SettingsInput> for Settings {
         {
             return Err("reasoning-delimiters requires replay-reasoning to be `inline`".to_owned());
         }
-        for (index, level) in settings.effort_levels.iter().enumerate() {
-            if level.name.trim().is_empty() {
-                return Err("effort-level names must not be empty".to_owned());
-            }
-            if settings.effort_levels[..index]
-                .iter()
-                .any(|previous| previous.name == level.name)
-            {
-                return Err(format!(
-                    "effort-level names must be unique; duplicate `{}`",
-                    level.name
-                ));
-            }
-        }
-        if let Some(default_effort) = &settings.default_effort
-            && !settings
-                .effort_levels
-                .iter()
-                .any(|level| level.name == *default_effort)
-        {
-            return Err(format!(
-                "default-effort `{default_effort}` does not name an effort-level"
-            ));
-        }
-
         Ok(Self(settings))
     }
-}
-
-impl Settings {
-    fn selected_effort(&self) -> Option<&EffortLevel> {
-        self.default_effort.as_deref().map(|name| {
-            self.effort_levels
-                .iter()
-                .find(|level| level.name == name)
-                .expect("settings validation ensures the default effort exists")
-        })
-    }
-}
-
-#[derive(Clone, chap::serde::Deserialize, chap::schemars::JsonSchema)]
-#[serde(crate = "chap::serde", deny_unknown_fields)]
-#[schemars(crate = "chap::schemars")]
-struct EffortLevel {
-    /// The name an operator and, later, a caller sees. CHAP never interprets it.
-    #[schemars(regex(pattern = r"\S"))]
-    name: String,
-    #[allow(dead_code)]
-    description: Option<String>,
-    #[serde(default)]
-    #[schemars(extend("propertyNames" = allowed_fragment_property_names()))]
-    body: BodyFragment,
 }
 
 /// A raw JSON object merged into the request body. The keys belong to the
@@ -324,55 +266,21 @@ mod tests {
     }
 
     #[test]
-    fn accepts_no_effort_control() {
+    fn defaults_to_an_empty_request_body() {
         let settings = settings_with(serde_json::json!({})).unwrap();
 
-        assert!(settings.effort_levels.is_empty());
-        assert!(settings.default_effort.is_none());
         assert!(settings.request_body.0.is_empty());
     }
 
     #[test]
-    fn rejects_an_unknown_default_effort() {
+    fn rejects_plugin_owned_fields_in_fragments() {
         let error = settings_with(serde_json::json!({
-            "effort-levels": [{ "name": "low" }],
-            "default-effort": "high",
+            "request-body": { "messages": [] },
         }))
         .err()
         .unwrap();
 
-        assert!(error.to_string().contains("does not name an effort-level"));
-    }
-
-    #[test]
-    fn rejects_duplicate_or_empty_effort_level_names() {
-        for (levels, expected) in [
-            (
-                serde_json::json!([{ "name": "low" }, { "name": "low" }]),
-                "must be unique",
-            ),
-            (serde_json::json!([{ "name": "" }]), "must not be empty"),
-        ] {
-            let error = settings_with(serde_json::json!({ "effort-levels": levels }))
-                .err()
-                .unwrap();
-
-            assert!(error.to_string().contains(expected));
-        }
-    }
-
-    #[test]
-    fn rejects_plugin_owned_fields_in_fragments() {
-        for extra in [
-            serde_json::json!({ "request-body": { "messages": [] } }),
-            serde_json::json!({
-                "effort-levels": [{ "name": "high", "body": { "model": "other" } }],
-            }),
-        ] {
-            let error = settings_with(extra).err().unwrap();
-
-            assert!(error.to_string().contains("plugin-owned field"));
-        }
+        assert!(error.to_string().contains("plugin-owned field"));
     }
 
     #[test]
@@ -385,10 +293,6 @@ mod tests {
 
         assert_eq!(
             schema["properties"]["request-body"]["propertyNames"],
-            expected
-        );
-        assert_eq!(
-            schema["$defs"]["EffortLevel"]["properties"]["body"]["propertyNames"],
             expected
         );
     }
