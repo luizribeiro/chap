@@ -1,10 +1,9 @@
 //! Wire format for the OpenAI Chat Completions API.
 
-use chap::provider::{
+use chap_plugin::provider::{
     self, AssistantContent, Completion, CompletionRequest, FinishReason, ProviderError, RateLimit,
     Usage,
 };
-use chap_plugin as chap;
 use serde::{Deserialize, Serialize};
 
 use crate::{ReasoningDelimiters, ReplayReasoningMode, Settings};

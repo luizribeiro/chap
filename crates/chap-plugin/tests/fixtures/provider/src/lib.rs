@@ -1,8 +1,7 @@
-use chap::provider::{
+use chap_plugin::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message, ProviderError,
 };
-use chap::{MetadataSource, Needs, Plugin, Provider};
-use chap_plugin as chap;
+use chap_plugin::{MetadataSource, Needs, Plugin, Provider};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -54,4 +53,4 @@ impl Provider for ProviderFixture {
     }
 }
 
-chap::plugin!(ProviderFixture: Provider);
+chap_plugin::plugin!(ProviderFixture: Provider);

@@ -1,5 +1,4 @@
-use chap::tools::ToolDefinition;
-use chap_plugin as chap;
+use chap_plugin::tools::ToolDefinition;
 use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, Tools, env, net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -112,7 +111,7 @@ impl Tools for Kagi {
                 self.settings.api_key_env
             )
         })?;
-        let response = chap::http::Client::with_max_response_bytes(8 * 1024 * 1024)
+        let response = chap_plugin::http::Client::with_max_response_bytes(8 * 1024 * 1024)
             .post(&url)
             .header("accept", "application/json")
             .map_err(|error| error.to_string())?
@@ -123,23 +122,23 @@ impl Tools for Kagi {
             .send()
             .await
             .map_err(|error| match error {
-                chap::http::Error::InvalidHeaderValue(_) => {
+                chap_plugin::http::Error::InvalidHeaderValue(_) => {
                     "Kagi API key contains invalid header characters".to_owned()
                 }
-                chap::http::Error::Request(error) => {
+                chap_plugin::http::Error::Request(error) => {
                     format!("Kagi HTTP request failed: {error}")
                 }
-                chap::http::Error::Body(error) => {
+                chap_plugin::http::Error::Body(error) => {
                     format!("failed to read Kagi response: {error}")
                 }
-                chap::http::Error::ResponseTooLarge { limit } => {
+                chap_plugin::http::Error::ResponseTooLarge { limit } => {
                     format!("Kagi response exceeded the {limit}-byte limit")
                 }
                 error => error.to_string(),
             })?;
         let status = response.status();
         let body = response.text().map_err(|error| match error {
-            chap::http::Error::Utf8(error) => {
+            chap_plugin::http::Error::Utf8(error) => {
                 format!("Kagi response was not valid UTF-8: {error}")
             }
             error => error.to_string(),
@@ -421,7 +420,7 @@ mod tests {
 
     #[test]
     fn publishes_the_settings_object_schema() {
-        let schema = chap::__private::settings_schema::<Kagi>();
+        let schema = chap_plugin::__private::settings_schema::<Kagi>();
         let schema: serde_json::Value = serde_json::from_str(&schema).unwrap();
 
         assert_eq!(
@@ -565,4 +564,4 @@ mod tests {
     }
 }
 
-chap::plugin!(Kagi: Tools);
+chap_plugin::plugin!(Kagi: Tools);

@@ -1,9 +1,8 @@
-use chap::provider::{
+use chap_plugin::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message, ProviderError, ToolCall,
 };
-use chap::tools::ToolDefinition;
-use chap::{MetadataSource, Needs, Plugin, Provider, Tools};
-use chap_plugin as chap;
+use chap_plugin::tools::ToolDefinition;
+use chap_plugin::{MetadataSource, Needs, Plugin, Provider, Tools};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -83,4 +82,4 @@ impl Tools for MultiRoleFixture {
     }
 }
 
-chap::plugin!(MultiRoleFixture: Provider + Tools);
+chap_plugin::plugin!(MultiRoleFixture: Provider + Tools);

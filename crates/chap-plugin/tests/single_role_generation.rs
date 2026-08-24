@@ -1,8 +1,7 @@
-use chap::provider::{
+use chap_plugin::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message, ProviderError,
 };
-use chap::{MetadataSource, Needs, NoSettings, Plugin, Provider};
-use chap_plugin as chap;
+use chap_plugin::{MetadataSource, Needs, NoSettings, Plugin, Provider};
 
 struct SingleRole;
 
@@ -37,7 +36,7 @@ impl Provider for SingleRole {
     }
 }
 
-chap::plugin!(SingleRole: Provider);
+chap_plugin::plugin!(SingleRole: Provider);
 
 #[test]
 fn plugin_macro_supports_single_role_tests() {}

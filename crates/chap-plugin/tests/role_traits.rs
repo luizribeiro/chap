@@ -1,11 +1,10 @@
 #![cfg(all(feature = "provider", feature = "tools"))]
 
-use chap::{
+use chap_plugin::{
     Needs, NoSettings, Plugin, Provider, Tools,
     provider::{Completion, CompletionRequest, FinishReason, ProviderError},
     tools::ToolDefinition,
 };
-use chap_plugin as chap;
 
 struct Dummy;
 

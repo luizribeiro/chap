@@ -1,5 +1,4 @@
-use chap::provider::{Completion, CompletionRequest, ProviderError};
-use chap_plugin as chap;
+use chap_plugin::provider::{Completion, CompletionRequest, ProviderError};
 use chap_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, env, net};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -10,7 +9,7 @@ struct OpenAiCompatible {
     settings: Settings,
 }
 
-chap::plugin!(OpenAiCompatible: Provider);
+chap_plugin::plugin!(OpenAiCompatible: Provider);
 
 impl Plugin for OpenAiCompatible {
     const ID: &'static str = "openai";
@@ -133,7 +132,7 @@ impl Provider for OpenAiCompatible {
             .as_deref()
             .map(read_environment_variable)
             .transpose()?;
-        let response = chap::http::Client::new()
+        let response = chap_plugin::http::Client::new()
             .post(&url)
             .header("content-type", "application/json")
             .map_err(|error| ProviderError::Other(error.to_string()))?

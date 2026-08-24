@@ -1,9 +1,8 @@
-use chap::provider::{
+use chap_plugin::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message, ProviderError,
 };
-use chap::tools::ToolDefinition;
-use chap::{MetadataSource, Needs, NoSettings, Plugin, Provider, Tools};
-use chap_plugin as chap;
+use chap_plugin::tools::ToolDefinition;
+use chap_plugin::{MetadataSource, Needs, NoSettings, Plugin, Provider, Tools};
 
 struct MultiRole;
 
@@ -55,7 +54,7 @@ impl Tools for MultiRole {
     }
 }
 
-chap::plugin!(MultiRole: Provider + Tools);
+chap_plugin::plugin!(MultiRole: Provider + Tools);
 
 #[test]
 fn plugin_macro_supports_multi_role_tests() {}
