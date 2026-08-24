@@ -81,7 +81,7 @@ async fn completes_through_the_chap_host_against_an_allowed_local_server() {
     let component = build_openai_component(&workspace);
     let mock = MockServer::start();
     let directory = tempfile::tempdir().unwrap();
-    let config_path = directory.path().join("chap.toml");
+    let config_path = directory.path().join("chap.json");
     write_openai_config(&config_path, &component, &mock.origin);
 
     let HostCompletion {
@@ -130,7 +130,7 @@ async fn completes_without_an_authorization_header_when_no_api_key_is_configured
     let component = build_openai_component(&workspace);
     let mock = MockServer::start();
     let directory = tempfile::tempdir().unwrap();
-    let config_path = directory.path().join("chap.toml");
+    let config_path = directory.path().join("chap.json");
     write_openai_config_without_an_api_key(&config_path, &component, &mock.origin);
 
     let HostCompletion {
@@ -162,7 +162,7 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let component = build_openai_component(&workspace);
     let directory = tempfile::tempdir().unwrap();
-    let config_path = directory.path().join("chap.toml");
+    let config_path = directory.path().join("chap.json");
     write_openai_config(&config_path, &component, "http://127.0.0.1:41001");
 
     AgentBuilder::load(&config_path)
@@ -214,7 +214,7 @@ async fn admission_after_narrowed_egress_refreshes_the_stored_record() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let component = build_openai_component(&workspace);
     let directory = tempfile::tempdir().unwrap();
-    let config_path = directory.path().join("chap.toml");
+    let config_path = directory.path().join("chap.json");
     let origin = "http://127.0.0.1:41001";
     write_openai_config(&config_path, &component, origin);
 
@@ -258,7 +258,7 @@ async fn admission_with_a_matching_digest_does_not_rewrite_the_store() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let component = build_openai_component(&workspace);
     let directory = tempfile::tempdir().unwrap();
-    let config_path = directory.path().join("chap.toml");
+    let config_path = directory.path().join("chap.json");
     write_openai_config(&config_path, &component, "http://127.0.0.1:41001");
 
     let approved = AgentBuilder::load(&config_path)
@@ -343,19 +343,22 @@ fn write_openai_config_without_an_api_key(path: &Path, component: &Path, origin:
 
 fn write_config(path: &Path, component: &Path, origin: &str, api_key_env: Option<&str>) {
     let api_key_setting = api_key_env
-        .map(|name| format!("api-key-env = \"{name}\"\n"))
+        .map(|name| format!(r#", "api-key-env": "{name}""#))
         .unwrap_or_default();
     std::fs::write(
         path,
         format!(
-            r#"
-[plugins.openai]
-component = {component:?}
-
-[plugins.openai.settings]
-base-url = "{origin}/v1"
-model = "mock-model"
-{api_key_setting}"#,
+            r#"{{
+                "plugins": {{
+                    "openai": {{
+                        "component": {component:?},
+                        "settings": {{
+                            "base-url": "{origin}/v1",
+                            "model": "mock-model"{api_key_setting}
+                        }}
+                    }}
+                }}
+            }}"#,
             component = component.display().to_string(),
         ),
     )

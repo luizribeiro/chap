@@ -42,14 +42,14 @@ pub struct ConfiguredPlugin {
     #[serde(default)]
     tools: Option<PluginToolsConfig>,
     #[serde(default)]
-    settings: toml::Table,
+    settings: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Config {
     pub fn load(path: &Path) -> Result<Self, String> {
         let source = fs::read_to_string(path)
             .map_err(|error| format!("failed to read `{}`: {error}", path.display()))?;
-        let mut config: Self = toml::from_str(&source)
+        let mut config: Self = serde_json::from_str(&source)
             .map_err(|error| format!("failed to parse `{}`: {error}", path.display()))?;
         config.directory = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         Ok(config)
@@ -110,7 +110,7 @@ impl ConfiguredPlugin {
     }
 
     pub(crate) fn settings(&self) -> Value {
-        toml_to_json(toml::Value::Table(self.settings.clone()))
+        Value::Object(self.settings.clone())
     }
 
     pub(crate) fn has_tools_config(&self) -> bool {
@@ -122,40 +122,24 @@ fn default_max_concurrency() -> NonZeroUsize {
     NonZeroUsize::new(8).expect("default tool concurrency is nonzero")
 }
 
-fn toml_to_json(value: toml::Value) -> Value {
-    match value {
-        toml::Value::String(value) => Value::String(value),
-        toml::Value::Integer(value) => Value::Number(value.into()),
-        toml::Value::Float(value) => serde_json::Number::from_f64(value)
-            .map(Value::Number)
-            .unwrap_or_else(|| Value::String(toml::Value::Float(value).to_string())),
-        toml::Value::Boolean(value) => Value::Bool(value),
-        toml::Value::Datetime(value) => Value::String(value.to_string()),
-        toml::Value::Array(values) => Value::Array(values.into_iter().map(toml_to_json).collect()),
-        toml::Value::Table(values) => Value::Object(
-            values
-                .into_iter()
-                .map(|(key, value)| (key, toml_to_json(value)))
-                .collect(),
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn parses_plugins() {
-        let config: Config = toml::from_str(
-            r#"
-[plugins.openai]
-component = "./plugins/openai-compatible.wasm"
-
-[plugins.openai.settings]
-base-url = "https://api.example.com/v1"
-model = "example-model"
-"#,
+        let config: Config = serde_json::from_str(
+            r#"{
+                "plugins": {
+                    "openai": {
+                        "component": "./plugins/openai-compatible.wasm",
+                        "settings": {
+                            "base-url": "https://api.example.com/v1",
+                            "model": "example-model"
+                        }
+                    }
+                }
+            }"#,
         )
         .unwrap();
 
@@ -172,7 +156,7 @@ model = "example-model"
 
     #[test]
     fn defaults_tool_execution_when_the_section_is_absent() {
-        let config: Config = toml::from_str("").unwrap();
+        let config: Config = serde_json::from_str("{}").unwrap();
 
         assert_eq!(config.tools.execution, ExecutionMode::Parallel);
         assert_eq!(config.tools.max_concurrency.get(), 8);
@@ -180,11 +164,12 @@ model = "example-model"
 
     #[test]
     fn parses_sequential_tool_execution() {
-        let config: Config = toml::from_str(
-            r#"
-[tools]
-execution = "sequential"
-"#,
+        let config: Config = serde_json::from_str(
+            r#"{
+                "tools": {
+                    "execution": "sequential"
+                }
+            }"#,
         )
         .unwrap();
 
@@ -193,14 +178,17 @@ execution = "sequential"
 
     #[test]
     fn parses_plugin_tools_execution_override() {
-        let config: Config = toml::from_str(
-            r#"
-[plugins.kagi]
-component = "kagi.wasm"
-
-[plugins.kagi.tools]
-execution = "sequential"
-"#,
+        let config: Config = serde_json::from_str(
+            r#"{
+                "plugins": {
+                    "kagi": {
+                        "component": "kagi.wasm",
+                        "tools": {
+                            "execution": "sequential"
+                        }
+                    }
+                }
+            }"#,
         )
         .unwrap();
 
@@ -209,11 +197,14 @@ execution = "sequential"
 
     #[test]
     fn defaults_plugin_execution_when_the_tools_section_is_absent() {
-        let config: Config = toml::from_str(
-            r#"
-[plugins.kagi]
-component = "kagi.wasm"
-"#,
+        let config: Config = serde_json::from_str(
+            r#"{
+                "plugins": {
+                    "kagi": {
+                        "component": "kagi.wasm"
+                    }
+                }
+            }"#,
         )
         .unwrap();
 
@@ -222,12 +213,15 @@ component = "kagi.wasm"
 
     #[test]
     fn rejects_top_level_plugin_execution() {
-        let error = toml::from_str::<Config>(
-            r#"
-[plugins.kagi]
-component = "kagi.wasm"
-execution = "sequential"
-"#,
+        let error = serde_json::from_str::<Config>(
+            r#"{
+                "plugins": {
+                    "kagi": {
+                        "component": "kagi.wasm",
+                        "execution": "sequential"
+                    }
+                }
+            }"#,
         )
         .unwrap_err();
 
@@ -236,24 +230,26 @@ execution = "sequential"
 
     #[test]
     fn rejects_zero_tool_concurrency() {
-        let error = toml::from_str::<Config>(
-            r#"
-[tools]
-max-concurrency = 0
-"#,
+        let error = serde_json::from_str::<Config>(
+            r#"{
+                "tools": {
+                    "max-concurrency": 0
+                }
+            }"#,
         )
         .unwrap_err();
 
-        assert!(error.to_string().contains("max-concurrency"));
+        assert!(error.to_string().contains("nonzero usize"));
     }
 
     #[test]
     fn rejects_unknown_tool_settings() {
-        let error = toml::from_str::<Config>(
-            r#"
-[tools]
-concurrency = 8
-"#,
+        let error = serde_json::from_str::<Config>(
+            r#"{
+                "tools": {
+                    "concurrency": 8
+                }
+            }"#,
         )
         .unwrap_err();
 
@@ -261,81 +257,18 @@ concurrency = 8
     }
 
     #[test]
-    fn preserves_toml_types_and_nested_settings() {
-        let config: Config = toml::from_str(
-            r#"
-[plugins.example]
-component = "example.wasm"
-
-[plugins.example.settings]
-string = "value"
-integer = 42
-float = 1.5
-boolean = true
-array = ["one", "two"]
-
-[plugins.example.settings.nested]
-enabled = false
-"#,
-        )
-        .unwrap();
-
-        let settings = config.plugin("example").unwrap().settings();
-        assert_eq!(
-            settings,
-            serde_json::json!({
-                "string": "value",
-                "integer": 42,
-                "float": 1.5,
-                "boolean": true,
-                "array": ["one", "two"],
-                "nested": {"enabled": false}
-            })
-        );
-    }
-
-    #[test]
-    fn converts_toml_only_values_to_plain_json_strings() {
-        let config: Config = toml::from_str(
-            r#"
-[plugins.example]
-component = "example.wasm"
-
-[plugins.example.settings]
-date = 1979-05-27
-time = 07:32:00
-local-date-time = 1979-05-27T07:32:00
-offset-date-time = 1979-05-27T07:32:00Z
-not-a-number = nan
-infinity = inf
-dates = [1979-05-27, 1980-05-27]
-"#,
-        )
-        .unwrap();
-
-        let settings = config.plugin("example").unwrap().settings();
-        assert_eq!(settings["date"], "1979-05-27");
-        assert_eq!(settings["time"], "07:32:00");
-        assert_eq!(settings["local-date-time"], "1979-05-27T07:32:00");
-        assert_eq!(settings["offset-date-time"], "1979-05-27T07:32:00Z");
-        assert_eq!(settings["not-a-number"], "nan");
-        assert_eq!(settings["infinity"], "inf");
-        assert_eq!(
-            settings["dates"],
-            serde_json::json!(["1979-05-27", "1980-05-27"])
-        );
-    }
-
-    #[test]
     fn passes_api_key_env_through_untouched() {
-        let config: Config = toml::from_str(
-            r#"
-[plugins.example]
-component = "example.wasm"
-
-[plugins.example.settings]
-api-key-env = "EXAMPLE_API_KEY"
-"#,
+        let config: Config = serde_json::from_str(
+            r#"{
+                "plugins": {
+                    "example": {
+                        "component": "example.wasm",
+                        "settings": {
+                            "api-key-env": "EXAMPLE_API_KEY"
+                        }
+                    }
+                }
+            }"#,
         )
         .unwrap();
 

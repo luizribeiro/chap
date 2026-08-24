@@ -29,16 +29,19 @@ async fn approved_matching_manifest_admits_a_configured_provider() {
         ),
     )
     .unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins."example.provider"]
-component = "provider.wasm"
-
-[plugins."example.provider".settings]
-model = "example-model"
-"#,
+        r#"{
+            "plugins": {
+                "example.provider": {
+                    "component": "provider.wasm",
+                    "settings": {
+                        "model": "example-model"
+                    }
+                }
+            }
+        }"#,
     )
     .unwrap();
 
@@ -71,13 +74,16 @@ async fn classifies_a_trapping_provider_as_a_plugin_failure() {
         provider_component("example.provider"),
     )
     .unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins.example]
-component = "provider.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "example": {
+                    "component": "provider.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
     let builder = AgentBuilder::load(&config_path).unwrap();
@@ -102,16 +108,19 @@ async fn first_run_refuses_only_the_unapproved_plugin() {
         provider_component("example.provider"),
     )
     .unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins.approved]
-component = "provider.wasm"
-
-[plugins.unapproved]
-component = "provider.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "approved": {
+                    "component": "provider.wasm"
+                },
+                "unapproved": {
+                    "component": "provider.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
 
@@ -148,13 +157,16 @@ async fn approving_then_denying_toggles_plugin_admission() {
         provider_component("example.provider"),
     )
     .unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins.example]
-component = "provider.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "example": {
+                    "component": "provider.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
 
@@ -198,13 +210,16 @@ async fn nonblocking_drift_errors_are_reported_without_panicking() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
     fs::write(&component, provider_component("example.provider")).unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins.example]
-component = "provider.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "example": {
+                    "component": "provider.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
     let builder = AgentBuilder::load(&config_path).unwrap();
@@ -242,13 +257,16 @@ async fn rejects_missing_required_settings_during_prepare() {
         ),
     )
     .unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins."example.provider"]
-component = "provider.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "example.provider": {
+                    "component": "provider.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
 
@@ -275,13 +293,16 @@ async fn validates_settings_before_loading_tool_definitions() {
         ),
     )
     .unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins."example.tools"]
-component = "tools.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "example.tools": {
+                    "component": "tools.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
 
@@ -300,13 +321,16 @@ component = "tools.wasm"
 #[tokio::test]
 async fn reports_framework_schema_transport_errors() {
     let directory = test_directory();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins.example]
-component = "provider.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "example": {
+                    "component": "provider.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
 
@@ -328,13 +352,16 @@ fn discovers_a_configured_tool_plugin() {
     let directory = test_directory();
     let component = directory.join("tools.wasm");
     fs::write(&component, tool_component("example.tools")).unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins."example.tools"]
-component = "tools.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "example.tools": {
+                    "component": "tools.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
 
@@ -352,13 +379,16 @@ async fn loads_definitions_from_an_admitted_tool_plugin() {
         tool_component("example.tools"),
     )
     .unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins."example.tools"]
-component = "tools.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "example.tools": {
+                    "component": "tools.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
 
@@ -379,13 +409,16 @@ async fn loads_execution_modes_declared_by_an_admitted_tool_plugin() {
         tool_component("example.tools"),
     )
     .unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins."example.tools"]
-component = "tools.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "example.tools": {
+                    "component": "tools.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
 
@@ -412,19 +445,22 @@ async fn plugin_execution_override_makes_loaded_tools_sequential() {
         tool_component("example.tools"),
     )
     .unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[tools]
-execution = "parallel"
-
-[plugins."example.tools"]
-component = "tools.wasm"
-
-[plugins."example.tools".tools]
-execution = "sequential"
-"#,
+        r#"{
+            "tools": {
+                "execution": "parallel"
+            },
+            "plugins": {
+                "example.tools": {
+                    "component": "tools.wasm",
+                    "tools": {
+                        "execution": "sequential"
+                    }
+                }
+            }
+        }"#,
     )
     .unwrap();
 
@@ -448,16 +484,19 @@ async fn rejects_tools_config_for_a_provider_only_plugin() {
         provider_component("example.provider"),
     )
     .unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins."example.provider"]
-component = "provider.wasm"
-
-[plugins."example.provider".tools]
-execution = "sequential"
-"#,
+        r#"{
+            "plugins": {
+                "example.provider": {
+                    "component": "provider.wasm",
+                    "tools": {
+                        "execution": "sequential"
+                    }
+                }
+            }
+        }"#,
     )
     .unwrap();
 
@@ -482,13 +521,16 @@ async fn accepts_an_instance_id_that_differs_from_plugin_metadata() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
     fs::write(&component, provider_component("embedded.id")).unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins.config-id]
-component = "provider.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "config-id": {
+                    "component": "provider.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
 
@@ -507,16 +549,19 @@ async fn drops_partial_start_resources_on_a_blocking_thread() {
         provider_component("example.provider"),
     )
     .unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins.a-provider]
-component = "provider.wasm"
-
-[plugins.z-missing]
-component = "missing.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "a-provider": {
+                    "component": "provider.wasm"
+                },
+                "z-missing": {
+                    "component": "missing.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
     let (dropped, observed_drop) = mpsc::sync_channel(1);
@@ -579,13 +624,16 @@ fn unsupported_plugin_builder() -> (PathBuf, PathBuf, AgentBuilder) {
     let directory = test_directory();
     let component = directory.join("unsupported.wasm");
     fs::write(&component, unsupported_component("example.unsupported")).unwrap();
-    let config_path = directory.join("chap.toml");
+    let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
-        r#"
-[plugins.example]
-component = "unsupported.wasm"
-"#,
+        r#"{
+            "plugins": {
+                "example": {
+                    "component": "unsupported.wasm"
+                }
+            }
+        }"#,
     )
     .unwrap();
     let builder = AgentBuilder::load(&config_path).unwrap();

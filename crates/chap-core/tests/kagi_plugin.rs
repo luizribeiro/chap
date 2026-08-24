@@ -9,17 +9,20 @@ async fn migrated_kagi_component_admits_and_classifies_as_tools_only() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let component = build_kagi_component(&workspace);
     let directory = tempfile::tempdir().unwrap();
-    let config_path = directory.path().join("chap.toml");
+    let config_path = directory.path().join("chap.json");
     std::fs::write(
         &config_path,
         format!(
-            r#"
-[plugins.kagi]
-component = {component:?}
-
-[plugins.kagi.settings]
-api-key-env = "CHAP_TEST_KAGI_API_KEY"
-"#,
+            r#"{{
+                "plugins": {{
+                    "kagi": {{
+                        "component": {component:?},
+                        "settings": {{
+                            "api-key-env": "CHAP_TEST_KAGI_API_KEY"
+                        }}
+                    }}
+                }}
+            }}"#,
             component = component.display().to_string(),
         ),
     )

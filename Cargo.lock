@@ -314,7 +314,6 @@ dependencies = [
  "tempfile",
  "time",
  "tokio",
- "toml",
  "uuid",
  "wasmprinter 0.255.0",
  "wat",
