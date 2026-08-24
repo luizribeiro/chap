@@ -1,6 +1,8 @@
 use chap::provider::{Completion, CompletionRequest, ProviderError};
 use chap_plugin as chap;
 use chap_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, env, net};
+use schemars::JsonSchema;
+use serde::Deserialize;
 
 mod chat_completions;
 
@@ -27,9 +29,9 @@ impl Plugin for OpenAiCompatible {
     }
 }
 
-#[derive(chap::serde::Deserialize, chap::schemars::JsonSchema)]
-#[serde(crate = "chap::serde", rename_all = "kebab-case", deny_unknown_fields)]
-#[schemars(crate = "chap::schemars", rename_all = "kebab-case")]
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[schemars(rename_all = "kebab-case")]
 struct Settings {
     #[schemars(regex(pattern = r"\S"))]
     base_url: String,
@@ -47,9 +49,8 @@ struct Settings {
 
 /// A raw JSON object merged into the request body. The keys belong to the
 /// server, not to CHAP, and are sent unmodified.
-#[derive(Clone, Default, chap::serde::Deserialize, chap::schemars::JsonSchema)]
-#[serde(crate = "chap::serde", transparent)]
-#[schemars(crate = "chap::schemars")]
+#[derive(Clone, Default, Deserialize, JsonSchema)]
+#[serde(transparent)]
 struct BodyFragment(
     #[serde(deserialize_with = "deserialize_body_fragment")]
     serde_json::Map<String, serde_json::Value>,
@@ -65,24 +66,22 @@ fn deserialize_body_fragment<'de, D>(
     deserializer: D,
 ) -> Result<serde_json::Map<String, serde_json::Value>, D::Error>
 where
-    D: chap::serde::Deserializer<'de>,
+    D: serde::Deserializer<'de>,
 {
-    let body: serde_json::Map<String, serde_json::Value> =
-        chap::serde::Deserialize::deserialize(deserializer)?;
+    let body: serde_json::Map<String, serde_json::Value> = Deserialize::deserialize(deserializer)?;
     if let Some(field) = OWNED_REQUEST_FIELDS
         .iter()
         .find(|field| body.contains_key(**field))
     {
-        return Err(chap::serde::de::Error::custom(format!(
+        return Err(serde::de::Error::custom(format!(
             "request body fragments cannot set plugin-owned field `{field}`"
         )));
     }
     Ok(body)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, chap::serde::Deserialize, chap::schemars::JsonSchema)]
-#[serde(crate = "chap::serde", untagged, deny_unknown_fields)]
-#[schemars(crate = "chap::schemars")]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, JsonSchema)]
+#[serde(untagged, deny_unknown_fields)]
 enum ReplayReasoning {
     Mode(ReplayReasoningMode),
     Inline { inline: ReasoningDelimiters },
@@ -97,20 +96,17 @@ impl ReplayReasoning {
     }
 }
 
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, chap::serde::Deserialize, chap::schemars::JsonSchema,
-)]
-#[serde(crate = "chap::serde", rename_all = "kebab-case")]
-#[schemars(crate = "chap::schemars", rename_all = "kebab-case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
 enum ReplayReasoningMode {
     Field,
     Inline,
     Off,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, chap::serde::Deserialize, chap::schemars::JsonSchema)]
-#[serde(crate = "chap::serde", deny_unknown_fields)]
-#[schemars(crate = "chap::schemars")]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct ReasoningDelimiters {
     open: String,
     close: String,
@@ -278,7 +274,7 @@ mod tests {
 
     #[test]
     fn settings_schema_forbids_plugin_owned_fields_in_fragments() {
-        let generator = chap::schemars::generate::SchemaSettings::draft2020_12()
+        let generator = schemars::generate::SchemaSettings::draft2020_12()
             .for_deserialize()
             .into_generator();
         let schema = serde_json::to_value(generator.into_root_schema_for::<Settings>()).unwrap();
@@ -292,7 +288,7 @@ mod tests {
 
     #[test]
     fn settings_schema_constrains_reasoning_replay() {
-        let generator = chap::schemars::generate::SchemaSettings::draft2020_12()
+        let generator = schemars::generate::SchemaSettings::draft2020_12()
             .for_deserialize()
             .into_generator();
         let schema = serde_json::to_value(generator.into_root_schema_for::<Settings>()).unwrap();

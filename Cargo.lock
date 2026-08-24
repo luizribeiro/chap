@@ -338,6 +338,7 @@ name = "chap-openai-compatible"
 version = "0.1.0"
 dependencies = [
  "chap-plugin",
+ "schemars",
  "serde",
  "serde_json",
 ]
