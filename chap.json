@@ -1,0 +1,17 @@
+{
+  "plugins": {
+    "openai": {
+      "component": "./target/wasm32-wasip2/release/chap_openai_compatible.wasm",
+      "settings": {
+        "base-url": "http://127.0.0.1:8080/v1",
+        "model": "Inkling-Small-mxfp4-mtp4"
+      }
+    },
+    "kagi": {
+      "component": "./target/wasm32-wasip2/release/chap_kagi.wasm",
+      "settings": {
+        "api-key-env": "KAGI_API_KEY"
+      }
+    }
+  }
+}

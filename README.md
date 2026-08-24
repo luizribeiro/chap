@@ -24,14 +24,14 @@ cargo run
 
 ## Plugins
 
-Plugins and their configuration live in `chap.toml`. List the configured
+Plugins and their configuration live in `chap.json`. List the configured
 plugins with:
 
 ```console
 cargo run -- plugins list
 ```
 
-Use `--config /path/to/chap.toml` to read a different file.
+Use `--config /path/to/chap.json` to read a different file.
 
 The repository includes an OpenAI-compatible Chat Completions provider and Kagi
 web tools. Build their configured release components with the system Cargo:
@@ -43,45 +43,59 @@ cargo build -p chap-openai-compatible -p chap-kagi --release --target wasm32-was
 Each plugin is keyed by an operator-assigned instance id and maps directly to
 its component and settings:
 
-```toml
-[plugins.openai]
-component = "./target/wasm32-wasip2/release/chap_openai_compatible.wasm"
-
-[plugins.openai.settings]
-base-url = "http://127.0.0.1:8080/v1"
-model = "example-model"
-# Optional. Names the environment variable holding the API key. The plugin
-# declares an env.read grant for it, so the access shows up in `chap grants
-# review`; the value itself never appears in chap.toml and is never read by the
-# host. Omit it to talk to a server that takes unauthenticated requests: the
-# plugin then requests no environment grant and sends no authorization header.
-api-key-env = "OPENAI_API_KEY"
+```json
+{
+  "plugins": {
+    "openai": {
+      "component": "./target/wasm32-wasip2/release/chap_openai_compatible.wasm",
+      "settings": {
+        "base-url": "http://127.0.0.1:8080/v1",
+        "model": "example-model",
+        "api-key-env": "OPENAI_API_KEY"
+      }
+    }
+  }
+}
 ```
+
+`api-key-env` is optional and names the environment variable holding the API
+key. The plugin declares an `env.read` grant for it, so the access appears in
+`chap grants review`; the value itself never appears in `chap.json` and is never
+read by the host. If it is omitted, the plugin requests no environment grant
+and sends no authorization header.
 
 ### Tool execution
 
 Tool calls run in parallel by default. Configure the host-wide mode and
-concurrency limit in `chap.toml`:
+concurrency limit in `chap.json`:
 
-```toml
-[tools]
-execution = "parallel"
-max-concurrency = 8
+```json
+{
+  "tools": {
+    "execution": "parallel",
+    "max-concurrency": 8
+  }
+}
 ```
 
-The values shown are the defaults. `execution = "sequential"` runs every batch
+The values shown are the defaults. `"execution": "sequential"` runs every batch
 one call at a time. In parallel mode, any call whose tool resolves to sequential
 makes the whole batch sequential; otherwise `max-concurrency` limits the number
 of calls in flight. The limit must be at least 1 and has no fixed upper bound.
 
 A plugin's `tools` section can tighten all tools loaded from that plugin:
 
-```toml
-[plugins.stateful-tools]
-component = "./stateful-tools.wasm"
-
-[plugins.stateful-tools.tools]
-execution = "sequential"
+```json
+{
+  "plugins": {
+    "stateful-tools": {
+      "component": "./stateful-tools.wasm",
+      "tools": {
+        "execution": "sequential"
+      }
+    }
+  }
+}
 ```
 
 Plugin overrides are tighten-only: `sequential` can restrict a plugin, while
@@ -141,7 +155,7 @@ cargo run -- plugins check
 
 `grants review` also accepts one instance id. `grants deny <instance-id>` removes
 that instance's approval. CHAP stores approvals in `consent.json` beside the
-selected `chap.toml`; concrete scopes remain in `chap.toml`. A permission
+selected `chap.json`; concrete scopes remain in `chap.json`. A permission
 expansion, such as changing `base-url` to point at a different origin, blocks
 admission until the new manifest is reviewed and approved. Narrowing or
 removing authority is reported as non-blocking drift.
@@ -149,19 +163,19 @@ removing authority is reported as non-blocking drift.
 `plugins check` verifies that every configured component exists, has matching
 embedded plugin metadata, implements a supported role, publishes a schema that
 accepts its settings, and has sufficient consent for admission. Use
-`--config /path/to/chap.toml` with either `grants` or `plugins` to select another
+`--config /path/to/chap.json` with either `grants` or `plugins` to select another
 configuration.
 
 ### Typed plugin settings
 
 Configuration has a deliberate ownership boundary. CHAP owns `component`; a
-plugin owns its `[plugins.<id>.settings]` table. The framework-generated JSON
+plugin owns its `plugins.<id>.settings` object. The framework-generated JSON
 Schema uses that settings object as its root and does not describe the
 surrounding plugin entry.
 
-At startup, the host converts the complete settings table to one JSON object.
-Strings, numbers, booleans, arrays, and nested tables retain their corresponding
-JSON types. Secrets stay out of that object entirely: a setting such as
+At startup, the host passes the complete settings object through as JSON.
+Strings, numbers, booleans, arrays, and nested objects retain their JSON types.
+Secrets stay out of that object entirely: a setting such as
 `api-key-env` carries only the *name* of an environment variable, the plugin
 declares an `env.read` need scoped from it, and Lockgate populates the
 component's environment with just the granted variables at admission. The plugin
@@ -188,7 +202,7 @@ struct Settings {
 }
 ```
 
-An `Option<T>` field is optional in the derived schema, so a settings table that
+An `Option<T>` field is optional in the derived schema, so a settings object that
 omits it still validates. Lockgate fetches the framework schema and validates
 resolved settings before admitting the plugin, loading tool definitions, or
 using a provider. Invalid settings are reported as plugin admission errors.
