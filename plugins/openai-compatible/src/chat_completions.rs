@@ -15,7 +15,7 @@ pub(crate) fn encode_request(
     request: CompletionRequest,
 ) -> Result<String, ProviderError> {
     let (replay_reasoning, reasoning_delimiters) = settings.replay_reasoning.parts();
-    let request = Request {
+    let mut body = serde_json::to_value(Request {
         model: &settings.model,
         messages: request
             .messages
@@ -28,12 +28,8 @@ pub(crate) fn encode_request(
             .map(Tool::try_from)
             .collect::<Result<_, _>>()?,
         stream: false,
-    };
-    if settings.request_body.0.is_empty() {
-        return serde_json::to_string(&request).map_err(encoding_error);
-    }
-
-    let mut body = serde_json::to_value(request).map_err(encoding_error)?;
+    })
+    .map_err(encoding_error)?;
     let object = body
         .as_object_mut()
         .expect("an OpenAI-compatible request encodes to an object");
@@ -510,7 +506,7 @@ mod tests {
 
         assert_eq!(
             encoded,
-            r#"{"model":"example-model","messages":[{"role":"user","content":"hello"}],"stream":false}"#
+            r#"{"messages":[{"content":"hello","role":"user"}],"model":"example-model","stream":false}"#
         );
 
         let encoded: serde_json::Value = serde_json::from_str(&encoded).unwrap();
