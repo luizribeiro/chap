@@ -10,15 +10,16 @@ mod export;
 #[path = "http.rs"]
 mod http_reexport;
 mod plugin;
+#[doc(hidden)]
 #[cfg(any(feature = "provider", feature = "tools"))]
 pub mod types;
 
 pub use chap_plugin_macros::plugin;
 #[doc(hidden)]
-pub use lockgate_plugin::{self as __lockgate, __private, __wit_bindgen, alloc};
+pub use lockgate_plugin::{self as __lockgate, __private, __wit_bindgen, alloc, generate};
 pub use lockgate_plugin::{
     EnvVarName, HttpOrigin, MetadataSource, Need, Needs, NoSettings, Permission, ScopeRef,
-    ScopedPermission, SettingsPolicy, export, generate,
+    ScopedPermission, SettingsPolicy,
 };
 
 pub use cap::{env, net};
