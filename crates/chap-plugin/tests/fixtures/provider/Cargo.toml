@@ -9,3 +9,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 chap-plugin = { workspace = true, default-features = false, features = ["provider"] }
+schemars.workspace = true
+serde.workspace = true

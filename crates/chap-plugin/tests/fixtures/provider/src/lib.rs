@@ -3,9 +3,14 @@ use chap::provider::{
 };
 use chap::{MetadataSource, Needs, Plugin, Provider};
 use chap_plugin as chap;
+use schemars::JsonSchema;
+use serde::Deserialize;
 
-#[derive(chap::Settings)]
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[schemars(rename_all = "kebab-case")]
 struct Settings {
+    #[schemars(regex(pattern = r"\S"))]
     prefix: String,
 }
 

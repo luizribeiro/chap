@@ -328,6 +328,7 @@ version = "0.1.0"
 dependencies = [
  "chap-plugin",
  "html-escape",
+ "schemars",
  "serde",
  "serde_json",
  "url",
@@ -350,6 +351,8 @@ dependencies = [
  "chap-plugin-macros",
  "lockgate-http",
  "lockgate-plugin",
+ "schemars",
+ "serde",
  "serde_json",
 ]
 
@@ -357,7 +360,6 @@ dependencies = [
 name = "chap-plugin-macros"
 version = "0.1.0"
 dependencies = [
- "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -368,6 +370,8 @@ name = "chap-sdk-multi-role-fixture"
 version = "0.1.0"
 dependencies = [
  "chap-plugin",
+ "schemars",
+ "serde",
 ]
 
 [[package]]
@@ -375,6 +379,8 @@ name = "chap-sdk-provider-fixture"
 version = "0.1.0"
 dependencies = [
  "chap-plugin",
+ "schemars",
+ "serde",
 ]
 
 [[package]]

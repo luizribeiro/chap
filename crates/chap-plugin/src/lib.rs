@@ -13,7 +13,7 @@ mod plugin;
 #[cfg(any(feature = "provider", feature = "tools"))]
 pub mod types;
 
-pub use chap_plugin_macros::{Settings, plugin};
+pub use chap_plugin_macros::plugin;
 #[doc(hidden)]
 pub use lockgate_plugin::{self as __lockgate, __private, __wit_bindgen, alloc};
 pub use lockgate_plugin::{

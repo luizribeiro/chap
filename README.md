@@ -173,13 +173,14 @@ validates the settings object at prepare time against the schema derived from
 the plugin's `type Settings`. The plugin then reads the validated typed value
 through `Self::settings()`.
 
-Rust plugins derive both deserialization and schema behavior from one strict
-settings type, as the built-in [OpenAI-compatible
-provider](plugins/openai-compatible/src/lib.rs) and [Kagi
+Rust plugins depend on `serde` and `schemars` directly and derive both
+deserialization and schema behavior on one strict settings type, as the built-in
+[OpenAI-compatible provider](plugins/openai-compatible/src/lib.rs) and [Kagi
 tools](plugins/kagi/src/lib.rs) do:
 
 ```rust
-#[derive(chap::Settings)]
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Settings {
     base_url: String,
     model: String,

@@ -28,7 +28,6 @@ lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", branch 
 chap-plugin = { path = "crates/chap-plugin" }
 chap-plugin-macros = { path = "crates/chap-plugin-macros" }
 pulldown-cmark = "0.13.4"
-proc-macro-crate = "3.5.0"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
 schemars = "1.2.2"

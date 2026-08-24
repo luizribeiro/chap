@@ -1,6 +1,7 @@
 use chap::tools::ToolDefinition;
 use chap_plugin as chap;
 use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, Tools, env, net};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -157,8 +158,11 @@ fn parse_arguments<T: for<'de> Deserialize<'de>>(tool: &str, arguments: &str) ->
     serde_json::from_str(arguments).map_err(|error| format!("invalid `{tool}` arguments: {error}"))
 }
 
-#[derive(chap::Settings)]
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[schemars(rename_all = "kebab-case")]
 struct Settings {
+    #[schemars(regex(pattern = r"\S"))]
     api_key_env: String,
 }
 
