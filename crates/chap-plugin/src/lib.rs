@@ -4,10 +4,6 @@
 //! Built-in plugins reference it as `../../crates/chap-plugin/wit` and select
 //! either the `provider-plugin` or `tool-plugin` world.
 
-mod cap;
-#[cfg(feature = "http")]
-#[path = "http.rs"]
-mod http_reexport;
 mod plugin;
 mod roles;
 #[doc(hidden)]
@@ -15,16 +11,15 @@ mod roles;
 pub mod types;
 
 pub use chap_plugin_macros::plugin;
+#[cfg(feature = "http")]
+pub use lockgate_http as http;
 #[doc(hidden)]
 pub use lockgate_plugin::{self as __lockgate, __private, __wit_bindgen, alloc, generate};
 pub use lockgate_plugin::{
     EnvVarName, HttpOrigin, MetadataSource, Need, Needs, NoSettings, Permission, ScopeRef,
-    ScopedPermission, SettingsPolicy,
+    ScopedPermission, SettingsPolicy, env, net,
 };
 
-pub use cap::{env, net};
-#[cfg(feature = "http")]
-pub use http_reexport::http;
 pub use plugin::Plugin;
 #[cfg(feature = "provider")]
 pub use roles::provider;
