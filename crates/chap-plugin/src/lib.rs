@@ -7,7 +7,6 @@
 mod plugin;
 mod roles;
 #[doc(hidden)]
-#[cfg(any(feature = "provider", feature = "tools"))]
 pub mod types;
 
 pub use chap_plugin_macros::plugin;
@@ -21,7 +20,5 @@ pub use lockgate_plugin::{
 };
 
 pub use plugin::Plugin;
-#[cfg(feature = "provider")]
 pub use roles::provider;
-#[cfg(feature = "tools")]
 pub use roles::tools;

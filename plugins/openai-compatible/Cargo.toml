@@ -8,7 +8,7 @@ publish.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-chap-plugin = { workspace = true, default-features = false, features = ["provider", "http"] }
+chap-plugin = { workspace = true }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -9,7 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 html-escape = "0.2.15"
-chap-plugin = { workspace = true, default-features = false, features = ["tools", "http"] }
+chap-plugin = { workspace = true }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

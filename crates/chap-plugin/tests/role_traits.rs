@@ -1,5 +1,3 @@
-#![cfg(all(feature = "provider", feature = "tools"))]
-
 use chap_plugin::{
     Needs, NoSettings, Plugin,
     provider::{Completion, CompletionRequest, FinishReason, Provider, ProviderError},
