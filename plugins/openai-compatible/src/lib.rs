@@ -1,7 +1,6 @@
 use chap::provider::{Completion, CompletionRequest, ProviderError};
 use chap_plugin as chap;
 use chap_plugin::{MetadataSource, Needs, Plugin, Provider, ScopeRef, env, net};
-use std::ops::Deref;
 
 mod chat_completions;
 
@@ -28,24 +27,10 @@ impl Plugin for OpenAiCompatible {
     }
 }
 
-/// Settings whose cross-field rules hold.
-#[derive(chap::serde::Deserialize, chap::schemars::JsonSchema)]
-#[serde(crate = "chap::serde", try_from = "SettingsInput")]
-#[schemars(crate = "chap::schemars")]
-struct Settings(SettingsInput);
-
-impl Deref for Settings {
-    type Target = SettingsInput;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 #[derive(chap::serde::Deserialize, chap::schemars::JsonSchema)]
 #[serde(crate = "chap::serde", rename_all = "kebab-case", deny_unknown_fields)]
 #[schemars(crate = "chap::schemars", rename_all = "kebab-case")]
-struct SettingsInput {
+struct Settings {
     #[schemars(regex(pattern = r"\S"))]
     base_url: String,
     #[schemars(regex(pattern = r"\S"))]
@@ -54,24 +39,10 @@ struct SettingsInput {
     #[serde(default = "replay_reasoning_by_default")]
     #[schemars(default = "replay_reasoning_by_default")]
     replay_reasoning: ReplayReasoning,
-    reasoning_delimiters: Option<ReasoningDelimiters>,
     /// Merged into every request body verbatim for server quirks.
     #[serde(default)]
     #[schemars(extend("propertyNames" = allowed_fragment_property_names()))]
     request_body: BodyFragment,
-}
-
-impl TryFrom<SettingsInput> for Settings {
-    type Error = String;
-
-    fn try_from(settings: SettingsInput) -> Result<Self, Self::Error> {
-        if settings.reasoning_delimiters.is_some()
-            && settings.replay_reasoning != ReplayReasoning::Inline
-        {
-            return Err("reasoning-delimiters requires replay-reasoning to be `inline`".to_owned());
-        }
-        Ok(Self(settings))
-    }
 }
 
 /// A raw JSON object merged into the request body. The keys belong to the
@@ -109,18 +80,35 @@ where
     Ok(body)
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, chap::serde::Deserialize, chap::schemars::JsonSchema)]
+#[serde(crate = "chap::serde", untagged, deny_unknown_fields)]
+#[schemars(crate = "chap::schemars")]
+enum ReplayReasoning {
+    Mode(ReplayReasoningMode),
+    Inline { inline: ReasoningDelimiters },
+}
+
+impl ReplayReasoning {
+    fn parts(&self) -> (ReplayReasoningMode, Option<&ReasoningDelimiters>) {
+        match self {
+            Self::Mode(mode) => (*mode, None),
+            Self::Inline { inline } => (ReplayReasoningMode::Inline, Some(inline)),
+        }
+    }
+}
+
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, chap::serde::Deserialize, chap::schemars::JsonSchema,
 )]
 #[serde(crate = "chap::serde", rename_all = "kebab-case")]
 #[schemars(crate = "chap::schemars", rename_all = "kebab-case")]
-enum ReplayReasoning {
+enum ReplayReasoningMode {
     Field,
     Inline,
     Off,
 }
 
-#[derive(chap::serde::Deserialize, chap::schemars::JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, chap::serde::Deserialize, chap::schemars::JsonSchema)]
 #[serde(crate = "chap::serde", deny_unknown_fields)]
 #[schemars(crate = "chap::schemars")]
 struct ReasoningDelimiters {
@@ -134,7 +122,7 @@ const fn replay_reasoning_by_default() -> ReplayReasoning {
     // replay reads, and one that does not ignores it. Inline replay has no such escape hatch:
     // it lands in `content`, where every server re-tokenizes it and the model imitates the
     // shape it finds there.
-    ReplayReasoning::Field
+    ReplayReasoning::Mode(ReplayReasoningMode::Field)
 }
 
 impl Provider for OpenAiCompatible {
@@ -210,22 +198,22 @@ mod tests {
             settings_with(serde_json::json!({}))
                 .unwrap()
                 .replay_reasoning,
-            ReplayReasoning::Field
+            ReplayReasoning::Mode(ReplayReasoningMode::Field)
         );
     }
 
     #[test]
     fn parses_each_explicit_reasoning_replay_mode() {
         for (value, expected) in [
-            ("field", ReplayReasoning::Field),
-            ("inline", ReplayReasoning::Inline),
-            ("off", ReplayReasoning::Off),
+            ("field", ReplayReasoningMode::Field),
+            ("inline", ReplayReasoningMode::Inline),
+            ("off", ReplayReasoningMode::Off),
         ] {
             assert_eq!(
                 settings_with(serde_json::json!({ "replay-reasoning": value }))
                     .unwrap()
                     .replay_reasoning,
-                expected
+                ReplayReasoning::Mode(expected)
             );
         }
     }
@@ -236,17 +224,23 @@ mod tests {
     }
 
     #[test]
-    fn rejects_reasoning_delimiters_outside_inline_mode() {
-        for replay_reasoning in ["field", "off"] {
-            let error = settings_with(serde_json::json!({
-                "replay-reasoning": replay_reasoning,
-                "reasoning-delimiters": { "open": "[", "close": "]" },
-            }))
-            .err()
-            .unwrap();
+    fn parses_inline_reasoning_delimiters() {
+        let settings = settings_with(serde_json::json!({
+            "replay-reasoning": {
+                "inline": { "open": "<think>", "close": "</think>" },
+            },
+        }))
+        .unwrap();
 
-            assert!(error.to_string().contains("requires replay-reasoning"));
-        }
+        assert_eq!(
+            settings.replay_reasoning,
+            ReplayReasoning::Inline {
+                inline: ReasoningDelimiters {
+                    open: "<think>".to_owned(),
+                    close: "</think>".to_owned(),
+                },
+            }
+        );
     }
 
     #[test]
@@ -257,8 +251,7 @@ mod tests {
         ] {
             assert!(
                 settings_with(serde_json::json!({
-                    "replay-reasoning": "inline",
-                    "reasoning-delimiters": reasoning_delimiters,
+                    "replay-reasoning": { "inline": reasoning_delimiters },
                 }))
                 .is_err()
             );
@@ -294,6 +287,34 @@ mod tests {
         assert_eq!(
             schema["properties"]["request-body"]["propertyNames"],
             expected
+        );
+    }
+
+    #[test]
+    fn settings_schema_constrains_reasoning_replay() {
+        let generator = chap::schemars::generate::SchemaSettings::draft2020_12()
+            .for_deserialize()
+            .into_generator();
+        let schema = serde_json::to_value(generator.into_root_schema_for::<Settings>()).unwrap();
+
+        assert_eq!(
+            schema["$defs"]["ReplayReasoningMode"]["enum"],
+            serde_json::json!(["field", "inline", "off"])
+        );
+        assert_eq!(
+            schema["$defs"]["ReplayReasoning"]["anyOf"][1],
+            serde_json::json!({
+                "additionalProperties": false,
+                "properties": {
+                    "inline": { "$ref": "#/$defs/ReasoningDelimiters" },
+                },
+                "required": ["inline"],
+                "type": "object",
+            })
+        );
+        assert_eq!(
+            schema["$defs"]["ReasoningDelimiters"]["required"],
+            serde_json::json!(["open", "close"])
         );
     }
 }

@@ -7,25 +7,20 @@ use chap::provider::{
 use chap_plugin as chap;
 use serde::{Deserialize, Serialize};
 
-use crate::{ReasoningDelimiters, ReplayReasoning, Settings};
+use crate::{ReasoningDelimiters, ReplayReasoningMode, Settings};
 
 /// Fragments compose by adding or overriding top-level fields; they never remove or rename them.
 pub(crate) fn encode_request(
     settings: &Settings,
     request: CompletionRequest,
 ) -> Result<String, ProviderError> {
+    let (replay_reasoning, reasoning_delimiters) = settings.replay_reasoning.parts();
     let request = Request {
         model: &settings.model,
         messages: request
             .messages
             .into_iter()
-            .map(|message| {
-                Message::from_provider(
-                    message,
-                    settings.replay_reasoning,
-                    settings.reasoning_delimiters.as_ref(),
-                )
-            })
+            .map(|message| Message::from_provider(message, replay_reasoning, reasoning_delimiters))
             .collect(),
         tools: request
             .tools
@@ -89,7 +84,7 @@ enum Message {
 impl Message {
     fn from_provider(
         message: provider::Message,
-        replay_reasoning: ReplayReasoning,
+        replay_reasoning: ReplayReasoningMode,
         reasoning_delimiters: Option<&ReasoningDelimiters>,
     ) -> Self {
         match message {
@@ -115,8 +110,8 @@ impl Message {
                 let text = (!text.is_empty()).then(|| text.join("\n"));
                 let reasoning = (!reasoning.is_empty()).then(|| reasoning.join("\n"));
                 let (content, reasoning_content) = match replay_reasoning {
-                    ReplayReasoning::Field => (text, reasoning),
-                    ReplayReasoning::Inline => {
+                    ReplayReasoningMode::Field => (text, reasoning),
+                    ReplayReasoningMode::Inline => {
                         // Untagged reasoning avoids teaching the model to mimic delimiters.
                         let reasoning = reasoning.map(|reasoning| match reasoning_delimiters {
                             Some(delimiters) => {
@@ -135,7 +130,7 @@ impl Message {
                             None,
                         )
                     }
-                    ReplayReasoning::Off => (text, None),
+                    ReplayReasoningMode::Off => (text, None),
                 };
                 Self::Assistant {
                     content,
@@ -461,20 +456,12 @@ mod tests {
 
     fn encode_assistant(
         content: Vec<AssistantContent>,
-        replay_reasoning: ReplayReasoning,
-    ) -> serde_json::Value {
-        encode_assistant_with_delimiters(content, replay_reasoning, None)
-    }
-
-    fn encode_assistant_with_delimiters(
-        content: Vec<AssistantContent>,
-        replay_reasoning: ReplayReasoning,
-        reasoning_delimiters: Option<&ReasoningDelimiters>,
+        replay_reasoning: ReplayReasoningMode,
     ) -> serde_json::Value {
         serde_json::to_value(Message::from_provider(
             provider::Message::Assistant(content),
             replay_reasoning,
-            reasoning_delimiters,
+            None,
         ))
         .unwrap()
     }
@@ -586,7 +573,7 @@ mod tests {
             }),
         ]
         .into_iter()
-        .map(|message| Message::from_provider(message, ReplayReasoning::Field, None))
+        .map(|message| Message::from_provider(message, ReplayReasoningMode::Field, None))
         .collect::<Vec<_>>();
 
         let encoded = serde_json::to_value(messages).unwrap();
@@ -607,7 +594,7 @@ mod tests {
                 reasoning("think"),
                 AssistantContent::Text("answer".to_owned()),
             ],
-            ReplayReasoning::Field,
+            ReplayReasoningMode::Field,
         );
 
         assert_eq!(encoded["reasoning_content"], "think");
@@ -621,7 +608,7 @@ mod tests {
                 reasoning("think"),
                 AssistantContent::Text("answer".to_owned()),
             ],
-            ReplayReasoning::Inline,
+            ReplayReasoningMode::Inline,
         );
 
         assert_eq!(encoded["content"], "think\n\nanswer");
@@ -631,18 +618,24 @@ mod tests {
 
     #[test]
     fn inline_wraps_only_reasoning_in_operator_delimiters() {
-        let delimiters = ReasoningDelimiters {
-            open: "<think>".to_owned(),
-            close: "</think>".to_owned(),
-        };
-        let encoded = encode_assistant_with_delimiters(
-            vec![
-                reasoning("think"),
-                AssistantContent::Text("answer".to_owned()),
-            ],
-            ReplayReasoning::Inline,
-            Some(&delimiters),
-        );
+        let settings = settings(serde_json::json!({
+            "replay-reasoning": {
+                "inline": { "open": "<think>", "close": "</think>" },
+            },
+        }));
+        let encoded = encode_request(
+            &settings,
+            CompletionRequest {
+                messages: vec![provider::Message::Assistant(vec![
+                    reasoning("think"),
+                    AssistantContent::Text("answer".to_owned()),
+                ])],
+                tools: vec![],
+            },
+        )
+        .unwrap();
+        let encoded: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        let encoded = &encoded["messages"][0];
 
         assert_eq!(encoded["content"], "<think>think</think>\n\nanswer");
         assert!(encoded.get("reasoning_content").is_none());
@@ -650,7 +643,7 @@ mod tests {
 
     #[test]
     fn off_omits_reasoning_from_the_message() {
-        let encoded = encode_assistant(vec![reasoning("think")], ReplayReasoning::Off);
+        let encoded = encode_assistant(vec![reasoning("think")], ReplayReasoningMode::Off);
 
         assert!(encoded.get("reasoning_content").is_none());
         assert!(encoded.get("content").is_none());
@@ -660,7 +653,7 @@ mod tests {
     fn joins_multiple_reasoning_parts_inline() {
         let encoded = encode_assistant(
             vec![reasoning("first"), reasoning("second")],
-            ReplayReasoning::Inline,
+            ReplayReasoningMode::Inline,
         );
 
         assert_eq!(encoded["content"], "first\nsecond");
@@ -669,7 +662,7 @@ mod tests {
 
     #[test]
     fn inline_preserves_reasoning_without_text() {
-        let encoded = encode_assistant(vec![reasoning("think")], ReplayReasoning::Inline);
+        let encoded = encode_assistant(vec![reasoning("think")], ReplayReasoningMode::Inline);
 
         assert_eq!(encoded["content"], "think");
         assert!(encoded.get("reasoning_content").is_none());
@@ -678,9 +671,9 @@ mod tests {
     #[test]
     fn preserves_text_and_tool_calls_in_every_reasoning_replay_mode() {
         for (replay_reasoning, expected_content) in [
-            (ReplayReasoning::Field, "hello"),
-            (ReplayReasoning::Inline, "think\n\nhello"),
-            (ReplayReasoning::Off, "hello"),
+            (ReplayReasoningMode::Field, "hello"),
+            (ReplayReasoningMode::Inline, "think\n\nhello"),
+            (ReplayReasoningMode::Off, "hello"),
         ] {
             let encoded = encode_assistant(
                 vec![
@@ -699,9 +692,9 @@ mod tests {
     #[test]
     fn omits_empty_reasoning_in_every_replay_mode() {
         for replay_reasoning in [
-            ReplayReasoning::Field,
-            ReplayReasoning::Inline,
-            ReplayReasoning::Off,
+            ReplayReasoningMode::Field,
+            ReplayReasoningMode::Inline,
+            ReplayReasoningMode::Off,
         ] {
             let encoded = encode_assistant(vec![reasoning("")], replay_reasoning);
 
