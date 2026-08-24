@@ -13,19 +13,10 @@ pub(crate) struct Settings {
     #[schemars(default = "replay_reasoning_by_default")]
     pub(crate) replay_reasoning: ReplayReasoning,
     /// Merged into every request body verbatim for server quirks.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_body_fragment")]
     #[schemars(extend("propertyNames" = allowed_fragment_property_names()))]
-    pub(crate) request_body: BodyFragment,
+    pub(crate) request_body: serde_json::Map<String, serde_json::Value>,
 }
-
-/// A raw JSON object merged into the request body. The keys belong to the
-/// server, not to CHAP, and are sent unmodified.
-#[derive(Clone, Default, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub(crate) struct BodyFragment(
-    #[serde(deserialize_with = "deserialize_body_fragment")]
-    pub(crate)  serde_json::Map<String, serde_json::Value>,
-);
 
 const OWNED_REQUEST_FIELDS: [&str; 4] = ["model", "messages", "tools", "stream"];
 
@@ -178,7 +169,7 @@ mod tests {
     fn defaults_to_an_empty_request_body() {
         let settings = settings_with(serde_json::json!({})).unwrap();
 
-        assert!(settings.request_body.0.is_empty());
+        assert!(settings.request_body.is_empty());
     }
 
     #[test]

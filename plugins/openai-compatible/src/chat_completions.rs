@@ -32,7 +32,7 @@ pub(crate) fn encode_request(
     let object = body
         .as_object_mut()
         .expect("an OpenAI-compatible request encodes to an object");
-    object.extend(settings.request_body.0.clone());
+    object.extend(settings.request_body.clone());
     serde_json::to_string(&body).map_err(encoding_error)
 }
 
