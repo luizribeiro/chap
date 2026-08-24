@@ -1,5 +1,5 @@
 use chap_plugin::tools::{ToolDefinition, Tools};
-use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, env, net};
+use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, capabilities};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -26,8 +26,8 @@ impl Plugin for Kagi {
     const REPOSITORY: MetadataSource = MetadataSource::Absent;
     const HOMEPAGE: MetadataSource = MetadataSource::Absent;
     const NEEDS: Needs = Needs::required(&[
-        net::EGRESS.need(&[ScopeRef::literal("https://kagi.com")]),
-        env::READ.need(&[ScopeRef::setting("/api_key_env")]),
+        capabilities::net::EGRESS.need(&[ScopeRef::literal("https://kagi.com")]),
+        capabilities::env::READ.need(&[ScopeRef::setting("/api_key_env")]),
     ]);
     type Settings = Settings;
 

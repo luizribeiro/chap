@@ -16,8 +16,13 @@ pub use lockgate_http as http;
 pub use lockgate_plugin::{self as __lockgate, __private, __wit_bindgen, alloc, generate};
 pub use lockgate_plugin::{
     EnvVarName, HttpOrigin, MetadataSource, Need, Needs, NoSettings, Permission, ScopeRef,
-    ScopedPermission, SettingsPolicy, env, net,
+    ScopedPermission, SettingsPolicy,
 };
+
+/// Capability permissions a plugin can request through [`Plugin::NEEDS`].
+pub mod capabilities {
+    pub use lockgate_plugin::{env, net};
+}
 
 pub use plugin::Plugin;
 pub use roles::provider;

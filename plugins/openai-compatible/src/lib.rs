@@ -1,5 +1,5 @@
 use chap_plugin::provider::{Completion, CompletionRequest, Provider, ProviderError};
-use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, env, net};
+use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, capabilities};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -19,8 +19,9 @@ impl Plugin for OpenAiCompatible {
     const LICENSE: MetadataSource = MetadataSource::Absent;
     const REPOSITORY: MetadataSource = MetadataSource::Absent;
     const HOMEPAGE: MetadataSource = MetadataSource::Absent;
-    const NEEDS: Needs = Needs::required(&[net::EGRESS.need(&[ScopeRef::setting("/base_url")])])
-        .optional(&[env::READ.need(&[ScopeRef::setting("/api_key_env")])]);
+    const NEEDS: Needs =
+        Needs::required(&[capabilities::net::EGRESS.need(&[ScopeRef::setting("/base_url")])])
+            .optional(&[capabilities::env::READ.need(&[ScopeRef::setting("/api_key_env")])]);
     type Settings = Settings;
 
     fn new(settings: Self::Settings) -> Self {
