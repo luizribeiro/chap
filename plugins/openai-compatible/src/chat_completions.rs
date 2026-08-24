@@ -6,7 +6,7 @@ use chap_plugin::provider::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{ReasoningDelimiters, ReplayReasoningMode, Settings};
+use crate::settings::{ReasoningDelimiters, ReplayReasoningMode, Settings};
 
 /// Fragments compose by adding or overriding top-level fields; they never remove or rename them.
 pub(crate) fn encode_request(
