@@ -1,6 +1,6 @@
 use super::{
     super::{
-        AgentBuilder,
+        AgentBuilder, PLUGIN_ADMISSION_DEADLINE, PLUGIN_FUEL_PER_CALL, plugin_admission_context,
         provider::{CompletionBackend, FinishReason, PluginBackend},
     },
     fixtures::{
@@ -11,13 +11,27 @@ use super::{
     },
 };
 use crate::{ExecutionMode, ProviderError, SessionOptions, Tool, ToolDefinition};
-use lockgate::{ConsentRequired, DriftReport, Role};
+use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role};
 use std::{
     fs,
     path::{Path, PathBuf},
     sync::mpsc,
     time::Duration,
 };
+
+#[test]
+fn plugin_admission_context_has_expected_deadline() {
+    let context = plugin_admission_context();
+
+    assert_eq!(context.data, ());
+    assert_eq!(
+        context.budget,
+        BudgetClass::Bounded {
+            fuel: PLUGIN_FUEL_PER_CALL,
+            deadline: Some(PLUGIN_ADMISSION_DEADLINE),
+        }
+    );
+}
 
 #[tokio::test]
 async fn approved_matching_manifest_admits_a_configured_provider() {

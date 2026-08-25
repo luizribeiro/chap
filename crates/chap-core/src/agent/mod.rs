@@ -20,6 +20,7 @@ mod provider;
 mod turn;
 
 const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
+const PLUGIN_ADMISSION_DEADLINE: Duration = Duration::from_secs(30);
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
 type InnerHost = Host<()>;
@@ -376,7 +377,7 @@ impl AgentBuilder {
                 prepared,
                 acceptance,
                 RuntimeLimits::default(),
-                InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL),
+                plugin_admission_context(),
             )
             .await
             .map_err(|error| Self::load_error(id, &path, error))?;
@@ -518,6 +519,10 @@ impl AgentBuilder {
             )),
         }
     }
+}
+
+fn plugin_admission_context() -> InvocationCtx<()> {
+    InvocationCtx::bounded_with_deadline(PLUGIN_FUEL_PER_CALL, PLUGIN_ADMISSION_DEADLINE)
 }
 
 fn supported_roles(interfaces: &[String]) -> Vec<&'static str> {
