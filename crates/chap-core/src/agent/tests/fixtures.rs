@@ -110,7 +110,7 @@ fn plugin_component(
     role_call: RoleCall,
 ) -> Vec<u8> {
     let mut resolve = Resolve::new();
-    let wit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../chap-plugin/wit");
+    let wit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../chap-wit/wit");
     resolve.push_path(wit).unwrap();
     let clock_import = if role_call == RoleCall::Hang {
         resolve

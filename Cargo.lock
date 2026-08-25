@@ -359,6 +359,7 @@ dependencies = [
 name = "chap-plugin-macros"
 version = "0.1.0"
 dependencies = [
+ "chap-wit",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -384,6 +385,10 @@ dependencies = [
 
 [[package]]
 name = "chap-test-all"
+version = "0.1.0"
+
+[[package]]
+name = "chap-wit"
 version = "0.1.0"
 
 [[package]]

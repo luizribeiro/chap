@@ -1,4 +1,4 @@
-use crate::{compose, roles};
+use crate::roles;
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::BTreeSet;
@@ -36,8 +36,9 @@ pub(crate) fn expand(input: PluginInput) -> syn::Result<TokenStream> {
         })
         .collect::<syn::Result<Vec<_>>>()?;
     let plugin = input.plugin;
-    let inline = LitStr::new(&compose::world(&roles), proc_macro2::Span::call_site());
-    let world = LitStr::new(compose::WORLD, proc_macro2::Span::call_site());
+    let wit_roles = roles.iter().map(|role| role.wit).collect::<Vec<_>>();
+    let inline = LitStr::new(&chap_wit::world(&wit_roles), proc_macro2::Span::call_site());
+    let world = LitStr::new(chap_wit::WORLD, proc_macro2::Span::call_site());
     let bridges = roles.iter().map(|role| (role.bridge)(&plugin));
     let test_references = roles.iter().map(|role| (role.test_reference)(&plugin));
 

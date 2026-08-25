@@ -1,8 +1,7 @@
 //! Guest authoring facade for CHAP plugins.
 //!
-//! The shared `chap:agent` WIT package lives in this crate's `wit` directory.
-//! Built-in plugins reference it as `../../crates/chap-plugin/wit` and select
-//! either the `provider-plugin` or `tool-plugin` world.
+//! The shared `chap:agent` WIT package and plugin-world composition live in the
+//! `chap-wit` crate.
 
 mod plugin;
 mod roles;

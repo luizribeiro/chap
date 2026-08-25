@@ -3,38 +3,32 @@ use quote::quote;
 use syn::Ident;
 
 pub(crate) struct Role {
-    pub(crate) rust_name: &'static str,
-    pub(crate) interface: &'static str,
-    pub(crate) wit: &'static str,
+    pub(crate) wit: &'static chap_wit::Role,
     pub(crate) bridge: fn(&Ident) -> TokenStream,
     pub(crate) test_reference: fn(&Ident) -> TokenStream,
 }
 
-const PROVIDER_WIT: &str = include_str!("../../chap-plugin/wit/provider.wit");
-const TOOLS_WIT: &str = include_str!("../../chap-plugin/wit/tools.wit");
-
 const ROLES: &[Role] = &[
     Role {
-        rust_name: "Provider",
-        interface: "provider",
-        wit: PROVIDER_WIT,
+        wit: &chap_wit::PROVIDER,
         bridge: provider_bridge,
         test_reference: provider_test_reference,
     },
     Role {
-        rust_name: "Tools",
-        interface: "tools",
-        wit: TOOLS_WIT,
+        wit: &chap_wit::TOOLS,
         bridge: tools_bridge,
         test_reference: tools_test_reference,
     },
 ];
 
 pub(crate) fn resolve(name: &Ident) -> syn::Result<&'static Role> {
-    ROLES
+    let wit = chap_wit::resolve(&name.to_string()).ok_or_else(|| {
+        syn::Error::new(name.span(), format!("unknown CHAP plugin role `{name}`"))
+    })?;
+    Ok(ROLES
         .iter()
-        .find(|role| name == role.rust_name)
-        .ok_or_else(|| syn::Error::new(name.span(), format!("unknown CHAP plugin role `{name}`")))
+        .find(|role| std::ptr::eq(role.wit, wit))
+        .expect("every WIT role must have a code generator"))
 }
 
 fn provider_bridge(plugin: &Ident) -> TokenStream {

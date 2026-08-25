@@ -5,6 +5,7 @@ members = [
     "crates/chap-plugin",
     "crates/chap-plugin-macros",
     "crates/chap-test-all",
+    "crates/chap-wit",
     "crates/chap-plugin/tests/fixtures/multi-role",
     "crates/chap-plugin/tests/fixtures/provider",
     "plugins/kagi",
@@ -27,6 +28,7 @@ lockgate-http = { git = "https://github.com/luizribeiro/lockgate.git", branch = 
 lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", branch = "main", default-features = false }
 chap-plugin = { path = "crates/chap-plugin" }
 chap-plugin-macros = { path = "crates/chap-plugin-macros" }
+chap-wit = { path = "crates/chap-wit" }
 pulldown-cmark = "0.13.4"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"

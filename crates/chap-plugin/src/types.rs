@@ -4,7 +4,7 @@ mod bindings {
     use lockgate_plugin::__wit_bindgen as wit_bindgen;
 
     lockgate_plugin::__wit_bindgen::generate!({
-        path: "wit",
+        path: "../chap-wit/wit",
         world: "sdk-types",
     });
 }

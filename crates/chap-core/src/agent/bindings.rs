@@ -1,4 +1,4 @@
 lockgate::host_bindings!({
-    path: "../chap-plugin/wit",
+    path: "../chap-wit/wit",
     world: "host",
 });
