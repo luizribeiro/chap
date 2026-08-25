@@ -4,16 +4,6 @@ world sdk-types {
   import types;
 }
 
-world provider-plugin {
-  export types;
-  export provider;
-}
-
-world tool-plugin {
-  export types;
-  export tools;
-}
-
 world host {
   export types;
   export provider;

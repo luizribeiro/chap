@@ -1,4 +1,5 @@
-use std::{fs, path::Path};
+use chap_wit::{PROVIDER, Role, TOOLS};
+use std::fs;
 use wit_component::{ComponentEncoder, StringEncoding, dummy_module, embed_component_metadata};
 use wit_parser::{ManglingAndAbi, Resolve};
 
@@ -10,59 +11,44 @@ enum RoleCall {
 }
 
 pub(super) fn provider_component(id: &str) -> Vec<u8> {
-    plugin_component(
-        id,
-        "provider-plugin",
-        Some(permissive_schema()),
-        RoleCall::Trap,
-    )
+    plugin_component(id, &[&PROVIDER], Some(permissive_schema()), RoleCall::Trap)
 }
 
 pub(super) fn fast_provider_component(id: &str) -> Vec<u8> {
     plugin_component(
         id,
-        "provider-plugin",
+        &[&PROVIDER],
         Some(permissive_schema()),
         RoleCall::Succeed,
     )
 }
 
 pub(super) fn hanging_provider_component(id: &str) -> Vec<u8> {
-    plugin_component(
-        id,
-        "provider-plugin",
-        Some(permissive_schema()),
-        RoleCall::Hang,
-    )
+    plugin_component(id, &[&PROVIDER], Some(permissive_schema()), RoleCall::Hang)
 }
 
 pub(super) fn provider_component_with_schema(id: &str, schema: &str) -> Vec<u8> {
-    plugin_component(id, "provider-plugin", Some(schema), RoleCall::Trap)
+    plugin_component(id, &[&PROVIDER], Some(schema), RoleCall::Trap)
 }
 
 pub(super) fn provider_component_with_trapping_schema(id: &str) -> Vec<u8> {
-    plugin_component(id, "provider-plugin", None, RoleCall::Trap)
+    plugin_component(id, &[&PROVIDER], None, RoleCall::Trap)
 }
 
 pub(super) fn tool_component(id: &str) -> Vec<u8> {
-    plugin_component(id, "tool-plugin", Some(permissive_schema()), RoleCall::Trap)
+    plugin_component(id, &[&TOOLS], Some(permissive_schema()), RoleCall::Trap)
 }
 
 pub(super) fn fast_tool_component(id: &str) -> Vec<u8> {
-    plugin_component(
-        id,
-        "tool-plugin",
-        Some(permissive_schema()),
-        RoleCall::Succeed,
-    )
+    plugin_component(id, &[&TOOLS], Some(permissive_schema()), RoleCall::Succeed)
 }
 
 pub(super) fn hanging_tool_component(id: &str) -> Vec<u8> {
-    plugin_component(id, "tool-plugin", Some(permissive_schema()), RoleCall::Hang)
+    plugin_component(id, &[&TOOLS], Some(permissive_schema()), RoleCall::Hang)
 }
 
 pub(super) fn tool_component_with_schema(id: &str, schema: &str) -> Vec<u8> {
-    plugin_component(id, "tool-plugin", Some(schema), RoleCall::Trap)
+    plugin_component(id, &[&TOOLS], Some(schema), RoleCall::Trap)
 }
 
 pub(super) fn unsupported_component(id: &str) -> Vec<u8> {
@@ -105,13 +91,14 @@ world fixture {
 
 fn plugin_component(
     id: &str,
-    world_name: &str,
+    roles: &[&Role],
     schema: Option<&str>,
     role_call: RoleCall,
 ) -> Vec<u8> {
     let mut resolve = Resolve::new();
-    let wit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../chap-wit/wit");
-    resolve.push_path(wit).unwrap();
+    resolve
+        .push_str("chap-plugin.wit", &chap_wit::world(roles))
+        .unwrap();
     let clock_import = if role_call == RoleCall::Hang {
         resolve
             .push_str(
@@ -157,6 +144,7 @@ interface schema {
 "#,
         )
         .unwrap();
+    let world_name = chap_wit::WORLD;
     let wrapper = format!(
         r#"
 package chap:test;
@@ -172,13 +160,7 @@ world fixture {{
     let world = resolve.packages[package].worlds["fixture"];
     let mut module = dummy_module(&resolve, world, ManglingAndAbi::Standard32);
     if let Some(schema) = schema {
-        module = module_with_schema(
-            &module,
-            schema,
-            true,
-            world_name == "tool-plugin",
-            role_call,
-        );
+        module = module_with_schema(&module, schema, true, roles.contains(&&TOOLS), role_call);
     }
     embed_component_metadata(&mut module, &resolve, world, StringEncoding::UTF8).unwrap();
     let bytes = ComponentEncoder::default()
