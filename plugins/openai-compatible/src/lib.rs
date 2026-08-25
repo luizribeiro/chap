@@ -4,7 +4,7 @@ use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, capabilities};
 mod chat_completions;
 mod settings;
 
-use settings::Settings;
+use settings::{Settings, http_client};
 
 struct OpenAiCompatible {
     settings: Settings,
@@ -43,7 +43,7 @@ impl Provider for OpenAiCompatible {
             .as_deref()
             .map(read_environment_variable)
             .transpose()?;
-        let response = chap_plugin::http::Client::new()
+        let response = http_client(settings)
             .post(&url)
             .header("content-type", "application/json")
             .map_err(|error| ProviderError::Other(error.to_string()))?

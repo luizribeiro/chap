@@ -1,3 +1,5 @@
+use chap_plugin::http::Client;
+use core::{num::NonZeroU64, time::Duration};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -9,6 +11,8 @@ pub(crate) struct Settings {
     #[schemars(regex(pattern = r"\S"))]
     pub(crate) model: String,
     pub(crate) api_key_env: Option<String>,
+    #[serde(default)]
+    pub(crate) timeouts: Timeouts,
     #[serde(default = "replay_reasoning_by_default")]
     #[schemars(default = "replay_reasoning_by_default")]
     pub(crate) replay_reasoning: ReplayReasoning,
@@ -16,6 +20,41 @@ pub(crate) struct Settings {
     #[serde(default, deserialize_with = "deserialize_body_fragment")]
     #[schemars(extend("propertyNames" = allowed_fragment_property_names()))]
     pub(crate) request_body: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Timeouts {
+    connect_seconds: Option<NonZeroU64>,
+    first_byte_seconds: Option<NonZeroU64>,
+    between_bytes_seconds: Option<NonZeroU64>,
+}
+
+type ConfigureTimeout = fn(Client, Duration) -> Client;
+
+pub(crate) fn http_client(settings: &Settings) -> Client {
+    let timeouts: [(Option<NonZeroU64>, ConfigureTimeout); 3] = [
+        (
+            settings.timeouts.connect_seconds,
+            Client::with_connect_timeout,
+        ),
+        (
+            settings.timeouts.first_byte_seconds,
+            Client::with_first_byte_timeout,
+        ),
+        (
+            settings.timeouts.between_bytes_seconds,
+            Client::with_between_bytes_timeout,
+        ),
+    ];
+
+    timeouts
+        .into_iter()
+        .fold(Client::new(), |client, (seconds, configure)| {
+            seconds.map_or(client, |seconds| {
+                configure(client, Duration::from_secs(seconds.get()))
+            })
+        })
 }
 
 const OWNED_REQUEST_FIELDS: [&str; 4] = ["model", "messages", "tools", "stream"];
@@ -97,6 +136,114 @@ mod tests {
             .unwrap()
             .extend(extra.as_object().unwrap().clone());
         serde_json::from_value(value)
+    }
+
+    fn assert_client_timeouts(settings: &Settings, expected: [Option<u64>; 3]) {
+        let client = format!("{:?}", http_client(settings));
+        for (name, seconds) in [
+            "connect_timeout",
+            "first_byte_timeout",
+            "between_bytes_timeout",
+        ]
+        .into_iter()
+        .zip(expected)
+        {
+            let expected = format!("{name}: {:?}", seconds.map(Duration::from_secs));
+            assert!(client.contains(&expected), "{client}");
+        }
+    }
+
+    fn settings_schema() -> serde_json::Value {
+        let generator = schemars::generate::SchemaSettings::draft2020_12()
+            .for_deserialize()
+            .into_generator();
+        serde_json::to_value(generator.into_root_schema_for::<Settings>()).unwrap()
+    }
+
+    #[test]
+    fn defaults_transport_timeouts_to_unset() {
+        let settings = settings_with(serde_json::json!({})).unwrap();
+
+        assert_client_timeouts(&settings, [None, None, None]);
+    }
+
+    #[test]
+    fn parses_each_transport_timeout() {
+        for (timeouts, expected) in [
+            (
+                serde_json::json!({ "connect_seconds": 11 }),
+                [Some(11), None, None],
+            ),
+            (
+                serde_json::json!({ "first_byte_seconds": 22 }),
+                [None, Some(22), None],
+            ),
+            (
+                serde_json::json!({ "between_bytes_seconds": 33 }),
+                [None, None, Some(33)],
+            ),
+        ] {
+            let settings = settings_with(serde_json::json!({ "timeouts": timeouts })).unwrap();
+
+            assert_client_timeouts(&settings, expected);
+        }
+    }
+
+    #[test]
+    fn parses_all_transport_timeouts() {
+        let settings = settings_with(serde_json::json!({
+            "timeouts": {
+                "connect_seconds": 10,
+                "first_byte_seconds": 60,
+                "between_bytes_seconds": 30,
+            },
+        }))
+        .unwrap();
+
+        assert_client_timeouts(&settings, [Some(10), Some(60), Some(30)]);
+    }
+
+    #[test]
+    fn rejects_zero_transport_timeouts() {
+        for timeouts in [
+            serde_json::json!({ "connect_seconds": 0 }),
+            serde_json::json!({ "first_byte_seconds": 0 }),
+            serde_json::json!({ "between_bytes_seconds": 0 }),
+        ] {
+            assert!(settings_with(serde_json::json!({ "timeouts": timeouts })).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_transport_timeout() {
+        assert!(
+            settings_with(serde_json::json!({
+                "timeouts": { "total_seconds": 90 },
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn settings_schema_constrains_transport_timeouts() {
+        let schema = settings_schema();
+        let timeouts = &schema["$defs"]["Timeouts"];
+
+        assert_eq!(timeouts["additionalProperties"], false);
+        assert!(timeouts.get("required").is_none());
+        for field in [
+            "connect_seconds",
+            "first_byte_seconds",
+            "between_bytes_seconds",
+        ] {
+            assert_eq!(timeouts["properties"][field]["minimum"], 1);
+        }
+        assert!(
+            !schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("timeouts"))
+        );
     }
 
     #[test]
@@ -185,10 +332,7 @@ mod tests {
 
     #[test]
     fn settings_schema_forbids_plugin_owned_fields_in_fragments() {
-        let generator = schemars::generate::SchemaSettings::draft2020_12()
-            .for_deserialize()
-            .into_generator();
-        let schema = serde_json::to_value(generator.into_root_schema_for::<Settings>()).unwrap();
+        let schema = settings_schema();
         let expected = serde_json::json!({ "not": { "enum": OWNED_REQUEST_FIELDS } });
 
         assert_eq!(
@@ -199,10 +343,7 @@ mod tests {
 
     #[test]
     fn settings_schema_constrains_reasoning_replay() {
-        let generator = schemars::generate::SchemaSettings::draft2020_12()
-            .for_deserialize()
-            .into_generator();
-        let schema = serde_json::to_value(generator.into_root_schema_for::<Settings>()).unwrap();
+        let schema = settings_schema();
 
         assert_eq!(
             schema["$defs"]["ReplayReasoningMode"]["enum"],

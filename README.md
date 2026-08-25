@@ -51,7 +51,12 @@ its component and settings:
       "settings": {
         "base_url": "http://127.0.0.1:8080/v1",
         "model": "example-model",
-        "api_key_env": "OPENAI_API_KEY"
+        "api_key_env": "OPENAI_API_KEY",
+        "timeouts": {
+          "connect_seconds": 10,
+          "first_byte_seconds": 60,
+          "between_bytes_seconds": 30
+        }
       }
     }
   }
@@ -63,6 +68,13 @@ key. The plugin declares an `env.read` grant for it, so the access appears in
 `chap grants review`; the value itself never appears in `chap.json` and is never
 read by the host. If it is omitted, the plugin requests no environment grant
 and sends no authorization header.
+
+The optional `timeouts` object configures the HTTP transport in whole, nonzero
+seconds. Each timeout is independently optional: `connect_seconds` limits
+connection establishment, `first_byte_seconds` limits the wait for the first
+response byte, and `between_bytes_seconds` limits stalls between later response
+body chunks. All three are unset when omitted. They provide specific transport
+errors within the provider call's separate, outer wall-clock deadline.
 
 ### Plugin call deadlines
 
