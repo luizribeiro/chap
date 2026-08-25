@@ -1580,7 +1580,7 @@ dependencies = [
 [[package]]
 name = "lockgate"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#99e11ae8f4d27c6575505aa19faece309acad93e"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#91f281de85e47cd6c0b15a87010d8374f6b95577"
 dependencies = [
  "anyhow",
  "http",
@@ -1602,20 +1602,21 @@ dependencies = [
 [[package]]
 name = "lockgate-http"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#99e11ae8f4d27c6575505aa19faece309acad93e"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#91f281de85e47cd6c0b15a87010d8374f6b95577"
 dependencies = [
+ "bytes",
  "http",
  "http-body-util",
  "serde",
  "serde_json",
- "wasi-fetch",
+ "wasip3",
  "wit-bindgen",
 ]
 
 [[package]]
 name = "lockgate-macros"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#99e11ae8f4d27c6575505aa19faece309acad93e"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#91f281de85e47cd6c0b15a87010d8374f6b95577"
 dependencies = [
  "heck",
  "proc-macro-crate",
@@ -1629,7 +1630,7 @@ dependencies = [
 [[package]]
 name = "lockgate-plugin"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#99e11ae8f4d27c6575505aa19faece309acad93e"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#91f281de85e47cd6c0b15a87010d8374f6b95577"
 dependencies = [
  "lockgate-plugin-macros",
  "lockgate-policy",
@@ -1642,7 +1643,7 @@ dependencies = [
 [[package]]
 name = "lockgate-plugin-macros"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#99e11ae8f4d27c6575505aa19faece309acad93e"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#91f281de85e47cd6c0b15a87010d8374f6b95577"
 dependencies = [
  "lockgate-schema",
  "proc-macro-crate",
@@ -1656,7 +1657,7 @@ dependencies = [
 [[package]]
 name = "lockgate-policy"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#99e11ae8f4d27c6575505aa19faece309acad93e"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#91f281de85e47cd6c0b15a87010d8374f6b95577"
 dependencies = [
  "lockgate-macros",
  "url",
@@ -1665,7 +1666,7 @@ dependencies = [
 [[package]]
 name = "lockgate-schema"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#99e11ae8f4d27c6575505aa19faece309acad93e"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#91f281de85e47cd6c0b15a87010d8374f6b95577"
 dependencies = [
  "serde",
  "serde_json",
@@ -2978,22 +2979,6 @@ name = "wasi"
 version = "0.11.1+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
-
-[[package]]
-name = "wasi-fetch"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "292c62fe37626bb3c2b43d41eaa2bcbc209b14855d5a62dedf010634121fb410"
-dependencies = [
- "bytes",
- "futures",
- "http",
- "http-body",
- "serde",
- "serde_json",
- "url",
- "wasip3",
-]
 
 [[package]]
 name = "wasip2"
