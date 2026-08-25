@@ -289,6 +289,7 @@ impl AgentBuilder {
             resources.builder.as_mut().expect("uninitialized host"),
             config,
             consent,
+            plugin_call_deadlines,
         )
         .await?;
         let builder = resources.builder.take().expect("uninitialized host");
@@ -322,12 +323,15 @@ impl AgentBuilder {
         builder: &mut HostBuilder<()>,
         config: &Config,
         consent: &ConsentStore,
+        plugin_call_deadlines: PluginCallDeadlines,
     ) -> Result<(BTreeMap<String, PluginHandle>, BTreeMap<String, String>), String> {
         let mut plugins = BTreeMap::new();
         let mut plugin_errors = BTreeMap::new();
 
         for (id, plugin) in config.plugins() {
-            match Self::load_plugin(builder, config, consent, id, plugin).await? {
+            match Self::load_plugin(builder, config, consent, id, plugin, plugin_call_deadlines)
+                .await?
+            {
                 PluginLoad::Admitted(admitted) => {
                     plugins.insert(id.to_owned(), admitted);
                 }
@@ -346,6 +350,7 @@ impl AgentBuilder {
         consent: &ConsentStore,
         id: &str,
         plugin: &ConfiguredPlugin,
+        plugin_call_deadlines: PluginCallDeadlines,
     ) -> Result<PluginLoad, String> {
         let path = config.component_path(plugin);
         let prepared = Self::prepare_plugin(builder, config, id, plugin).await?;
@@ -376,7 +381,7 @@ impl AgentBuilder {
             .admit(
                 prepared,
                 acceptance,
-                RuntimeLimits::default(),
+                runtime_limits(plugin_call_deadlines),
                 plugin_admission_context(),
             )
             .await
@@ -523,6 +528,13 @@ impl AgentBuilder {
 
 fn plugin_admission_context() -> InvocationCtx<()> {
     InvocationCtx::bounded_with_deadline(PLUGIN_FUEL_PER_CALL, PLUGIN_ADMISSION_DEADLINE)
+}
+
+fn runtime_limits(deadlines: PluginCallDeadlines) -> RuntimeLimits {
+    RuntimeLimits {
+        http_request_timeout_ceiling: Some(deadlines.provider.max(deadlines.tool)),
+        ..RuntimeLimits::default()
+    }
 }
 
 fn supported_roles(interfaces: &[String]) -> Vec<&'static str> {

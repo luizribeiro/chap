@@ -1,7 +1,9 @@
 use super::{
     super::{
-        AgentBuilder, PLUGIN_ADMISSION_DEADLINE, PLUGIN_FUEL_PER_CALL, plugin_admission_context,
+        AgentBuilder, PLUGIN_ADMISSION_DEADLINE, PLUGIN_FUEL_PER_CALL, PluginCallDeadlines,
+        plugin_admission_context,
         provider::{CompletionBackend, FinishReason, PluginBackend},
+        runtime_limits,
     },
     fixtures::{
         fast_provider_component, fast_tool_component, hanging_provider_component,
@@ -11,7 +13,7 @@ use super::{
     },
 };
 use crate::{ExecutionMode, ProviderError, SessionOptions, Tool, ToolDefinition};
-use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role};
+use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role, RuntimeLimits};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -31,6 +33,40 @@ fn plugin_admission_context_has_expected_deadline() {
             deadline: Some(PLUGIN_ADMISSION_DEADLINE),
         }
     );
+}
+
+#[test]
+fn http_timeout_ceiling_uses_larger_provider_deadline() {
+    let provider = Duration::from_secs(45);
+    let tool = Duration::from_secs(15);
+
+    assert_default_runtime_limits_except_timeout_ceiling(
+        runtime_limits(PluginCallDeadlines { provider, tool }),
+        provider,
+    );
+}
+
+#[test]
+fn http_timeout_ceiling_uses_larger_tool_deadline() {
+    let provider = Duration::from_secs(15);
+    let tool = Duration::from_secs(45);
+
+    assert_default_runtime_limits_except_timeout_ceiling(
+        runtime_limits(PluginCallDeadlines { provider, tool }),
+        tool,
+    );
+}
+
+fn assert_default_runtime_limits_except_timeout_ceiling(
+    limits: RuntimeLimits,
+    timeout_ceiling: Duration,
+) {
+    let default = RuntimeLimits::default();
+
+    assert_eq!(limits.http_request_timeout_ceiling, Some(timeout_ceiling));
+    assert_eq!(limits.instantiation_fuel, default.instantiation_fuel);
+    assert_eq!(limits.max_memory_bytes, default.max_memory_bytes);
+    assert_eq!(limits.max_detached_jobs, default.max_detached_jobs);
 }
 
 #[tokio::test]
