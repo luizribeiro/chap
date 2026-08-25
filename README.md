@@ -64,6 +64,26 @@ key. The plugin declares an `env.read` grant for it, so the access appears in
 read by the host. If it is omitted, the plugin requests no environment grant
 and sends no authorization header.
 
+### Plugin call deadlines
+
+Provider completions and tool calls have separate wall-clock deadlines. Set
+each deadline in whole, nonzero seconds:
+
+```json
+{
+  "provider": {
+    "deadline_seconds": 120
+  },
+  "tools": {
+    "deadline_seconds": 30
+  }
+}
+```
+
+The values shown are the defaults. A deadline stops a plugin call even while it
+is waiting on network I/O; the existing fuel budget separately limits guest
+instructions.
+
 ### Tool execution
 
 Tool calls run in parallel by default. Configure the host-wide mode and
@@ -72,6 +92,7 @@ concurrency limit in `chap.json`:
 ```json
 {
   "tools": {
+    "deadline_seconds": 30,
     "execution": "parallel",
     "max_concurrency": 8
   }

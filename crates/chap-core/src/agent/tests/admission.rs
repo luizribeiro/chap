@@ -114,6 +114,9 @@ async fn times_out_a_hanging_provider_plugin() {
     fs::write(
         &config_path,
         r#"{
+            "provider": {
+                "deadline_seconds": 1
+            },
             "plugins": {
                 "example": {
                     "component": "provider.wasm"
@@ -122,8 +125,7 @@ async fn times_out_a_hanging_provider_plugin() {
         }"#,
     )
     .unwrap();
-    let mut builder = AgentBuilder::load(&config_path).unwrap();
-    builder.plugin_call_deadlines.provider = Duration::from_secs(1);
+    let builder = AgentBuilder::load(&config_path).unwrap();
     builder.approve_plugin("example").await.unwrap();
     let agent = builder.start().await.unwrap();
     let backend = PluginBackend::new(&agent.inner, "example");
@@ -499,6 +501,9 @@ async fn times_out_a_hanging_tool_plugin() {
     fs::write(
         &config_path,
         r#"{
+            "tools": {
+                "deadline_seconds": 1
+            },
             "plugins": {
                 "example.tools": {
                     "component": "tools.wasm"
@@ -508,8 +513,7 @@ async fn times_out_a_hanging_tool_plugin() {
     )
     .unwrap();
 
-    let mut builder = AgentBuilder::load(&config_path).unwrap();
-    builder.plugin_call_deadlines.tool = Duration::from_secs(1);
+    let builder = AgentBuilder::load(&config_path).unwrap();
     builder.approve_plugin("example.tools").await.unwrap();
     let agent = builder.start().await.unwrap();
 

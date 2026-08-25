@@ -20,8 +20,6 @@ mod provider;
 mod turn;
 
 const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
-const PROVIDER_CALL_DEADLINE: Duration = Duration::from_secs(120);
-const TOOL_CALL_DEADLINE: Duration = Duration::from_secs(30);
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
 type InnerHost = Host<()>;
@@ -104,15 +102,6 @@ struct PluginCallDeadlines {
     tool: Duration,
 }
 
-impl Default for PluginCallDeadlines {
-    fn default() -> Self {
-        Self {
-            provider: PROVIDER_CALL_DEADLINE,
-            tool: TOOL_CALL_DEADLINE,
-        }
-    }
-}
-
 pub(crate) struct AgentInner {
     lockgate: Arc<InnerHost>,
     plugins: BTreeMap<String, LoadedPlugin>,
@@ -127,11 +116,15 @@ impl AgentBuilder {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         let config = Config::load(path.as_ref())?;
         let consent = ConsentStore::new(config.consent_path());
+        let plugin_call_deadlines = PluginCallDeadlines {
+            provider: config.provider().deadline(),
+            tool: config.tools().deadline(),
+        };
         Ok(Self {
             config,
             consent,
             tools: ToolRegistry::new(),
-            plugin_call_deadlines: PluginCallDeadlines::default(),
+            plugin_call_deadlines,
         })
     }
 
