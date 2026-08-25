@@ -7,11 +7,17 @@ use crate::tool::ToolRegistry;
 use crate::{ExecutionMode, Tool, ToolDefinition};
 use lockgate::{
     ConsentRecord, ConsentRequired, Host, HostBuilder, InvocationCtx, PluginConfig, PluginHandle,
-    Prepared, Role, RoleError, RuntimeLimits,
+    Prepared, Role, RuntimeLimits,
 };
 use plugin_tool::PluginTool;
 use provider::PluginBackend;
-use std::{collections::BTreeMap, fs, path::Path, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+    sync::Arc,
+    time::Duration,
+};
 use turn::run_agent_loop;
 
 mod bindings;
@@ -76,8 +82,18 @@ impl Drop for StartResources {
 #[derive(Clone)]
 struct LoadedPlugin {
     handle: PluginHandle,
-    provider: bool,
-    tools: bool,
+    roles: BTreeSet<&'static str>,
+}
+
+struct AdmittedPlugin {
+    handle: PluginHandle,
+    exported_interfaces: Vec<String>,
+}
+
+impl LoadedPlugin {
+    fn has_role(&self, role: &chap_wit::Role) -> bool {
+        self.roles.contains(role.interface)
+    }
 }
 
 pub struct AgentBuilder {
@@ -285,7 +301,7 @@ impl AgentBuilder {
         consent: &ConsentStore,
         plugin_call_deadlines: PluginCallDeadlines,
     ) -> Result<(BTreeMap<String, LoadedPlugin>, BTreeMap<String, String>), String> {
-        let (handles, plugin_errors) = Self::load_plugins(
+        let (admitted, plugin_errors) = Self::load_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
             config,
             consent,
@@ -295,9 +311,9 @@ impl AgentBuilder {
         let builder = resources.builder.take().expect("uninitialized host");
         resources.host = Some(Arc::new(builder.finish()));
         let lockgate = resources.host.as_ref().expect("initialized host");
-        let plugins = Self::classify_plugins(lockgate, handles)?;
+        let plugins = Self::classify_plugins(admitted);
         for (id, plugin) in &plugins {
-            if !plugin.tools {
+            if !plugin.has_role(&chap_wit::TOOLS) {
                 continue;
             }
             for tool in PluginTool::load(
@@ -324,7 +340,7 @@ impl AgentBuilder {
         config: &Config,
         consent: &ConsentStore,
         plugin_call_deadlines: PluginCallDeadlines,
-    ) -> Result<(BTreeMap<String, PluginHandle>, BTreeMap<String, String>), String> {
+    ) -> Result<(BTreeMap<String, AdmittedPlugin>, BTreeMap<String, String>), String> {
         let mut plugins = BTreeMap::new();
         let mut plugin_errors = BTreeMap::new();
 
@@ -377,6 +393,7 @@ impl AgentBuilder {
                 approved_at: prior.approved_at.clone(),
             })
         });
+        let exported_interfaces = prepared.inspection().exported_interfaces().to_vec();
         let handle = builder
             .admit(
                 prepared,
@@ -389,7 +406,10 @@ impl AgentBuilder {
         if let Some(record) = refreshed_record {
             consent.save(record)?;
         }
-        Ok(PluginLoad::Admitted(handle))
+        Ok(PluginLoad::Admitted(AdmittedPlugin {
+            handle,
+            exported_interfaces,
+        }))
     }
 
     async fn prepare_plugin(
@@ -494,38 +514,22 @@ impl AgentBuilder {
     }
 
     fn classify_plugins(
-        host: &InnerHost,
-        handles: BTreeMap<String, PluginHandle>,
-    ) -> Result<BTreeMap<String, LoadedPlugin>, String> {
-        handles
+        admitted: BTreeMap<String, AdmittedPlugin>,
+    ) -> BTreeMap<String, LoadedPlugin> {
+        admitted
             .into_iter()
-            .map(|(id, handle)| {
-                let provider = Self::exports_role::<bindings::provider::Role>(host, &handle, &id)?;
-                let tools = Self::exports_role::<bindings::tools::Role>(host, &handle, &id)?;
-                Ok((
-                    id,
-                    LoadedPlugin {
-                        handle,
-                        provider,
-                        tools,
-                    },
-                ))
+            .map(|(id, admitted)| {
+                let roles = chap_wit::ROLES
+                    .iter()
+                    .filter(|role| {
+                        exports_interface_named(role.interface, &admitted.exported_interfaces)
+                    })
+                    .map(|role| role.interface)
+                    .collect();
+                let handle = admitted.handle;
+                (id, LoadedPlugin { handle, roles })
             })
             .collect()
-    }
-
-    fn exports_role<R: Role>(
-        host: &InnerHost,
-        handle: &PluginHandle,
-        id: &str,
-    ) -> Result<bool, String> {
-        match host.client::<R>(handle) {
-            Ok(_) => Ok(true),
-            Err(RoleError::RoleNotExported { .. }) => Ok(false),
-            Err(error) => Err(format!(
-                "failed to inspect roles for plugin `{id}`: {error}"
-            )),
-        }
     }
 }
 
@@ -607,7 +611,7 @@ impl Agent {
             .inner
             .plugins
             .get(&options.provider)
-            .is_some_and(|plugin| plugin.provider)
+            .is_some_and(|plugin| plugin.has_role(&chap_wit::PROVIDER))
         {
             return Err(format!(
                 "provider plugin `{}` is not configured",
@@ -621,7 +625,7 @@ impl Agent {
 
 #[allow(clippy::large_enum_variant)]
 enum PluginLoad {
-    Admitted(PluginHandle),
+    Admitted(AdmittedPlugin),
     Refused(String),
 }
 

@@ -41,7 +41,7 @@ impl AgentInner {
         let plugin = self
             .plugins
             .get(provider)
-            .filter(|plugin| plugin.provider)
+            .filter(|plugin| plugin.has_role(&chap_wit::PROVIDER))
             .ok_or_else(|| {
                 ProviderError::Plugin(format!("provider plugin `{provider}` is not configured"))
             })?;
