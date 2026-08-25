@@ -1,6 +1,6 @@
-use super::{AgentInner, PLUGIN_FUEL_PER_CALL, bindings};
+use super::{AgentInner, PLUGIN_FUEL_PER_CALL, bindings, context::ContextFuture};
 use crate::{
-    ProviderError, ToolDefinition,
+    ProviderError, SessionId, ToolDefinition,
     session::{AssistantContent, Message, Reasoning, ToolCall, Usage},
 };
 use bindings::provider as provider_bindings;
@@ -13,6 +13,10 @@ pub(super) type CompletionFuture<'a> =
 
 pub(super) trait CompletionBackend: Sync {
     fn complete(&self, messages: Vec<Message>) -> CompletionFuture<'_>;
+
+    fn assemble_context(&self, _session: SessionId) -> ContextFuture<'_> {
+        Box::pin(async { Ok(None) })
+    }
 }
 
 pub(super) struct PluginBackend<'a> {
@@ -29,6 +33,10 @@ impl<'a> PluginBackend<'a> {
 impl CompletionBackend for PluginBackend<'_> {
     fn complete(&self, messages: Vec<Message>) -> CompletionFuture<'_> {
         Box::pin(self.runtime.request_completion(self.provider, messages))
+    }
+
+    fn assemble_context(&self, session: SessionId) -> ContextFuture<'_> {
+        Box::pin(self.runtime.assemble_context(session))
     }
 }
 

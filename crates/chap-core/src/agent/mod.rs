@@ -18,15 +18,18 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use tokio::sync::Mutex as AsyncMutex;
 use turn::run_agent_loop;
 
 mod bindings;
+mod context;
 mod plugin_tool;
 mod provider;
 mod turn;
 
 const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
 const PLUGIN_ADMISSION_DEADLINE: Duration = Duration::from_secs(30);
+const CONTEXT_ASSEMBLY_DEADLINE: Duration = Duration::from_secs(10);
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
 type InnerHost = Host<()>;
@@ -127,6 +130,8 @@ pub(crate) struct AgentInner {
     tools: ToolRegistry,
     tool_execution: ToolExecutionConfig,
     plugin_call_deadlines: PluginCallDeadlines,
+    context_last_good:
+        AsyncMutex<BTreeMap<(crate::SessionId, String), Vec<context::ContextSegment>>>,
 }
 
 impl AgentBuilder {
@@ -291,6 +296,7 @@ impl AgentBuilder {
                 tools,
                 tool_execution,
                 plugin_call_deadlines,
+                context_last_good: AsyncMutex::new(BTreeMap::new()),
             }),
         })
     }
@@ -539,7 +545,12 @@ fn plugin_admission_context() -> InvocationCtx<()> {
 
 fn runtime_limits(deadlines: PluginCallDeadlines) -> RuntimeLimits {
     RuntimeLimits {
-        http_request_timeout_ceiling: Some(deadlines.provider.max(deadlines.tool)),
+        http_request_timeout_ceiling: Some(
+            deadlines
+                .provider
+                .max(deadlines.tool)
+                .max(CONTEXT_ASSEMBLY_DEADLINE),
+        ),
         ..RuntimeLimits::default()
     }
 }

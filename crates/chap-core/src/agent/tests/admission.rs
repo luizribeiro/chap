@@ -57,6 +57,19 @@ fn http_timeout_ceiling_uses_larger_tool_deadline() {
     );
 }
 
+#[test]
+fn http_timeout_ceiling_includes_context_deadline() {
+    let deadline = Duration::from_secs(1);
+
+    assert_default_runtime_limits_except_timeout_ceiling(
+        runtime_limits(PluginCallDeadlines {
+            provider: deadline,
+            tool: deadline,
+        }),
+        super::super::CONTEXT_ASSEMBLY_DEADLINE,
+    );
+}
+
 fn assert_default_runtime_limits_except_timeout_ceiling(
     limits: RuntimeLimits,
     timeout_ceiling: Duration,

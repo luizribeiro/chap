@@ -53,6 +53,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
         "multi:",
     )
     .await;
+    let context = admit_context(&mut builder, &components.context).await;
     let host = builder.finish();
 
     let completion = host
@@ -76,6 +77,18 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
         completion.finish_reason,
         bindings::types::FinishReason::Stop
     ));
+
+    let segments = host
+        .client::<bindings::context::Role>(&context)
+        .unwrap()
+        .segments(InvocationCtx::bounded(INVOCATION_FUEL))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(segments.len(), 1);
+    assert_eq!(segments[0].id, "configured-context");
+    assert_eq!(segments[0].content, "configured content");
+    assert_eq!(segments[0].priority, -5);
 
     let first_completion = host
         .client::<bindings::provider::Role>(&multi_role)
@@ -202,9 +215,41 @@ async fn admit(
         .unwrap()
 }
 
+async fn admit_context(builder: &mut HostBuilder<()>, component: &Path) -> PluginHandle {
+    let bytes = std::fs::read(component).unwrap();
+    let prepared = builder
+        .prepare(
+            "sdk-context-fixture",
+            &bytes,
+            PluginConfig {
+                settings: Some(json!({
+                    "segments": [{
+                        "id": "configured-context",
+                        "content": "configured content",
+                        "priority": -5,
+                    }]
+                })),
+                ..PluginConfig::default()
+            },
+        )
+        .await
+        .unwrap();
+    let acceptance = prepared.accept_all();
+    builder
+        .admit(
+            prepared,
+            acceptance,
+            RuntimeLimits::default(),
+            InvocationCtx::bounded(INVOCATION_FUEL),
+        )
+        .await
+        .unwrap()
+}
+
 struct Components {
     provider: PathBuf,
     multi_role: PathBuf,
+    context: PathBuf,
 }
 
 fn build_sdk_components(workspace: &Path) -> Components {
@@ -216,6 +261,8 @@ fn build_sdk_components(workspace: &Path) -> Components {
             "chap-sdk-provider-fixture",
             "-p",
             "chap-sdk-multi-role-fixture",
+            "-p",
+            "chap-sdk-context-fixture",
             "--target",
             "wasm32-wasip2",
         ])
@@ -235,6 +282,7 @@ fn build_sdk_components(workspace: &Path) -> Components {
     };
     let provider = target.join("wasm32-wasip2/debug/chap_sdk_provider_fixture.wasm");
     let multi_role = target.join("wasm32-wasip2/debug/chap_sdk_multi_role_fixture.wasm");
+    let context = target.join("wasm32-wasip2/debug/chap_sdk_context_fixture.wasm");
     assert!(
         provider.is_file(),
         "provider fixture was not built at `{}`",
@@ -245,8 +293,14 @@ fn build_sdk_components(workspace: &Path) -> Components {
         "multi-role fixture was not built at `{}`",
         multi_role.display()
     );
+    assert!(
+        context.is_file(),
+        "context fixture was not built at `{}`",
+        context.display()
+    );
     Components {
         provider,
         multi_role,
+        context,
     }
 }

@@ -1,0 +1,13 @@
+[package]
+name = "chap-sdk-context-fixture"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+chap-plugin = { workspace = true, default-features = false }
+schemars.workspace = true
+serde.workspace = true

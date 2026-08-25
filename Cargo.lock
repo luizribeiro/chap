@@ -367,6 +367,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "chap-sdk-context-fixture"
+version = "0.1.0"
+dependencies = [
+ "chap-plugin",
+ "schemars",
+ "serde",
+]
+
+[[package]]
 name = "chap-sdk-multi-role-fixture"
 version = "0.1.0"
 dependencies = [
