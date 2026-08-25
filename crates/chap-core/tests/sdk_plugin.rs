@@ -1,3 +1,4 @@
+use chap_core::AgentBuilder;
 use lockgate::{HostBuilder, InvocationCtx, PluginConfig, PluginHandle, RuntimeLimits};
 use serde_json::json;
 use std::{
@@ -18,6 +19,25 @@ const INVOCATION_FUEL: u64 = 25_000_000;
 async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let components = build_sdk_components(&workspace);
+    let config_directory = tempfile::tempdir().unwrap();
+    let config_path = config_directory.path().join("chap.json");
+    std::fs::write(
+        &config_path,
+        json!({
+            "plugins": {
+                "sdk-multi-role": {
+                    "component": components.multi_role.display().to_string(),
+                }
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let chap_builder = AgentBuilder::load(&config_path).unwrap();
+    assert_eq!(
+        chap_builder.plugin_roles("sdk-multi-role").unwrap(),
+        ["provider", "tool", "context"]
+    );
     let mut builder = HostBuilder::new(()).unwrap();
     let provider = admit(
         &mut builder,
@@ -94,6 +114,17 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
         registrations[0].execution_mode,
         bindings::types::ExecutionMode::Parallel
     ));
+    let segments = host
+        .client::<bindings::context::Role>(&multi_role)
+        .unwrap()
+        .segments(InvocationCtx::bounded(INVOCATION_FUEL))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(segments.len(), 1);
+    assert_eq!(segments[0].id, "sdk-context");
+    assert_eq!(segments[0].content, "multi:context");
+    assert_eq!(segments[0].priority, 7);
     let output = tools
         .execute(
             InvocationCtx::bounded(INVOCATION_FUEL),

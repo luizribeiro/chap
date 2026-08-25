@@ -8,4 +8,5 @@ world host {
   export types;
   export provider;
   export tools;
+  export context;
 }

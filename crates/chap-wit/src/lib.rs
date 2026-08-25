@@ -5,6 +5,7 @@ pub const WORLD: &str = "chap-plugin";
 pub const TYPES_WIT: &str = include_str!("../wit/types.wit");
 pub const PROVIDER_WIT: &str = include_str!("../wit/provider.wit");
 pub const TOOLS_WIT: &str = include_str!("../wit/tools.wit");
+pub const CONTEXT_WIT: &str = include_str!("../wit/context.wit");
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Role {
@@ -28,7 +29,14 @@ pub static TOOLS: Role = Role {
     wit: TOOLS_WIT,
 };
 
-pub static ROLES: &[&Role] = &[&PROVIDER, &TOOLS];
+pub static CONTEXT: Role = Role {
+    rust_name: "Context",
+    interface: "context",
+    display_name: "context",
+    wit: CONTEXT_WIT,
+};
+
+pub static ROLES: &[&Role] = &[&PROVIDER, &TOOLS, &CONTEXT];
 
 pub fn resolve(name: &str) -> Option<&'static Role> {
     ROLES.iter().copied().find(|role| role.rust_name == name)
@@ -85,6 +93,21 @@ mod tests {
         .concat();
 
         assert_eq!(world(&[&PROVIDER, &TOOLS]), expected);
+    }
+
+    #[test]
+    fn composes_a_three_role_world() {
+        let expected = [
+            PACKAGE,
+            source_body(TYPES_WIT),
+            source_body(PROVIDER_WIT),
+            source_body(TOOLS_WIT),
+            source_body(CONTEXT_WIT),
+            "\nworld chap-plugin {\n  import types;\n  export provider;\n  export tools;\n  export context;\n}\n",
+        ]
+        .concat();
+
+        assert_eq!(world(&[&PROVIDER, &TOOLS, &CONTEXT]), expected);
     }
 
     fn source_body(source: &str) -> &str {

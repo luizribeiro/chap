@@ -1,5 +1,6 @@
 use chap_plugin::{
     Needs, NoSettings, Plugin,
+    context::{Context, Segment},
     provider::{Completion, CompletionRequest, FinishReason, Provider, ProviderError},
     tools::{ToolDefinition, Tools},
 };
@@ -36,11 +37,19 @@ impl Tools for Dummy {
     }
 }
 
+impl Context for Dummy {
+    async fn segments(&self) -> Result<Vec<Segment>, String> {
+        Ok(Vec::new())
+    }
+}
+
 #[test]
 fn role_traits_are_implementable() {
     fn assert_provider<T: Provider>() {}
     fn assert_tools<T: Tools>() {}
+    fn assert_context<T: Context>() {}
 
     assert_provider::<Dummy>();
     assert_tools::<Dummy>();
+    assert_context::<Dummy>();
 }

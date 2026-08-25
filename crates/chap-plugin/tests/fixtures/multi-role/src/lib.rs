@@ -1,3 +1,4 @@
+use chap_plugin::context::{Context, Segment};
 use chap_plugin::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message, Provider,
     ProviderError, ToolCall,
@@ -83,4 +84,14 @@ impl Tools for MultiRoleFixture {
     }
 }
 
-chap_plugin::plugin!(MultiRoleFixture: Provider + Tools);
+impl Context for MultiRoleFixture {
+    async fn segments(&self) -> Result<Vec<Segment>, String> {
+        Ok(vec![Segment {
+            id: "sdk-context".to_owned(),
+            content: format!("{}context", self.prefix),
+            priority: 7,
+        }])
+    }
+}
+
+chap_plugin::plugin!(MultiRoleFixture: Provider + Tools + Context);

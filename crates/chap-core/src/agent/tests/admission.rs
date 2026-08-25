@@ -882,13 +882,14 @@ fn keeps_a_bare_export_name_as_the_package_id() {
 #[test]
 fn resolves_supported_role_display_names_in_table_order() {
     let interfaces = vec![
+        <super::super::bindings::context::Role as Role>::INTERFACE.to_owned(),
         <super::super::bindings::tools::Role as Role>::INTERFACE.to_owned(),
         <super::super::bindings::provider::Role as Role>::INTERFACE.to_owned(),
     ];
 
     assert_eq!(
         super::super::supported_roles(&interfaces),
-        ["provider", "tool"]
+        ["provider", "tool", "context"]
     );
 }
 

@@ -1,0 +1,26 @@
+package chap:agent@0.2.0;
+
+interface context {
+  record segment {
+    /// Stable identifier for this segment across recomputations. Reserved for
+    /// dedup, user override and diagnostics; the host does not read it yet.
+    id: string,
+    content: string,
+    /// Lower renders earlier. Ties break by plugin id, then by position within
+    /// that plugin's returned list — not by configuration order, which the host
+    /// discards when it parses plugins into a sorted map.
+    priority: s32,
+  }
+
+  /// Contributes this plugin's share of a session's assembled context.
+  ///
+  /// Called at run start. Every segment from every context plugin is sorted,
+  /// joined, and prepended to the request as a single system message; the
+  /// result is never written to session history, so it survives compaction by
+  /// being recomputed rather than rehydrated.
+  ///
+  /// Returning an empty list contributes nothing. Returning an error means the
+  /// plugin could not determine its segments: the host reuses this plugin's
+  /// previous segments if it has any, and fails the run if it does not.
+  segments: async func() -> result<list<segment>, string>;
+}

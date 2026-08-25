@@ -1,3 +1,4 @@
+use chap_plugin::context::{Context, Segment};
 use chap_plugin::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message, Provider, ProviderError,
 };
@@ -54,7 +55,17 @@ impl Tools for MultiRole {
     }
 }
 
-chap_plugin::plugin!(MultiRole: Provider + Tools);
+impl Context for MultiRole {
+    async fn segments(&self) -> Result<Vec<Segment>, String> {
+        Ok(vec![Segment {
+            id: "fixture-context".to_owned(),
+            content: "fixture context".to_owned(),
+            priority: 0,
+        }])
+    }
+}
+
+chap_plugin::plugin!(MultiRole: Provider + Tools + Context);
 
 #[test]
 fn plugin_macro_supports_multi_role_tests() {}

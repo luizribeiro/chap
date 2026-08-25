@@ -24,5 +24,6 @@ pub mod capabilities {
 }
 
 pub use plugin::Plugin;
+pub use roles::context;
 pub use roles::provider;
 pub use roles::tools;

@@ -19,6 +19,11 @@ const ROLES: &[Role] = &[
         bridge: tools_bridge,
         test_reference: tools_test_reference,
     },
+    Role {
+        wit: &chap_wit::CONTEXT,
+        bridge: context_bridge,
+        test_reference: context_test_reference,
+    },
 ];
 
 pub(crate) fn resolve(name: &Ident) -> syn::Result<&'static Role> {
@@ -101,5 +106,37 @@ fn tools_test_reference(plugin: &Ident) -> TokenStream {
         let _ = <#plugin as ::chap_plugin::tools::Tools>::definitions;
         let _ = <#plugin as ::chap_plugin::tools::Tools>::execution_mode;
         let _ = <#plugin as ::chap_plugin::tools::Tools>::execute;
+    }
+}
+
+fn context_bridge(plugin: &Ident) -> TokenStream {
+    quote! {
+        #[automatically_derived]
+        impl exports::chap::agent::context::Guest for #plugin {
+            async fn segments() -> ::core::result::Result<
+                ::chap_plugin::alloc::vec::Vec<exports::chap::agent::context::Segment>,
+                ::chap_plugin::alloc::string::String,
+            > {
+                let object = <#plugin as ::chap_plugin::Plugin>::new(
+                    <#plugin as ::chap_plugin::__lockgate::Plugin>::settings(),
+                );
+                let segments =
+                    <#plugin as ::chap_plugin::context::Context>::segments(&object).await?;
+                Ok(segments
+                    .into_iter()
+                    .map(|segment| exports::chap::agent::context::Segment {
+                        id: segment.id,
+                        content: segment.content,
+                        priority: segment.priority,
+                    })
+                    .collect())
+            }
+        }
+    }
+}
+
+fn context_test_reference(plugin: &Ident) -> TokenStream {
+    quote! {
+        let _ = <#plugin as ::chap_plugin::context::Context>::segments;
     }
 }
