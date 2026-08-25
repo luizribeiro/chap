@@ -466,12 +466,15 @@ impl AgentBuilder {
         plugin: &ConfiguredPlugin,
         exported_interfaces: &[String],
     ) -> Result<(), String> {
-        if plugin.has_tools_config()
-            && !exports_interface::<bindings::tools::Role>(exported_interfaces)
-        {
-            return Err(format!(
-                "plugin `{id}` configures a `tools` section, but its component does not export the tools interface"
-            ));
+        for role in chap_wit::ROLES {
+            if plugin.has_section(role.interface)
+                && !exports_interface_named(role.interface, exported_interfaces)
+            {
+                return Err(format!(
+                    "plugin `{id}` configures a `{}` section, but its component does not export the {} interface",
+                    role.interface, role.interface,
+                ));
+            }
         }
         Ok(())
     }
@@ -538,18 +541,23 @@ fn runtime_limits(deadlines: PluginCallDeadlines) -> RuntimeLimits {
 }
 
 fn supported_roles(interfaces: &[String]) -> Vec<&'static str> {
-    let mut roles = Vec::new();
-    if exports_interface::<bindings::provider::Role>(interfaces) {
-        roles.push("provider");
-    }
-    if exports_interface::<bindings::tools::Role>(interfaces) {
-        roles.push("tool");
-    }
-    roles
+    chap_wit::ROLES
+        .iter()
+        .filter(|role| exports_interface_named(role.interface, interfaces))
+        .map(|role| role.display_name)
+        .collect()
 }
 
-fn exports_interface<R: Role>(interfaces: &[String]) -> bool {
-    interfaces.iter().any(|interface| interface == R::INTERFACE)
+fn exports_interface_named(interface: &str, interfaces: &[String]) -> bool {
+    let known_interface = <bindings::provider::Role as Role>::INTERFACE;
+    let (package, known_name) = known_interface
+        .split_once('/')
+        .expect("role interfaces must be package-qualified");
+    let qualified = match known_name.split_once('@') {
+        Some((_, version)) => format!("{package}/{interface}@{version}"),
+        None => format!("{package}/{interface}"),
+    };
+    interfaces.iter().any(|exported| exported == &qualified)
 }
 
 fn role_package(interface: &str) -> String {

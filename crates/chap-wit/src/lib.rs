@@ -10,18 +10,21 @@ pub const TOOLS_WIT: &str = include_str!("../wit/tools.wit");
 pub struct Role {
     pub rust_name: &'static str,
     pub interface: &'static str,
+    pub display_name: &'static str,
     pub wit: &'static str,
 }
 
 pub static PROVIDER: Role = Role {
     rust_name: "Provider",
     interface: "provider",
+    display_name: "provider",
     wit: PROVIDER_WIT,
 };
 
 pub static TOOLS: Role = Role {
     rust_name: "Tools",
     interface: "tools",
+    display_name: "tool",
     wit: TOOLS_WIT,
 };
 

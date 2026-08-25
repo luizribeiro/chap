@@ -151,8 +151,11 @@ impl ConfiguredPlugin {
         Value::Object(self.settings.clone())
     }
 
-    pub(crate) fn has_tools_config(&self) -> bool {
-        self.tools.is_some()
+    pub(crate) fn has_section(&self, name: &str) -> bool {
+        match name {
+            "tools" => self.tools.is_some(),
+            _ => false,
+        }
     }
 }
 
