@@ -345,6 +345,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "chap-persona"
+version = "0.1.0"
+dependencies = [
+ "chap-plugin",
+ "futures",
+ "jsonschema",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "chap-plugin"
 version = "0.1.0"
 dependencies = [

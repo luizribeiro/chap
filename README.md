@@ -33,11 +33,12 @@ cargo run -- plugins list
 
 Use `--config /path/to/chap.json` to read a different file.
 
-The repository includes an OpenAI-compatible Chat Completions provider and Kagi
-web tools. Build their configured release components with the system Cargo:
+The repository includes an OpenAI-compatible Chat Completions provider, Kagi
+web tools, and a persona context contributor. Build their configured release
+components with the system Cargo:
 
 ```console
-cargo build -p chap-openai-compatible -p chap-kagi --release --target wasm32-wasip2
+cargo build -p chap-openai-compatible -p chap-kagi -p chap-persona --release --target wasm32-wasip2
 ```
 
 Each plugin is keyed by an operator-assigned instance id and maps directly to
@@ -57,6 +58,13 @@ its component and settings:
           "first_byte_seconds": 60,
           "between_bytes_seconds": 30
         }
+      }
+    },
+    "persona": {
+      "component": "./target/wasm32-wasip2/release/chap_persona.wasm",
+      "settings": {
+        "persona": "You are a wizard. Answer in riddles.",
+        "priority": 0
       }
     }
   }
@@ -154,7 +162,9 @@ cargo test-all
 The OpenAI-compatible plugin declares network egress scoped from `base_url`,
 and Lockgate resolves that URL's origin as the granted scope. The scheme and
 effective port are part of the origin. Kagi declares the literal origin
-`https://kagi.com` and therefore needs no configurable origin.
+`https://kagi.com` and therefore needs no configurable origin. Persona exports
+only the context role and requests no capabilities; it contributes its
+configured text at run start without storing it in session history.
 
 ### Token usage
 
@@ -183,6 +193,7 @@ then check that the components can be admitted:
 cargo run -- grants review
 cargo run -- grants approve openai
 cargo run -- grants approve kagi
+cargo run -- grants approve persona
 cargo run -- plugins check
 ```
 
@@ -223,7 +234,8 @@ through `Self::settings()`.
 Rust plugins depend on `serde` and `schemars` directly and derive both
 deserialization and schema behavior on one strict settings type, as the built-in
 [OpenAI-compatible provider](plugins/openai-compatible/src/lib.rs) and [Kagi
-tools](plugins/kagi/src/lib.rs) do:
+tools](plugins/kagi/src/lib.rs), along with the [Persona context
+plugin](plugins/persona/src/lib.rs), do:
 
 ```rust
 #[derive(Deserialize, JsonSchema)]
