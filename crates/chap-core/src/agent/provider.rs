@@ -5,7 +5,7 @@ use crate::{
 };
 use bindings::provider as provider_bindings;
 use bindings::types as provider_types;
-use lockgate::InvocationCtx;
+use lockgate::{CallError, InvocationCtx};
 use std::{fmt, future::Future, pin::Pin, time::Duration};
 
 pub(super) type CompletionFuture<'a> =
@@ -49,7 +49,10 @@ impl AgentInner {
             .client::<provider_bindings::Role>(&plugin.handle)
             .map_err(|error| plugin_error(provider, error))?
             .complete(
-                InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL),
+                InvocationCtx::bounded_with_deadline(
+                    PLUGIN_FUEL_PER_CALL,
+                    self.plugin_call_deadlines.provider,
+                ),
                 provider_types::CompletionRequest {
                     messages: messages.into_iter().map(Into::into).collect(),
                     tools: self
@@ -61,9 +64,16 @@ impl AgentInner {
                 },
             )
             .await
-            .map_err(|error| plugin_error(provider, error))?
+            .map_err(|error| map_plugin_call_error(provider, error))?
             .map_err(|error| map_provider_error(provider, error))
             .map(Into::into)
+    }
+}
+
+fn map_plugin_call_error(provider: &str, error: CallError) -> ProviderError {
+    match error {
+        CallError::DeadlineExceeded { .. } => ProviderError::TimedOut,
+        error => plugin_error(provider, error),
     }
 }
 

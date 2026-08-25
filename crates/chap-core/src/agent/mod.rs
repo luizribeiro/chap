@@ -11,7 +11,7 @@ use lockgate::{
 };
 use plugin_tool::PluginTool;
 use provider::PluginBackend;
-use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
+use std::{collections::BTreeMap, fs, path::Path, sync::Arc, time::Duration};
 use turn::run_agent_loop;
 
 mod bindings;
@@ -20,6 +20,8 @@ mod provider;
 mod turn;
 
 const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
+const PROVIDER_CALL_DEADLINE: Duration = Duration::from_secs(120);
+const TOOL_CALL_DEADLINE: Duration = Duration::from_secs(30);
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
 type InnerHost = Host<()>;
@@ -83,6 +85,7 @@ pub struct AgentBuilder {
     config: Config,
     consent: ConsentStore,
     tools: ToolRegistry,
+    plugin_call_deadlines: PluginCallDeadlines,
 }
 
 pub struct Agent {
@@ -95,6 +98,21 @@ struct ToolExecutionConfig {
     max_concurrency: usize,
 }
 
+#[derive(Clone, Copy)]
+struct PluginCallDeadlines {
+    provider: Duration,
+    tool: Duration,
+}
+
+impl Default for PluginCallDeadlines {
+    fn default() -> Self {
+        Self {
+            provider: PROVIDER_CALL_DEADLINE,
+            tool: TOOL_CALL_DEADLINE,
+        }
+    }
+}
+
 pub(crate) struct AgentInner {
     lockgate: Arc<InnerHost>,
     plugins: BTreeMap<String, LoadedPlugin>,
@@ -102,6 +120,7 @@ pub(crate) struct AgentInner {
     sessions: SessionManager,
     tools: ToolRegistry,
     tool_execution: ToolExecutionConfig,
+    plugin_call_deadlines: PluginCallDeadlines,
 }
 
 impl AgentBuilder {
@@ -112,6 +131,7 @@ impl AgentBuilder {
             config,
             consent,
             tools: ToolRegistry::new(),
+            plugin_call_deadlines: PluginCallDeadlines::default(),
         })
     }
 
@@ -225,20 +245,27 @@ impl AgentBuilder {
             config,
             consent,
             tools,
+            plugin_call_deadlines,
         } = self;
         let builder = HostBuilder::new(())
             .map_err(|error| format!("failed to create Lockgate host: {error}"))?;
         let mut resources = StartResources::new(tools, builder);
-        let (plugins, plugin_errors) =
-            match Self::initialize_plugins(&mut resources, &config, &consent).await {
-                Ok(plugins) => plugins,
-                Err(error) => {
-                    return match resources.cleanup().await {
-                        Ok(()) => Err(error),
-                        Err(cleanup_error) => Err(format!("{error}; {cleanup_error}")),
-                    };
-                }
-            };
+        let (plugins, plugin_errors) = match Self::initialize_plugins(
+            &mut resources,
+            &config,
+            &consent,
+            plugin_call_deadlines,
+        )
+        .await
+        {
+            Ok(plugins) => plugins,
+            Err(error) => {
+                return match resources.cleanup().await {
+                    Ok(()) => Err(error),
+                    Err(cleanup_error) => Err(format!("{error}; {cleanup_error}")),
+                };
+            }
+        };
         let lockgate = resources.host.take().expect("initialized Lockgate host");
         let tools = resources.tools.take().expect("initialized tool registry");
         let tool_execution = ToolExecutionConfig {
@@ -253,6 +280,7 @@ impl AgentBuilder {
                 sessions: SessionManager::new(),
                 tools,
                 tool_execution,
+                plugin_call_deadlines,
             }),
         })
     }
@@ -261,6 +289,7 @@ impl AgentBuilder {
         resources: &mut StartResources,
         config: &Config,
         consent: &ConsentStore,
+        plugin_call_deadlines: PluginCallDeadlines,
     ) -> Result<(BTreeMap<String, LoadedPlugin>, BTreeMap<String, String>), String> {
         let (handles, plugin_errors) = Self::load_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
@@ -281,6 +310,7 @@ impl AgentBuilder {
                 Arc::clone(lockgate),
                 plugin.handle.clone(),
                 config.execution_mode(id),
+                plugin_call_deadlines.tool,
             )
             .await?
             {

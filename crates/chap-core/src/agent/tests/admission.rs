@@ -1,10 +1,11 @@
 use super::{
     super::{
         AgentBuilder,
-        provider::{CompletionBackend, PluginBackend},
+        provider::{CompletionBackend, FinishReason, PluginBackend},
     },
     fixtures::{
-        provider_component, provider_component_with_schema,
+        fast_provider_component, fast_tool_component, hanging_provider_component,
+        hanging_tool_component, provider_component, provider_component_with_schema,
         provider_component_with_trapping_schema, test_directory, tool_component,
         tool_component_with_schema, unsupported_component,
     },
@@ -15,6 +16,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::mpsc,
+    time::Duration,
 };
 
 #[tokio::test]
@@ -97,6 +99,90 @@ async fn classifies_a_trapping_provider_as_a_plugin_failure() {
         panic!("a trapping provider should be a plugin failure");
     };
     assert!(message.contains("plugin trapped:"), "{message}");
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn times_out_a_hanging_provider_plugin() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        hanging_provider_component("example.provider"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.json");
+    fs::write(
+        &config_path,
+        r#"{
+            "plugins": {
+                "example": {
+                    "component": "provider.wasm"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    let mut builder = AgentBuilder::load(&config_path).unwrap();
+    builder.plugin_call_deadlines.provider = Duration::from_secs(1);
+    builder.approve_plugin("example").await.unwrap();
+    let agent = builder.start().await.unwrap();
+    let backend = PluginBackend::new(&agent.inner, "example");
+
+    let error = tokio::time::timeout(Duration::from_secs(5), backend.complete(Vec::new()))
+        .await
+        .expect("hanging provider call did not respect its deadline")
+        .unwrap_err();
+
+    assert_eq!(error, ProviderError::TimedOut);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn fast_provider_and_tool_plugins_succeed_with_deadlines() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        fast_provider_component("example.provider"),
+    )
+    .unwrap();
+    fs::write(
+        directory.join("tools.wasm"),
+        fast_tool_component("example.tools"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.json");
+    fs::write(
+        &config_path,
+        r#"{
+            "plugins": {
+                "example.provider": {
+                    "component": "provider.wasm"
+                },
+                "example.tools": {
+                    "component": "tools.wasm"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    builder.approve_plugin("example.provider").await.unwrap();
+    builder.approve_plugin("example.tools").await.unwrap();
+    let agent = builder.start().await.unwrap();
+    let backend = PluginBackend::new(&agent.inner, "example.provider");
+
+    let completion = backend.complete(Vec::new()).await.unwrap();
+    let tool_output = agent
+        .inner
+        .tools
+        .execute("fixture-tool", "{}".to_owned())
+        .await
+        .unwrap();
+
+    assert!(completion.content.is_empty());
+    assert!(matches!(completion.finish_reason, FinishReason::Stop));
+    assert!(completion.usage.is_none());
+    assert!(tool_output.is_empty());
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -398,6 +484,48 @@ async fn loads_definitions_from_an_admitted_tool_plugin() {
 
     assert!(agent.plugin_errors().next().is_none());
     assert_eq!(agent.tool_definitions()[0].name, "fixture-tool");
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn times_out_a_hanging_tool_plugin() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("tools.wasm"),
+        hanging_tool_component("example.tools"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.json");
+    fs::write(
+        &config_path,
+        r#"{
+            "plugins": {
+                "example.tools": {
+                    "component": "tools.wasm"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+
+    let mut builder = AgentBuilder::load(&config_path).unwrap();
+    builder.plugin_call_deadlines.tool = Duration::from_secs(1);
+    builder.approve_plugin("example.tools").await.unwrap();
+    let agent = builder.start().await.unwrap();
+
+    let error = tokio::time::timeout(
+        Duration::from_secs(5),
+        agent.inner.tools.execute("fixture-tool", "{}".to_owned()),
+    )
+    .await
+    .expect("hanging tool call did not respect its deadline")
+    .unwrap_err();
+
+    assert!(
+        error.starts_with("tool plugin `example.tools` timed out after "),
+        "{error}"
+    );
+    assert!(!error.contains(" failed: "), "{error}");
     fs::remove_dir_all(directory).unwrap();
 }
 

@@ -2,24 +2,67 @@ use std::{fs, path::Path};
 use wit_component::{ComponentEncoder, StringEncoding, dummy_module, embed_component_metadata};
 use wit_parser::{ManglingAndAbi, Resolve};
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RoleCall {
+    Trap,
+    Succeed,
+    Hang,
+}
+
 pub(super) fn provider_component(id: &str) -> Vec<u8> {
-    plugin_component(id, "provider-plugin", Some(permissive_schema()))
+    plugin_component(
+        id,
+        "provider-plugin",
+        Some(permissive_schema()),
+        RoleCall::Trap,
+    )
+}
+
+pub(super) fn fast_provider_component(id: &str) -> Vec<u8> {
+    plugin_component(
+        id,
+        "provider-plugin",
+        Some(permissive_schema()),
+        RoleCall::Succeed,
+    )
+}
+
+pub(super) fn hanging_provider_component(id: &str) -> Vec<u8> {
+    plugin_component(
+        id,
+        "provider-plugin",
+        Some(permissive_schema()),
+        RoleCall::Hang,
+    )
 }
 
 pub(super) fn provider_component_with_schema(id: &str, schema: &str) -> Vec<u8> {
-    plugin_component(id, "provider-plugin", Some(schema))
+    plugin_component(id, "provider-plugin", Some(schema), RoleCall::Trap)
 }
 
 pub(super) fn provider_component_with_trapping_schema(id: &str) -> Vec<u8> {
-    plugin_component(id, "provider-plugin", None)
+    plugin_component(id, "provider-plugin", None, RoleCall::Trap)
 }
 
 pub(super) fn tool_component(id: &str) -> Vec<u8> {
-    plugin_component(id, "tool-plugin", Some(permissive_schema()))
+    plugin_component(id, "tool-plugin", Some(permissive_schema()), RoleCall::Trap)
+}
+
+pub(super) fn fast_tool_component(id: &str) -> Vec<u8> {
+    plugin_component(
+        id,
+        "tool-plugin",
+        Some(permissive_schema()),
+        RoleCall::Succeed,
+    )
+}
+
+pub(super) fn hanging_tool_component(id: &str) -> Vec<u8> {
+    plugin_component(id, "tool-plugin", Some(permissive_schema()), RoleCall::Hang)
 }
 
 pub(super) fn tool_component_with_schema(id: &str, schema: &str) -> Vec<u8> {
-    plugin_component(id, "tool-plugin", Some(schema))
+    plugin_component(id, "tool-plugin", Some(schema), RoleCall::Trap)
 }
 
 pub(super) fn unsupported_component(id: &str) -> Vec<u8> {
@@ -50,7 +93,7 @@ world fixture {
         .unwrap();
     let world = resolve.packages[package].worlds["fixture"];
     let module = dummy_module(&resolve, world, ManglingAndAbi::Standard32);
-    let mut module = module_with_schema(&module, permissive_schema(), false);
+    let mut module = module_with_schema(&module, permissive_schema(), false, false, RoleCall::Trap);
     embed_component_metadata(&mut module, &resolve, world, StringEncoding::UTF8).unwrap();
     let bytes = ComponentEncoder::default()
         .module(&module)
@@ -60,10 +103,48 @@ world fixture {
     with_plugin_sections(bytes, id)
 }
 
-fn plugin_component(id: &str, world_name: &str, schema: Option<&str>) -> Vec<u8> {
+fn plugin_component(
+    id: &str,
+    world_name: &str,
+    schema: Option<&str>,
+    role_call: RoleCall,
+) -> Vec<u8> {
     let mut resolve = Resolve::new();
     let wit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../chap-plugin/wit");
     resolve.push_path(wit).unwrap();
+    let clock_import = if role_call == RoleCall::Hang {
+        resolve
+            .push_str(
+                "io.wit",
+                r#"
+package wasi:io@0.2.12;
+
+interface poll {
+  resource pollable {
+    block: func();
+  }
+}
+"#,
+            )
+            .unwrap();
+        resolve
+            .push_str(
+                "clocks.wit",
+                r#"
+package wasi:clocks@0.2.12;
+
+interface monotonic-clock {
+  use wasi:io/poll@0.2.12.{pollable};
+  type duration = u64;
+  subscribe-duration: func(when: duration) -> pollable;
+}
+"#,
+            )
+            .unwrap();
+        "import wasi:clocks/monotonic-clock@0.2.12;\n  import wasi:io/poll@0.2.12;"
+    } else {
+        ""
+    };
     resolve
         .push_str(
             "lockgate-config.wit",
@@ -81,6 +162,7 @@ interface schema {
 package chap:test;
 
 world fixture {{
+  {clock_import}
   include chap:agent/{world_name}@0.2.0;
   export lockgate:config/schema;
 }}
@@ -90,7 +172,13 @@ world fixture {{
     let world = resolve.packages[package].worlds["fixture"];
     let mut module = dummy_module(&resolve, world, ManglingAndAbi::Standard32);
     if let Some(schema) = schema {
-        module = module_with_schema(&module, schema, world_name == "tool-plugin");
+        module = module_with_schema(
+            &module,
+            schema,
+            true,
+            world_name == "tool-plugin",
+            role_call,
+        );
     }
     embed_component_metadata(&mut module, &resolve, world, StringEncoding::UTF8).unwrap();
     let bytes = ComponentEncoder::default()
@@ -101,21 +189,66 @@ world fixture {{
     with_plugin_sections(bytes, id)
 }
 
-fn module_with_schema(module: &[u8], schema: &str, tool_definitions: bool) -> Vec<u8> {
+fn module_with_schema(
+    module: &[u8],
+    schema: &str,
+    role_export: bool,
+    tool_definitions: bool,
+    role_call: RoleCall,
+) -> Vec<u8> {
+    const ROLE_RESULT: usize = 4096;
+
+    let has_clock_import = role_call == RoleCall::Hang;
+    let function_offset = if has_clock_import { 3 } else { 0 };
+    let schema_function_type = if has_clock_import { 2 } else { 0 };
+    let role_function_type = if has_clock_import { 3 } else { 2 };
     let definitions_result = (16 + schema.len() + 3) & !3;
     let mut wat = wasmprinter::print_bytes(module).unwrap();
     wat = wat.replacen("(memory (;0;) 0)", "(memory (;0;) 1)", 1);
-    wat = wat.replacen(
-        "(func (;0;) (type 0) (result i32)\n    unreachable\n  )",
-        "(func (;0;) (type 0) (result i32)\n    i32.const 0\n  )",
-        1,
+    replace_trapping_function(
+        &mut wat,
+        function_offset,
+        schema_function_type,
+        "(result i32)",
+        "i32.const 0",
     );
     if tool_definitions {
-        wat = wat.replacen(
-            "(func (;2;) (type 0) (result i32)\n    unreachable\n  )",
-            &format!("(func (;2;) (type 0) (result i32)\n    i32.const {definitions_result}\n  )"),
-            1,
+        replace_trapping_function(
+            &mut wat,
+            2 + function_offset,
+            schema_function_type,
+            "(result i32)",
+            &format!("i32.const {definitions_result}"),
         );
+    }
+    if role_export {
+        let realloc_function = if tool_definitions { 6 } else { 4 } + function_offset;
+        replace_trapping_function(
+            &mut wat,
+            realloc_function,
+            role_function_type,
+            "(param i32 i32 i32 i32) (result i32)",
+            "i32.const 8192",
+        );
+        let role_function = if tool_definitions { 4 } else { 2 } + function_offset;
+        let role_signature = "(param i32 i32 i32 i32) (result i32)";
+        match role_call {
+            RoleCall::Trap => {}
+            RoleCall::Succeed => replace_trapping_function(
+                &mut wat,
+                role_function,
+                role_function_type,
+                role_signature,
+                &format!("i32.const {ROLE_RESULT}"),
+            ),
+            RoleCall::Hang => replace_trapping_function(
+                &mut wat,
+                role_function,
+                role_function_type,
+                role_signature,
+                "i64.const 3600000000000\n    call 2\n    call 0\n    unreachable",
+            ),
+        }
     }
     let mut result = vec![16, 0, 0, 0];
     result.extend_from_slice(&(schema.len() as u32).to_le_bytes());
@@ -164,10 +297,31 @@ fn module_with_schema(module: &[u8], schema: &str, tool_definitions: bool) -> Ve
             ));
         }
     }
+    if role_call == RoleCall::Succeed {
+        let result_size = if tool_definitions { 12 } else { 104 };
+        data.push_str(&format!(
+            "(data (i32.const {ROLE_RESULT}) \"{}\")\n",
+            wat_bytes(&vec![0; result_size])
+        ));
+    }
     data.push(')');
     wat.truncate(wat.strip_suffix(")\n").unwrap().len());
     wat.push_str(&data);
     wat::parse_str(wat).unwrap()
+}
+
+fn replace_trapping_function(
+    wat: &mut String,
+    function: usize,
+    function_type: usize,
+    signature: &str,
+    body: &str,
+) {
+    let before =
+        format!("(func (;{function};) (type {function_type}) {signature}\n    unreachable\n  )");
+    let after = format!("(func (;{function};) (type {function_type}) {signature}\n    {body}\n  )");
+    assert!(wat.contains(&before), "missing fixture function `{before}`");
+    *wat = wat.replacen(&before, &after, 1);
 }
 
 fn wat_bytes(bytes: &[u8]) -> String {

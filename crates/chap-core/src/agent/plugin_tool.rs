@@ -1,7 +1,7 @@
 use super::{InnerHost, PLUGIN_FUEL_PER_CALL, bindings};
 use crate::{ExecutionMode, Tool, ToolDefinition};
-use lockgate::{InvocationCtx, PluginHandle};
-use std::{future::Future, pin::Pin, sync::Arc};
+use lockgate::{CallError, InvocationCtx, PluginHandle};
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use bindings::{
     tools as tool_bindings,
@@ -14,6 +14,7 @@ pub(super) struct PluginTool {
     definition: ToolDefinition,
     execution_mode: ExecutionMode,
     runtime: Arc<InnerHost>,
+    call_deadline: Duration,
 }
 
 impl PluginTool {
@@ -22,6 +23,7 @@ impl PluginTool {
         runtime: Arc<InnerHost>,
         handle: PluginHandle,
         configured_mode: ExecutionMode,
+        call_deadline: Duration,
     ) -> Result<Vec<Self>, String> {
         let definitions = runtime
             .client::<tool_bindings::Role>(&handle)
@@ -40,6 +42,7 @@ impl PluginTool {
                     definition: registration.definition.into(),
                     execution_mode: resolve_tool_mode(declared_mode, configured_mode),
                     runtime: Arc::clone(&runtime),
+                    call_deadline,
                 }
             })
             .collect())
@@ -64,14 +67,23 @@ impl Tool for PluginTool {
                 .client::<tool_bindings::Role>(&self.handle)
                 .map_err(|error| format!("tool plugin `{}` failed: {error}", self.plugin))?
                 .execute(
-                    InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL),
+                    InvocationCtx::bounded_with_deadline(PLUGIN_FUEL_PER_CALL, self.call_deadline),
                     &self.definition.name,
                     &arguments,
                 )
                 .await
-                .map_err(|error| format!("tool plugin `{}` failed: {error}", self.plugin))?
+                .map_err(|error| tool_call_error(&self.plugin, error))?
                 .map_err(|error| format!("tool plugin `{}`: {error}", self.plugin))
         })
+    }
+}
+
+fn tool_call_error(plugin: &str, error: CallError) -> String {
+    match error {
+        CallError::DeadlineExceeded { deadline } => {
+            format!("tool plugin `{plugin}` timed out after {deadline:?}")
+        }
+        error => format!("tool plugin `{plugin}` failed: {error}"),
     }
 }
 
