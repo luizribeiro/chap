@@ -213,20 +213,13 @@ impl SessionEvents {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionOptions {
     pub provider: String,
-    pub system_prompt: Option<String>,
 }
 
 impl SessionOptions {
     pub fn new(provider: impl Into<String>) -> Self {
         Self {
             provider: provider.into(),
-            system_prompt: None,
         }
-    }
-
-    pub fn with_system_prompt(mut self, system_prompt: impl Into<String>) -> Self {
-        self.system_prompt = Some(system_prompt.into());
-        self
     }
 }
 
@@ -302,18 +295,13 @@ impl SessionManager {
             return Err("a session provider is required".to_owned());
         }
         let id = SessionId(Uuid::now_v7());
-        let messages = options
-            .system_prompt
-            .into_iter()
-            .map(Message::System)
-            .collect();
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         let state = Arc::new(SessionState {
             id,
             provider: options.provider,
             turn_lock: AsyncMutex::new(()),
             run: Mutex::new(RunState::default()),
-            messages: RwLock::new(messages),
+            messages: RwLock::new(Vec::new()),
             next_event_sequence: Mutex::new(1),
             events,
         });
@@ -548,16 +536,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sessions_retain_system_prompts_in_their_history() {
+    async fn sessions_start_with_empty_history() {
         let manager = SessionManager::new();
-        let state = manager
-            .create(SessionOptions::new("provider").with_system_prompt("be helpful"))
-            .unwrap();
+        let state = manager.create(SessionOptions::new("provider")).unwrap();
 
-        assert_eq!(
-            *state.messages.read().await,
-            vec![Message::System("be helpful".to_owned())]
-        );
+        assert!(state.messages.read().await.is_empty());
         assert!(manager.owns(&state));
     }
 
