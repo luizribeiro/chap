@@ -243,7 +243,17 @@ async fn times_out_a_hanging_provider_plugin() {
         .expect("hanging provider call did not respect its deadline")
         .unwrap_err();
 
-    assert_eq!(error, ProviderError::TimedOut);
+    assert_eq!(
+        error,
+        ProviderError::TimedOut {
+            plugin: "example".to_owned(),
+            deadline: Duration::from_secs(1),
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        "provider plugin `example` timed out after 1s"
+    );
     fs::remove_dir_all(directory).unwrap();
 }
 

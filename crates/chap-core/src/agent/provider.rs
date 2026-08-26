@@ -82,7 +82,10 @@ impl AgentInner {
 
 fn map_plugin_call_error(provider: &str, error: CallError) -> ProviderError {
     match error {
-        CallError::DeadlineExceeded { .. } => ProviderError::TimedOut,
+        CallError::DeadlineExceeded { deadline } => ProviderError::TimedOut {
+            plugin: provider.to_owned(),
+            deadline,
+        },
         error => plugin_error(provider, error),
     }
 }
