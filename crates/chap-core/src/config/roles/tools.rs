@@ -1,9 +1,11 @@
-use super::super::Config;
 use crate::tool::ExecutionMode;
 use serde::Deserialize;
 
+#[cfg(test)]
+use super::super::Config;
+
 /// Settings for one plugin acting in the tools role.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ToolsSettings {
     /// How tools from this plugin may be scheduled.
@@ -11,11 +13,18 @@ pub(crate) struct ToolsSettings {
     execution: ExecutionMode,
 }
 
+impl ToolsSettings {
+    pub(crate) fn execution(&self) -> ExecutionMode {
+        self.execution
+    }
+}
+
+#[cfg(test)]
 impl Config {
     pub(crate) fn plugin_tools_execution(&self, id: &str) -> ExecutionMode {
         self.plugin(id)
-            .and_then(|plugin| plugin.tools.as_ref())
-            .map(|tools| tools.execution)
+            .map(|plugin| plugin.role_settings())
+            .map(|settings| settings.tools().execution())
             .unwrap_or_default()
     }
 }

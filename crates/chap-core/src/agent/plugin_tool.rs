@@ -1,5 +1,5 @@
 use super::{CallBudgets, InnerHost, PluginCall, bindings};
-use crate::{ExecutionMode, Tool, ToolDefinition};
+use crate::{ExecutionMode, Tool, ToolDefinition, config::roles::ToolsSettings};
 use lockgate::{CallError, PluginHandle};
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -22,7 +22,7 @@ impl PluginTool {
         plugin: &str,
         runtime: Arc<InnerHost>,
         handle: PluginHandle,
-        configured_mode: ExecutionMode,
+        settings: &ToolsSettings,
         call_budgets: CallBudgets,
     ) -> Result<Vec<Self>, String> {
         let definitions = runtime
@@ -44,7 +44,7 @@ impl PluginTool {
                     plugin: plugin.to_owned(),
                     handle: handle.clone(),
                     definition: registration.definition.into(),
-                    execution_mode: resolve_tool_mode(declared_mode, configured_mode),
+                    execution_mode: resolve_tool_mode(declared_mode, settings.execution()),
                     runtime: Arc::clone(&runtime),
                     call_budgets,
                 }

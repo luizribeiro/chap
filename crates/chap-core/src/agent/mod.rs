@@ -1,5 +1,5 @@
 use crate::config::{
-    Config, ConfiguredPlugin, agent::ToolExecutionSettings, roles::ContextChannel,
+    Config, ConfiguredPlugin, agent::ToolExecutionSettings, roles::PluginRoleSettings,
 };
 use crate::consent::{ConsentStore, PluginConsentReview, consent_drift};
 use crate::session::{
@@ -195,13 +195,13 @@ impl Drop for StartResources {
 struct LoadedPlugin {
     handle: PluginHandle,
     roles: BTreeSet<&'static str>,
-    context_channel: ContextChannel,
+    role_settings: PluginRoleSettings,
 }
 
 struct AdmittedPlugin {
     handle: PluginHandle,
     exported_interfaces: Vec<String>,
-    context_channel: ContextChannel,
+    role_settings: PluginRoleSettings,
 }
 
 impl LoadedPlugin {
@@ -419,7 +419,7 @@ impl AgentBuilder {
                 id,
                 Arc::clone(lockgate),
                 plugin.handle.clone(),
-                config.plugin_tools_execution(id),
+                plugin.role_settings.tools(),
                 call_budgets,
             )
             .await?
@@ -504,7 +504,7 @@ impl AgentBuilder {
         Ok(PluginLoad::Admitted(AdmittedPlugin {
             handle,
             exported_interfaces,
-            context_channel: plugin.context_channel(),
+            role_settings: plugin.role_settings(),
         }))
     }
 
@@ -623,13 +623,13 @@ impl AgentBuilder {
                     .map(|role| role.interface)
                     .collect();
                 let handle = admitted.handle;
-                let context_channel = admitted.context_channel;
+                let role_settings = admitted.role_settings;
                 (
                     id,
                     LoadedPlugin {
                         handle,
                         roles,
-                        context_channel,
+                        role_settings,
                     },
                 )
             })

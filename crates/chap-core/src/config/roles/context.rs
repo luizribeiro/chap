@@ -1,5 +1,7 @@
-use super::super::ConfiguredPlugin;
 use serde::Deserialize;
+
+#[cfg(test)]
+use super::super::ConfiguredPlugin;
 
 /// Destination for context contributed by a context-role plugin.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
@@ -13,7 +15,7 @@ pub(crate) enum ContextChannel {
 }
 
 /// Settings for one plugin acting in the context role.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ContextSettings {
     /// Where the plugin's contributed context is placed.
@@ -21,12 +23,16 @@ pub(crate) struct ContextSettings {
     channel: ContextChannel,
 }
 
+impl ContextSettings {
+    pub(crate) fn channel(&self) -> ContextChannel {
+        self.channel
+    }
+}
+
+#[cfg(test)]
 impl ConfiguredPlugin {
     pub(crate) fn context_channel(&self) -> ContextChannel {
-        self.context
-            .as_ref()
-            .map(|context| context.channel)
-            .unwrap_or_default()
+        self.role_settings().context().channel()
     }
 }
 
