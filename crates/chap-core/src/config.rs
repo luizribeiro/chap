@@ -14,16 +14,23 @@ pub struct Config {
     #[serde(default)]
     plugins: BTreeMap<String, ConfiguredPlugin>,
     #[serde(default)]
-    tools: ToolsConfig,
+    agent: AgentSettings,
     #[serde(skip)]
     directory: PathBuf,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSettings {
+    #[serde(default)]
+    tool_execution: ToolExecutionSettings,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ToolsConfig {
+pub struct ToolExecutionSettings {
     #[serde(default)]
-    execution: ExecutionMode,
+    mode: ExecutionMode,
     #[serde(default = "default_max_concurrency")]
     max_concurrency: NonZeroUsize,
 }
@@ -89,8 +96,8 @@ impl Config {
             .unwrap_or_default()
     }
 
-    pub(crate) fn tools(&self) -> &ToolsConfig {
-        &self.tools
+    pub(crate) fn tool_execution(&self) -> &ToolExecutionSettings {
+        &self.agent.tool_execution
     }
 
     pub(crate) fn component_path(&self, plugin: &ConfiguredPlugin) -> PathBuf {
@@ -102,18 +109,18 @@ impl Config {
     }
 }
 
-impl Default for ToolsConfig {
+impl Default for ToolExecutionSettings {
     fn default() -> Self {
         Self {
-            execution: ExecutionMode::default(),
+            mode: ExecutionMode::default(),
             max_concurrency: default_max_concurrency(),
         }
     }
 }
 
-impl ToolsConfig {
-    pub(crate) fn execution(&self) -> ExecutionMode {
-        self.execution
+impl ToolExecutionSettings {
+    pub(crate) fn mode(&self) -> ExecutionMode {
+        self.mode
     }
 
     pub(crate) fn max_concurrency(&self) -> NonZeroUsize {
@@ -183,25 +190,33 @@ mod tests {
     }
 
     #[test]
-    fn defaults_tool_execution_when_the_section_is_absent() {
-        let config: Config = serde_json::from_str("{}").unwrap();
+    fn defaults_agent_tool_execution_when_sections_are_absent() {
+        for source in [
+            "{}",
+            r#"{ "agent": {} }"#,
+            r#"{ "agent": { "tool_execution": {} } }"#,
+        ] {
+            let config: Config = serde_json::from_str(source).unwrap();
 
-        assert_eq!(config.tools.execution, ExecutionMode::Parallel);
-        assert_eq!(config.tools.max_concurrency.get(), 8);
+            assert_eq!(config.agent.tool_execution.mode, ExecutionMode::Parallel);
+            assert_eq!(config.agent.tool_execution.max_concurrency.get(), 8);
+        }
     }
 
     #[test]
-    fn parses_sequential_tool_execution() {
+    fn parses_sequential_agent_tool_execution() {
         let config: Config = serde_json::from_str(
             r#"{
-                "tools": {
-                    "execution": "sequential"
+                "agent": {
+                    "tool_execution": {
+                        "mode": "sequential"
+                    }
                 }
             }"#,
         )
         .unwrap();
 
-        assert_eq!(config.tools.execution, ExecutionMode::Sequential);
+        assert_eq!(config.agent.tool_execution.mode, ExecutionMode::Sequential);
     }
 
     #[test]
@@ -307,11 +322,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_zero_tool_concurrency() {
+    fn rejects_zero_agent_tool_concurrency() {
         let error = serde_json::from_str::<Config>(
             r#"{
-                "tools": {
-                    "max_concurrency": 0
+                "agent": {
+                    "tool_execution": {
+                        "max_concurrency": 0
+                    }
                 }
             }"#,
         )
@@ -321,17 +338,32 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_tool_settings() {
+    fn rejects_unknown_agent_tool_execution_settings() {
         let error = serde_json::from_str::<Config>(
             r#"{
-                "tools": {
-                    "concurrency": 8
+                "agent": {
+                    "tool_execution": {
+                        "concurrency": 8
+                    }
                 }
             }"#,
         )
         .unwrap_err();
 
         assert!(error.to_string().contains("unknown field `concurrency`"));
+    }
+
+    #[test]
+    fn no_role_name_is_a_top_level_config_key() {
+        for role in chap_wit::ROLES {
+            let source = format!(r#"{{ "{}": {{}} }}"#, role.interface);
+            let error = serde_json::from_str::<Config>(&source).unwrap_err();
+            assert!(
+                error.to_string().contains("unknown field"),
+                "`{}` is both a role interface and a top-level chap.json key",
+                role.interface,
+            );
+        }
     }
 
     #[test]

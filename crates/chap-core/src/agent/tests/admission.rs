@@ -695,8 +695,10 @@ async fn plugin_execution_override_makes_loaded_tools_sequential() {
     fs::write(
         &config_path,
         r#"{
-            "tools": {
-                "execution": "parallel"
+            "agent": {
+                "tool_execution": {
+                    "mode": "parallel"
+                }
             },
             "plugins": {
                 "example.tools": {

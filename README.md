@@ -94,17 +94,20 @@ concurrency limit in `chap.json`:
 
 ```json
 {
-  "tools": {
-    "execution": "parallel",
-    "max_concurrency": 8
+  "agent": {
+    "tool_execution": {
+      "mode": "parallel",
+      "max_concurrency": 8
+    }
   }
 }
 ```
 
-The values shown are the defaults. `"execution": "sequential"` runs every batch
-one call at a time. In parallel mode, any call whose tool resolves to sequential
-makes the whole batch sequential; otherwise `max_concurrency` limits the number
-of calls in flight. The limit must be at least 1 and has no fixed upper bound.
+The values shown are the defaults. Setting `agent.tool_execution.mode` to
+`"sequential"` runs every batch one call at a time. In parallel mode, any call
+whose tool resolves to sequential makes the whole batch sequential; otherwise
+`agent.tool_execution.max_concurrency` limits the number of calls in flight.
+The limit must be at least 1 and has no fixed upper bound.
 
 A plugin's `tools` section can tighten all tools loaded from that plugin:
 
@@ -121,14 +124,16 @@ A plugin's `tools` section can tighten all tools loaded from that plugin:
 }
 ```
 
-Plugin overrides are tighten-only: `sequential` can restrict a plugin, while
-`parallel` cannot loosen a tool's own sequential declaration. The plugin author
-knows whether a tool has shared internal state; an operator does not, so operator
-configuration may narrow scheduling but never widen it.
+Scheduling is tighten-only at both levels: `agent.tool_execution.mode` can force
+every batch to run sequentially, while `plugins.<id>.tools.execution` can force
+one plugin's tools to run sequentially. Neither can loosen a tool's own
+sequential declaration. The plugin author knows whether a tool has shared
+internal state; an operator does not, so operator configuration may narrow
+scheduling but never widen it.
 
-Raise `max_concurrency` deliberately. Each in-flight plugin call keeps a live
-wasmtime `Store` with its own memory allowance under `RuntimeLimits::default()`,
-so higher limits have a real memory cost.
+Raise `agent.tool_execution.max_concurrency` deliberately. Each in-flight plugin
+call keeps a live wasmtime `Store` with its own memory allowance under
+`RuntimeLimits::default()`, so higher limits have a real memory cost.
 
 Each built-in plugin carries its own Cargo configuration and defaults to the
 `wasm32-wasip2` target. The development shell provides Wasmtime as Cargo's test
@@ -255,7 +260,7 @@ failed to load plugin `openai`: plugin settings do not satisfy the schema
 old `settings-host` and `outbound-http` application interfaces are gone: v2
 injects typed settings through the framework contract and links HTTP only from
 the plugin's declared `net::EGRESS` grants. See [the WIT
-contracts](crates/chap-plugin/wit) for the CHAP-owned role interfaces;
+contracts](crates/chap-wit/wit/) for the CHAP-owned role interfaces;
 Lockgate adds its configuration interfaces automatically.
 
 ## Development

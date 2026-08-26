@@ -385,8 +385,8 @@ impl AgentBuilder {
         let lockgate = resources.host.take().expect("initialized Lockgate host");
         let tools = resources.tools.take().expect("initialized tool registry");
         let tool_execution = ToolExecutionConfig {
-            mode: config.tools().execution(),
-            max_concurrency: config.tools().max_concurrency().get(),
+            mode: config.tool_execution().mode(),
+            max_concurrency: config.tool_execution().max_concurrency().get(),
         };
         Ok(Agent {
             inner: Arc::new(AgentInner {
