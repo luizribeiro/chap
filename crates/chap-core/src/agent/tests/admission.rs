@@ -712,6 +712,46 @@ async fn rejects_tools_config_for_a_provider_only_plugin() {
 }
 
 #[tokio::test]
+async fn rejects_context_config_for_a_provider_only_plugin() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component("example.provider"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.json");
+    fs::write(
+        &config_path,
+        r#"{
+            "plugins": {
+                "example.provider": {
+                    "component": "provider.wasm",
+                    "context": {
+                        "channel": "system"
+                    }
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+
+    let error = AgentBuilder::load(&config_path)
+        .unwrap()
+        .start()
+        .await
+        .err()
+        .unwrap();
+
+    assert!(error.contains("plugin `example.provider`"), "{error}");
+    assert!(error.contains("`context` section"), "{error}");
+    assert!(
+        error.contains("does not export the context interface"),
+        "{error}"
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
 async fn accepts_an_instance_id_that_differs_from_plugin_metadata() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");

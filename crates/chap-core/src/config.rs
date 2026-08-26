@@ -50,12 +50,29 @@ struct PluginToolsConfig {
     execution: ExecutionMode,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ContextChannel {
+    #[default]
+    Context,
+    System,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PluginContextConfig {
+    #[serde(default)]
+    channel: ContextChannel,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfiguredPlugin {
     component: PathBuf,
     #[serde(default)]
     tools: Option<PluginToolsConfig>,
+    #[serde(default)]
+    context: Option<PluginContextConfig>,
     #[serde(default)]
     settings: serde_json::Map<String, serde_json::Value>,
 }
@@ -151,9 +168,17 @@ impl ConfiguredPlugin {
         Value::Object(self.settings.clone())
     }
 
+    pub(crate) fn context_channel(&self) -> ContextChannel {
+        self.context
+            .as_ref()
+            .map(|context| context.channel)
+            .unwrap_or_default()
+    }
+
     pub(crate) fn has_section(&self, name: &str) -> bool {
         match name {
             "tools" => self.tools.is_some(),
+            "context" => self.context.is_some(),
             _ => false,
         }
     }
@@ -290,6 +315,56 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.execution_mode("kagi"), ExecutionMode::Parallel);
+    }
+
+    #[test]
+    fn parses_plugin_context_channels_and_defaults_to_context() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "plugins": {
+                    "default-context": {
+                        "component": "context.wasm"
+                    },
+                    "operator-context": {
+                        "component": "context.wasm",
+                        "context": {
+                            "channel": "system"
+                        }
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.plugin("default-context").unwrap().context_channel(),
+            ContextChannel::Context
+        );
+        assert_eq!(
+            config.plugin("operator-context").unwrap().context_channel(),
+            ContextChannel::System
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_plugin_context_settings() {
+        for context in [
+            r#"{ "channel": "assistant" }"#,
+            r#"{ "channel": "context", "wrap": true }"#,
+        ] {
+            let source = format!(
+                r#"{{
+                    "plugins": {{
+                        "example": {{
+                            "component": "context.wasm",
+                            "context": {context}
+                        }}
+                    }}
+                }}"#
+            );
+
+            assert!(serde_json::from_str::<Config>(&source).is_err());
+        }
     }
 
     #[test]

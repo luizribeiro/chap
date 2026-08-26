@@ -34,25 +34,26 @@ impl Plugin for ProviderFixture {
 
 impl Provider for ProviderFixture {
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, ProviderError> {
-        let system = request.messages.iter().find_map(|message| match message {
-            Message::System(content) => Some(content.clone()),
-            _ => None,
-        });
-        let input = request
+        let has_system = request
+            .messages
+            .iter()
+            .any(|message| matches!(message, Message::System(_)));
+        let inputs = request
             .messages
             .into_iter()
-            .rev()
-            .find_map(|message| match message {
+            .filter_map(|message| match message {
+                Message::System(content) => Some(format!("system:{content}")),
+                Message::User(input) if has_system => Some(format!("user:{input}")),
                 Message::User(input) => Some(input),
                 _ => None,
             })
-            .ok_or_else(|| {
-                ProviderError::Other("provider fixture expected a user message".to_owned())
-            })?;
-        let response = match system {
-            Some(system) => format!("{}{system}|{input}", self.prefix),
-            None => format!("{}{}", self.prefix, input),
-        };
+            .collect::<Vec<_>>();
+        if inputs.is_empty() {
+            return Err(ProviderError::Other(
+                "provider fixture expected a system or user message".to_owned(),
+            ));
+        }
+        let response = format!("{}{}", self.prefix, inputs.join("|"));
         Ok(Completion {
             content: vec![AssistantContent::Text(response)],
             finish_reason: FinishReason::Stop,

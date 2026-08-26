@@ -87,8 +87,11 @@ async fn run_steps(
     };
     for _ in 0..MAX_PROVIDER_STEPS_PER_TURN {
         let mut messages = session.messages.read().await.clone();
-        if let Some(context) = &assembled_context {
-            messages.insert(0, Message::System(context.clone()));
+        if let Some(context) = &assembled_context.context {
+            messages.insert(0, Message::User(context.clone()));
+        }
+        if let Some(system) = &assembled_context.system {
+            messages.insert(0, Message::System(system.clone()));
         }
         let completion = tokio::select! {
             biased;

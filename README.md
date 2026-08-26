@@ -62,6 +62,9 @@ its component and settings:
     },
     "persona": {
       "component": "./target/wasm32-wasip2/release/chap_persona.wasm",
+      "context": {
+        "channel": "system"
+      },
       "settings": {
         "persona": "You are a wizard. Answer in riddles.",
         "priority": 0
@@ -165,6 +168,16 @@ effective port are part of the origin. Kagi declares the literal origin
 `https://kagi.com` and therefore needs no configurable origin. Persona exports
 only the context role and requests no capabilities; it contributes its
 configured text at run start without storing it in session history.
+
+Context plugins use the `context` channel by default, contributing one leading
+user message. Set a plugin's `context.channel` to `system` when that plugin
+speaks as the operator; system context is placed first, followed by contributed
+context and then conversation history. This distinction is a soft model prior,
+not a security boundary—the grant system controls what plugins and the model can
+actually do.
+
+CHAP does not wrap, attribute, or escape contributed content. A plugin relaying
+third-party bytes should provide its own wrapper and escaping.
 
 ### Token usage
 

@@ -14,10 +14,10 @@ interface context {
 
   /// Contributes this plugin's share of a session's assembled context.
   ///
-  /// Called at run start. Every segment from every context plugin is sorted,
-  /// joined, and prepended to the request as a single system message; the
-  /// result is never written to session history, so it survives compaction by
-  /// being recomputed rather than rehydrated.
+  /// Called at run start. Segments are sorted within their operator-configured
+  /// channel, joined, and prepended as at most one system message followed by
+  /// at most one user message. The result is never written to session history,
+  /// so it survives compaction by being recomputed rather than rehydrated.
   ///
   /// Returning an empty list contributes nothing. Returning an error means the
   /// plugin could not determine its segments: the host reuses this plugin's

@@ -1,4 +1,4 @@
-use crate::config::{Config, ConfiguredPlugin};
+use crate::config::{Config, ConfiguredPlugin, ContextChannel};
 use crate::consent::{ConsentStore, PluginConsentReview, consent_drift};
 use crate::session::{
     RunError, Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions,
@@ -86,11 +86,13 @@ impl Drop for StartResources {
 struct LoadedPlugin {
     handle: PluginHandle,
     roles: BTreeSet<&'static str>,
+    context_channel: ContextChannel,
 }
 
 struct AdmittedPlugin {
     handle: PluginHandle,
     exported_interfaces: Vec<String>,
+    context_channel: ContextChannel,
 }
 
 impl LoadedPlugin {
@@ -415,6 +417,7 @@ impl AgentBuilder {
         Ok(PluginLoad::Admitted(AdmittedPlugin {
             handle,
             exported_interfaces,
+            context_channel: plugin.context_channel(),
         }))
     }
 
@@ -533,7 +536,15 @@ impl AgentBuilder {
                     .map(|role| role.interface)
                     .collect();
                 let handle = admitted.handle;
-                (id, LoadedPlugin { handle, roles })
+                let context_channel = admitted.context_channel;
+                (
+                    id,
+                    LoadedPlugin {
+                        handle,
+                        roles,
+                        context_channel,
+                    },
+                )
             })
             .collect()
     }

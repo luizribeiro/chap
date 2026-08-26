@@ -1,4 +1,7 @@
-use super::{AgentInner, PLUGIN_FUEL_PER_CALL, bindings, context::ContextFuture};
+use super::{
+    AgentInner, PLUGIN_FUEL_PER_CALL, bindings,
+    context::{AssembledContext, ContextFuture},
+};
 use crate::{
     ProviderError, SessionId, ToolDefinition,
     session::{AssistantContent, Message, Reasoning, ToolCall, Usage},
@@ -15,7 +18,7 @@ pub(super) trait CompletionBackend: Sync {
     fn complete(&self, messages: Vec<Message>) -> CompletionFuture<'_>;
 
     fn assemble_context(&self, _session: SessionId) -> ContextFuture<'_> {
-        Box::pin(async { Ok(None) })
+        Box::pin(async { Ok(AssembledContext::default()) })
     }
 }
 

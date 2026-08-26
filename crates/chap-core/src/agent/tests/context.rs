@@ -9,9 +9,9 @@ use std::{
 };
 
 #[tokio::test]
-async fn real_context_plugins_compose_for_the_request_but_not_history() {
+async fn real_context_plugins_use_configured_channels_without_reaching_history() {
     let (agent, _directory) = start_agent([
-        (
+        context_plugin(
             "later-context",
             json!({
                 "segments": [{
@@ -21,13 +21,33 @@ async fn real_context_plugins_compose_for_the_request_but_not_history() {
                 }]
             }),
         ),
-        (
+        context_plugin(
             "earlier-context",
             json!({
                 "segments": [{
                     "id": "earlier",
                     "content": "earlier guidance",
                     "priority": -10,
+                }]
+            }),
+        ),
+        system_plugin(
+            "later-system",
+            json!({
+                "segments": [{
+                    "id": "later-system",
+                    "content": "later operator guidance",
+                    "priority": 40,
+                }]
+            }),
+        ),
+        system_plugin(
+            "earlier-system",
+            json!({
+                "segments": [{
+                    "id": "earlier-system",
+                    "content": "earlier operator guidance",
+                    "priority": -20,
                 }]
             }),
         ),
@@ -39,20 +59,23 @@ async fn real_context_plugins_compose_for_the_request_but_not_history() {
 
     assert_eq!(
         session.send("hello").await.unwrap(),
-        "provider:earlier guidance\n\nlater guidance|hello"
+        "provider:system:earlier operator guidance\n\nlater operator guidance|user:earlier guidance\n\nlater guidance|user:hello"
     );
     let history = session.state.messages.read().await;
+    assert_eq!(history.len(), 2, "{history:?}");
+    assert!(matches!(history.first(), Some(Message::User(input)) if input == "hello"));
     assert!(
         !history
             .iter()
             .any(|message| matches!(message, Message::System(_))),
-        "assembled context must never be stored in session history: {history:?}"
+        "assembled system context must never be stored in session history: {history:?}"
     );
 }
 
 #[tokio::test]
 async fn hanging_real_context_plugin_hits_the_assembly_deadline() {
-    let (agent, _directory) = start_agent([("hanging-context", json!({ "hang": true }))]).await;
+    let (agent, _directory) =
+        start_agent([context_plugin("hanging-context", json!({ "hang": true }))]).await;
     let session = agent
         .session(SessionOptions::new("fixture-provider"))
         .unwrap();
@@ -75,7 +98,7 @@ async fn hanging_real_context_plugin_hits_the_assembly_deadline() {
 }
 
 async fn start_agent(
-    contexts: impl IntoIterator<Item = (&'static str, Value)>,
+    contexts: impl IntoIterator<Item = ConfiguredContext>,
 ) -> (Agent, tempfile::TempDir) {
     let components = sdk_components();
     let directory = tempfile::tempdir().unwrap();
@@ -87,14 +110,15 @@ async fn start_agent(
             "settings": { "prefix": "provider:" },
         }),
     );
-    for (id, settings) in contexts {
-        plugins.insert(
-            id.to_owned(),
-            json!({
-                "component": components.context.display().to_string(),
-                "settings": settings,
-            }),
-        );
+    for context in contexts {
+        let mut configured = json!({
+            "component": components.context.display().to_string(),
+            "settings": context.settings,
+        });
+        if let Some(channel) = context.channel {
+            configured["context"] = json!({ "channel": channel });
+        }
+        plugins.insert(context.id.to_owned(), configured);
     }
     let config_path = directory.path().join("chap.json");
     std::fs::write(&config_path, json!({ "plugins": plugins }).to_string()).unwrap();
@@ -104,6 +128,28 @@ async fn start_agent(
         builder.approve_plugin(id).await.unwrap();
     }
     (builder.start().await.unwrap(), directory)
+}
+
+struct ConfiguredContext {
+    id: &'static str,
+    channel: Option<&'static str>,
+    settings: Value,
+}
+
+fn context_plugin(id: &'static str, settings: Value) -> ConfiguredContext {
+    ConfiguredContext {
+        id,
+        channel: None,
+        settings,
+    }
+}
+
+fn system_plugin(id: &'static str, settings: Value) -> ConfiguredContext {
+    ConfiguredContext {
+        id,
+        channel: Some("system"),
+        settings,
+    }
 }
 
 struct Components {
