@@ -30,6 +30,7 @@ mod turn;
 const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
 const PLUGIN_ADMISSION_DEADLINE: Duration = Duration::from_secs(30);
 const CONTEXT_ASSEMBLY_DEADLINE: Duration = Duration::from_secs(10);
+const GUEST_HTTP_REQUEST_CEILING: Duration = Duration::from_secs(120);
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
 type InnerHost = Host<()>;
@@ -313,7 +314,6 @@ impl AgentBuilder {
             resources.builder.as_mut().expect("uninitialized host"),
             config,
             consent,
-            plugin_call_deadlines,
         )
         .await?;
         let builder = resources.builder.take().expect("uninitialized host");
@@ -347,15 +347,12 @@ impl AgentBuilder {
         builder: &mut HostBuilder<()>,
         config: &Config,
         consent: &ConsentStore,
-        plugin_call_deadlines: PluginCallDeadlines,
     ) -> Result<(BTreeMap<String, AdmittedPlugin>, BTreeMap<String, String>), String> {
         let mut plugins = BTreeMap::new();
         let mut plugin_errors = BTreeMap::new();
 
         for (id, plugin) in config.plugins() {
-            match Self::load_plugin(builder, config, consent, id, plugin, plugin_call_deadlines)
-                .await?
-            {
+            match Self::load_plugin(builder, config, consent, id, plugin).await? {
                 PluginLoad::Admitted(admitted) => {
                     plugins.insert(id.to_owned(), admitted);
                 }
@@ -374,7 +371,6 @@ impl AgentBuilder {
         consent: &ConsentStore,
         id: &str,
         plugin: &ConfiguredPlugin,
-        plugin_call_deadlines: PluginCallDeadlines,
     ) -> Result<PluginLoad, String> {
         let path = config.component_path(plugin);
         let prepared = Self::prepare_plugin(builder, config, id, plugin).await?;
@@ -406,7 +402,7 @@ impl AgentBuilder {
             .admit(
                 prepared,
                 acceptance,
-                runtime_limits(plugin_call_deadlines),
+                runtime_limits(),
                 plugin_admission_context(),
             )
             .await
@@ -554,14 +550,9 @@ fn plugin_admission_context() -> InvocationCtx<()> {
     InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL, PLUGIN_ADMISSION_DEADLINE)
 }
 
-fn runtime_limits(deadlines: PluginCallDeadlines) -> RuntimeLimits {
+fn runtime_limits() -> RuntimeLimits {
     RuntimeLimits {
-        http_request_timeout_ceiling: Some(
-            deadlines
-                .provider
-                .max(deadlines.tool)
-                .max(CONTEXT_ASSEMBLY_DEADLINE),
-        ),
+        http_request_timeout_ceiling: Some(GUEST_HTTP_REQUEST_CEILING),
         ..RuntimeLimits::default()
     }
 }

@@ -1,7 +1,6 @@
 use super::{
     super::{
-        AgentBuilder, PLUGIN_ADMISSION_DEADLINE, PLUGIN_FUEL_PER_CALL, PluginCallDeadlines,
-        plugin_admission_context,
+        AgentBuilder, PLUGIN_ADMISSION_DEADLINE, PLUGIN_FUEL_PER_CALL, plugin_admission_context,
         provider::{CompletionBackend, FinishReason, PluginBackend},
         runtime_limits,
     },
@@ -36,37 +35,10 @@ fn plugin_admission_context_has_expected_deadline() {
 }
 
 #[test]
-fn http_timeout_ceiling_uses_larger_provider_deadline() {
-    let provider = Duration::from_secs(45);
-    let tool = Duration::from_secs(15);
-
+fn guest_http_request_ceiling_uses_its_own_limit() {
     assert_default_runtime_limits_except_timeout_ceiling(
-        runtime_limits(PluginCallDeadlines { provider, tool }),
-        provider,
-    );
-}
-
-#[test]
-fn http_timeout_ceiling_uses_larger_tool_deadline() {
-    let provider = Duration::from_secs(15);
-    let tool = Duration::from_secs(45);
-
-    assert_default_runtime_limits_except_timeout_ceiling(
-        runtime_limits(PluginCallDeadlines { provider, tool }),
-        tool,
-    );
-}
-
-#[test]
-fn http_timeout_ceiling_includes_context_deadline() {
-    let deadline = Duration::from_secs(1);
-
-    assert_default_runtime_limits_except_timeout_ceiling(
-        runtime_limits(PluginCallDeadlines {
-            provider: deadline,
-            tool: deadline,
-        }),
-        super::super::CONTEXT_ASSEMBLY_DEADLINE,
+        runtime_limits(),
+        super::super::GUEST_HTTP_REQUEST_CEILING,
     );
 }
 
