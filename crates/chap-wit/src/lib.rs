@@ -3,9 +3,29 @@
 const PACKAGE: &str = "package chap:agent@0.2.0;";
 pub const WORLD: &str = "chap-plugin";
 pub const TYPES_WIT: &str = include_str!("../wit/types.wit");
-pub const PROVIDER_WIT: &str = include_str!("../wit/provider.wit");
-pub const TOOLS_WIT: &str = include_str!("../wit/tools.wit");
-pub const CONTEXT_WIT: &str = include_str!("../wit/context.wit");
+
+macro_rules! roles {
+    ($(
+        $name:ident, $wit_name:ident = $rust_name:ident {
+            interface: $interface:literal,
+            display_name: $display_name:literal,
+            wit: $wit:literal,
+        }
+    ),+ $(,)?) => {
+        $(
+            pub const $wit_name: &str = include_str!($wit);
+
+            pub static $name: Role = Role {
+                rust_name: stringify!($rust_name),
+                interface: $interface,
+                display_name: $display_name,
+                wit: $wit_name,
+            };
+        )+
+
+        pub static ROLES: &[&Role] = &[$(&$name),+];
+    };
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Role {
@@ -15,28 +35,23 @@ pub struct Role {
     pub wit: &'static str,
 }
 
-pub static PROVIDER: Role = Role {
-    rust_name: "Provider",
-    interface: "provider",
-    display_name: "provider",
-    wit: PROVIDER_WIT,
-};
-
-pub static TOOLS: Role = Role {
-    rust_name: "Tools",
-    interface: "tools",
-    display_name: "tool",
-    wit: TOOLS_WIT,
-};
-
-pub static CONTEXT: Role = Role {
-    rust_name: "Context",
-    interface: "context",
-    display_name: "context",
-    wit: CONTEXT_WIT,
-};
-
-pub static ROLES: &[&Role] = &[&PROVIDER, &TOOLS, &CONTEXT];
+roles! {
+    PROVIDER, PROVIDER_WIT = Provider {
+        interface: "provider",
+        display_name: "provider",
+        wit: "../wit/provider.wit",
+    },
+    TOOLS, TOOLS_WIT = Tools {
+        interface: "tools",
+        display_name: "tool",
+        wit: "../wit/tools.wit",
+    },
+    CONTEXT, CONTEXT_WIT = Context {
+        interface: "context",
+        display_name: "context",
+        wit: "../wit/context.wit",
+    },
+}
 
 pub fn resolve(name: &str) -> Option<&'static Role> {
     ROLES.iter().copied().find(|role| role.rust_name == name)
@@ -67,6 +82,14 @@ fn wit_body(source: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn role_table_is_self_consistent() {
+        for role in ROLES {
+            let resolved = resolve(role.rust_name).expect("every role must resolve by rust_name");
+            assert!(std::ptr::eq(*role, resolved));
+        }
+    }
 
     #[test]
     fn composes_a_single_role_world() {
