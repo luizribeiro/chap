@@ -29,9 +29,115 @@ mod turn;
 
 const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
 const PLUGIN_ADMISSION_DEADLINE: Duration = Duration::from_secs(30);
-const CONTEXT_ASSEMBLY_DEADLINE: Duration = Duration::from_secs(10);
 const GUEST_HTTP_REQUEST_CEILING: Duration = Duration::from_secs(120);
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
+
+macro_rules! define_plugin_calls {
+    ($(
+        $(#[$meta:meta])*
+        $variant:ident => ($interface:literal, $function:literal),
+    )+) => {
+        /// An exported WIT function callable on a plugin.
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        pub enum PluginCall {
+            $(
+                $(#[$meta])*
+                $variant,
+            )+
+        }
+
+        impl PluginCall {
+            #[cfg(test)]
+            const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            #[cfg(test)]
+            const fn wit_name(self) -> (&'static str, &'static str) {
+                match self {
+                    $(Self::$variant => ($interface, $function),)+
+                }
+            }
+        }
+    };
+}
+
+define_plugin_calls! {
+    /// `provider.complete`.
+    ProviderComplete => ("provider", "complete"),
+    /// `tools.definitions`.
+    ToolDefinitions => ("tools", "definitions"),
+    /// `tools.execute`.
+    ToolExecute => ("tools", "execute"),
+    /// `context.segments`.
+    ContextSegments => ("context", "segments"),
+}
+
+/// Fuel and wall-clock bounds for one exported plugin call.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CallBudget {
+    /// Maximum guest instructions consumed by the call.
+    pub fuel: u64,
+    /// Maximum wall-clock duration of the call.
+    pub deadline: Duration,
+}
+
+impl CallBudget {
+    /// Creates the bounded invocation context used to make the call.
+    pub fn invocation_context(self) -> InvocationCtx<()> {
+        InvocationCtx::bounded(self.fuel, self.deadline)
+    }
+}
+
+/// Production plugin-call budgets, keyed by exported WIT function.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CallBudgets {
+    provider_complete: CallBudget,
+    tool_definitions: CallBudget,
+    tool_execute: CallBudget,
+    context_segments: CallBudget,
+}
+
+impl CallBudgets {
+    fn resolve(self, call: PluginCall) -> CallBudget {
+        match call {
+            PluginCall::ProviderComplete => self.provider_complete,
+            PluginCall::ToolDefinitions => self.tool_definitions,
+            PluginCall::ToolExecute => self.tool_execute,
+            PluginCall::ContextSegments => self.context_segments,
+        }
+    }
+
+    fn set(&mut self, call: PluginCall, budget: CallBudget) {
+        match call {
+            PluginCall::ProviderComplete => self.provider_complete = budget,
+            PluginCall::ToolDefinitions => self.tool_definitions = budget,
+            PluginCall::ToolExecute => self.tool_execute = budget,
+            PluginCall::ContextSegments => self.context_segments = budget,
+        }
+    }
+}
+
+impl Default for CallBudgets {
+    fn default() -> Self {
+        Self {
+            provider_complete: CallBudget {
+                fuel: PLUGIN_FUEL_PER_CALL,
+                deadline: Duration::from_secs(120),
+            },
+            tool_definitions: CallBudget {
+                fuel: PLUGIN_FUEL_PER_CALL,
+                deadline: Duration::from_secs(30),
+            },
+            tool_execute: CallBudget {
+                fuel: PLUGIN_FUEL_PER_CALL,
+                deadline: Duration::from_secs(30),
+            },
+            context_segments: CallBudget {
+                fuel: PLUGIN_FUEL_PER_CALL,
+                deadline: Duration::from_secs(10),
+            },
+        }
+    }
+}
 
 type InnerHost = Host<()>;
 type StartDropResources = (
@@ -106,7 +212,7 @@ pub struct AgentBuilder {
     config: Config,
     consent: ConsentStore,
     tools: ToolRegistry,
-    plugin_call_deadlines: PluginCallDeadlines,
+    call_budgets: CallBudgets,
 }
 
 pub struct Agent {
@@ -119,12 +225,6 @@ struct ToolExecutionConfig {
     max_concurrency: usize,
 }
 
-#[derive(Clone, Copy)]
-struct PluginCallDeadlines {
-    provider: Duration,
-    tool: Duration,
-}
-
 pub(crate) struct AgentInner {
     lockgate: Arc<InnerHost>,
     plugins: BTreeMap<String, LoadedPlugin>,
@@ -132,7 +232,7 @@ pub(crate) struct AgentInner {
     sessions: SessionManager,
     tools: ToolRegistry,
     tool_execution: ToolExecutionConfig,
-    plugin_call_deadlines: PluginCallDeadlines,
+    call_budgets: CallBudgets,
     context_last_good:
         AsyncMutex<BTreeMap<(crate::SessionId, String), Vec<context::ContextSegment>>>,
 }
@@ -141,16 +241,20 @@ impl AgentBuilder {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         let config = Config::load(path.as_ref())?;
         let consent = ConsentStore::new(config.consent_path());
-        let plugin_call_deadlines = PluginCallDeadlines {
-            provider: config.provider().deadline(),
-            tool: config.tools().deadline(),
-        };
         Ok(Self {
             config,
             consent,
             tools: ToolRegistry::new(),
-            plugin_call_deadlines,
+            call_budgets: CallBudgets::default(),
         })
+    }
+
+    /// Overrides the execution budget for one exported plugin call on every plugin.
+    ///
+    /// Calls without an override retain their production fuel and deadline defaults.
+    pub fn call_budget(mut self, call: PluginCall, budget: CallBudget) -> Self {
+        self.call_budgets.set(call, budget);
+        self
     }
 
     pub fn plugins(&self) -> impl Iterator<Item = (&str, &Path)> {
@@ -263,27 +367,21 @@ impl AgentBuilder {
             config,
             consent,
             tools,
-            plugin_call_deadlines,
+            call_budgets,
         } = self;
         let builder = HostBuilder::new(())
             .map_err(|error| format!("failed to create Lockgate host: {error}"))?;
         let mut resources = StartResources::new(tools, builder);
-        let (plugins, plugin_errors) = match Self::initialize_plugins(
-            &mut resources,
-            &config,
-            &consent,
-            plugin_call_deadlines,
-        )
-        .await
-        {
-            Ok(plugins) => plugins,
-            Err(error) => {
-                return match resources.cleanup().await {
-                    Ok(()) => Err(error),
-                    Err(cleanup_error) => Err(format!("{error}; {cleanup_error}")),
-                };
-            }
-        };
+        let (plugins, plugin_errors) =
+            match Self::initialize_plugins(&mut resources, &config, &consent, call_budgets).await {
+                Ok(plugins) => plugins,
+                Err(error) => {
+                    return match resources.cleanup().await {
+                        Ok(()) => Err(error),
+                        Err(cleanup_error) => Err(format!("{error}; {cleanup_error}")),
+                    };
+                }
+            };
         let lockgate = resources.host.take().expect("initialized Lockgate host");
         let tools = resources.tools.take().expect("initialized tool registry");
         let tool_execution = ToolExecutionConfig {
@@ -298,7 +396,7 @@ impl AgentBuilder {
                 sessions: SessionManager::new(),
                 tools,
                 tool_execution,
-                plugin_call_deadlines,
+                call_budgets,
                 context_last_good: AsyncMutex::new(BTreeMap::new()),
             }),
         })
@@ -308,7 +406,7 @@ impl AgentBuilder {
         resources: &mut StartResources,
         config: &Config,
         consent: &ConsentStore,
-        plugin_call_deadlines: PluginCallDeadlines,
+        call_budgets: CallBudgets,
     ) -> Result<(BTreeMap<String, LoadedPlugin>, BTreeMap<String, String>), String> {
         let (admitted, plugin_errors) = Self::load_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
@@ -329,7 +427,7 @@ impl AgentBuilder {
                 Arc::clone(lockgate),
                 plugin.handle.clone(),
                 config.execution_mode(id),
-                plugin_call_deadlines.tool,
+                call_budgets,
             )
             .await?
             {

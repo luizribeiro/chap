@@ -1,7 +1,7 @@
-use super::{InnerHost, PLUGIN_FUEL_PER_CALL, bindings};
+use super::{CallBudgets, InnerHost, PluginCall, bindings};
 use crate::{ExecutionMode, Tool, ToolDefinition};
-use lockgate::{CallError, InvocationCtx, PluginHandle};
-use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
+use lockgate::{CallError, PluginHandle};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bindings::{
     tools as tool_bindings,
@@ -14,7 +14,7 @@ pub(super) struct PluginTool {
     definition: ToolDefinition,
     execution_mode: ExecutionMode,
     runtime: Arc<InnerHost>,
-    call_deadline: Duration,
+    call_budgets: CallBudgets,
 }
 
 impl PluginTool {
@@ -23,12 +23,16 @@ impl PluginTool {
         runtime: Arc<InnerHost>,
         handle: PluginHandle,
         configured_mode: ExecutionMode,
-        call_deadline: Duration,
+        call_budgets: CallBudgets,
     ) -> Result<Vec<Self>, String> {
         let definitions = runtime
             .client::<tool_bindings::Role>(&handle)
             .map_err(|error| format!("tool plugin `{plugin}` failed: {error}"))?
-            .definitions(InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL, call_deadline))
+            .definitions(
+                call_budgets
+                    .resolve(PluginCall::ToolDefinitions)
+                    .invocation_context(),
+            )
             .await
             .map_err(|error| format!("tool plugin `{plugin}` failed: {error}"))?
             .map_err(|error| format!("tool plugin `{plugin}`: {error}"))?;
@@ -42,7 +46,7 @@ impl PluginTool {
                     definition: registration.definition.into(),
                     execution_mode: resolve_tool_mode(declared_mode, configured_mode),
                     runtime: Arc::clone(&runtime),
-                    call_deadline,
+                    call_budgets,
                 }
             })
             .collect())
@@ -67,7 +71,9 @@ impl Tool for PluginTool {
                 .client::<tool_bindings::Role>(&self.handle)
                 .map_err(|error| format!("tool plugin `{}` failed: {error}", self.plugin))?
                 .execute(
-                    InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL, self.call_deadline),
+                    self.call_budgets
+                        .resolve(PluginCall::ToolExecute)
+                        .invocation_context(),
                     &self.definition.name,
                     &arguments,
                 )

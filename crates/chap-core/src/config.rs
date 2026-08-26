@@ -4,21 +4,15 @@ use serde_json::Value;
 use std::{
     collections::BTreeMap,
     fs,
-    num::{NonZeroU64, NonZeroUsize},
+    num::NonZeroUsize,
     path::{Path, PathBuf},
-    time::Duration,
 };
-
-const DEFAULT_PROVIDER_DEADLINE_SECONDS: NonZeroU64 = NonZeroU64::new(120).expect("nonzero");
-const DEFAULT_TOOL_DEADLINE_SECONDS: NonZeroU64 = NonZeroU64::new(30).expect("nonzero");
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
     plugins: BTreeMap<String, ConfiguredPlugin>,
-    #[serde(default)]
-    provider: ProviderConfig,
     #[serde(default)]
     tools: ToolsConfig,
     #[serde(skip)]
@@ -27,16 +21,7 @@ pub struct Config {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProviderConfig {
-    #[serde(default = "default_provider_deadline_seconds")]
-    deadline_seconds: NonZeroU64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ToolsConfig {
-    #[serde(default = "default_tool_deadline_seconds")]
-    deadline_seconds: NonZeroU64,
     #[serde(default)]
     execution: ExecutionMode,
     #[serde(default = "default_max_concurrency")]
@@ -108,10 +93,6 @@ impl Config {
         &self.tools
     }
 
-    pub(crate) fn provider(&self) -> &ProviderConfig {
-        &self.provider
-    }
-
     pub(crate) fn component_path(&self, plugin: &ConfiguredPlugin) -> PathBuf {
         self.directory.join(&plugin.component)
     }
@@ -121,35 +102,16 @@ impl Config {
     }
 }
 
-impl Default for ProviderConfig {
-    fn default() -> Self {
-        Self {
-            deadline_seconds: default_provider_deadline_seconds(),
-        }
-    }
-}
-
 impl Default for ToolsConfig {
     fn default() -> Self {
         Self {
-            deadline_seconds: default_tool_deadline_seconds(),
             execution: ExecutionMode::default(),
             max_concurrency: default_max_concurrency(),
         }
     }
 }
 
-impl ProviderConfig {
-    pub(crate) fn deadline(&self) -> Duration {
-        Duration::from_secs(self.deadline_seconds.get())
-    }
-}
-
 impl ToolsConfig {
-    pub(crate) fn deadline(&self) -> Duration {
-        Duration::from_secs(self.deadline_seconds.get())
-    }
-
     pub(crate) fn execution(&self) -> ExecutionMode {
         self.execution
     }
@@ -186,14 +148,6 @@ impl ConfiguredPlugin {
 
 fn default_max_concurrency() -> NonZeroUsize {
     NonZeroUsize::new(8).expect("default tool concurrency is nonzero")
-}
-
-fn default_provider_deadline_seconds() -> NonZeroU64 {
-    DEFAULT_PROVIDER_DEADLINE_SECONDS
-}
-
-fn default_tool_deadline_seconds() -> NonZeroU64 {
-    DEFAULT_TOOL_DEADLINE_SECONDS
 }
 
 #[cfg(test)]
@@ -234,38 +188,6 @@ mod tests {
 
         assert_eq!(config.tools.execution, ExecutionMode::Parallel);
         assert_eq!(config.tools.max_concurrency.get(), 8);
-    }
-
-    #[test]
-    fn parses_plugin_call_deadlines() {
-        let config: Config = serde_json::from_str(
-            r#"{
-                "provider": {
-                    "deadline_seconds": 17
-                },
-                "tools": {
-                    "deadline_seconds": 9
-                }
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(config.provider.deadline(), Duration::from_secs(17));
-        assert_eq!(config.tools.deadline(), Duration::from_secs(9));
-    }
-
-    #[test]
-    fn defaults_plugin_call_deadlines_when_sections_are_absent() {
-        let config: Config = serde_json::from_str("{}").unwrap();
-
-        assert_eq!(
-            config.provider.deadline(),
-            Duration::from_secs(DEFAULT_PROVIDER_DEADLINE_SECONDS.get())
-        );
-        assert_eq!(
-            config.tools.deadline(),
-            Duration::from_secs(DEFAULT_TOOL_DEADLINE_SECONDS.get())
-        );
     }
 
     #[test]
@@ -396,52 +318,6 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("nonzero usize"));
-    }
-
-    #[test]
-    fn rejects_zero_provider_deadline() {
-        let error = serde_json::from_str::<Config>(
-            r#"{
-                "provider": {
-                    "deadline_seconds": 0
-                }
-            }"#,
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("nonzero u64"));
-    }
-
-    #[test]
-    fn rejects_zero_tool_deadline() {
-        let error = serde_json::from_str::<Config>(
-            r#"{
-                "tools": {
-                    "deadline_seconds": 0
-                }
-            }"#,
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("nonzero u64"));
-    }
-
-    #[test]
-    fn rejects_unknown_provider_settings() {
-        let error = serde_json::from_str::<Config>(
-            r#"{
-                "provider": {
-                    "timeout_seconds": 120
-                }
-            }"#,
-        )
-        .unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("unknown field `timeout_seconds`")
-        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use super::super::{Agent, AgentBuilder, CONTEXT_ASSEMBLY_DEADLINE};
+use super::super::{Agent, AgentBuilder, CallBudgets, PluginCall};
 use crate::{SessionOptions, session::Message};
 use serde_json::{Map, Value, json};
 use std::{
@@ -79,9 +79,12 @@ async fn hanging_real_context_plugin_hits_the_assembly_deadline() {
     let session = agent
         .session(SessionOptions::new("fixture-provider"))
         .unwrap();
+    let context_deadline = CallBudgets::default()
+        .resolve(PluginCall::ContextSegments)
+        .deadline;
 
     let error = tokio::time::timeout(
-        CONTEXT_ASSEMBLY_DEADLINE + Duration::from_secs(5),
+        context_deadline + Duration::from_secs(5),
         session.send("hello"),
     )
     .await

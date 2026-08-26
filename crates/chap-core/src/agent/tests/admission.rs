@@ -11,14 +11,18 @@ use super::{
         tool_component_with_schema, unsupported_component,
     },
 };
-use crate::{ExecutionMode, ProviderError, SessionOptions, Tool, ToolDefinition};
+use crate::{
+    CallBudget, ExecutionMode, PluginCall, ProviderError, SessionOptions, Tool, ToolDefinition,
+};
 use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role, RuntimeLimits};
 use std::{
+    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
     sync::mpsc,
     time::Duration,
 };
+use wit_parser::{Resolve, WorldItem, WorldKey};
 
 #[test]
 fn plugin_admission_context_has_expected_deadline() {
@@ -40,6 +44,76 @@ fn guest_http_request_ceiling_uses_its_own_limit() {
         runtime_limits(),
         super::super::GUEST_HTTP_REQUEST_CEILING,
     );
+}
+
+#[test]
+fn default_call_budgets_preserve_existing_bounds() {
+    let budgets = super::super::CallBudgets::default();
+
+    assert_eq!(
+        budgets.resolve(PluginCall::ProviderComplete),
+        CallBudget {
+            fuel: PLUGIN_FUEL_PER_CALL,
+            deadline: Duration::from_secs(120),
+        }
+    );
+    assert_eq!(
+        budgets.resolve(PluginCall::ToolDefinitions),
+        CallBudget {
+            fuel: PLUGIN_FUEL_PER_CALL,
+            deadline: Duration::from_secs(30),
+        }
+    );
+    assert_eq!(
+        budgets.resolve(PluginCall::ToolExecute),
+        CallBudget {
+            fuel: PLUGIN_FUEL_PER_CALL,
+            deadline: Duration::from_secs(30),
+        }
+    );
+    assert_eq!(
+        budgets.resolve(PluginCall::ContextSegments),
+        CallBudget {
+            fuel: PLUGIN_FUEL_PER_CALL,
+            deadline: Duration::from_secs(10),
+        }
+    );
+}
+
+#[test]
+fn plugin_call_keys_match_the_composed_wit_exports() {
+    let mut resolve = Resolve::new();
+    let package = resolve
+        .push_str("chap-plugin.wit", &chap_wit::world(chap_wit::ROLES))
+        .unwrap();
+    let world = resolve.packages[package].worlds[chap_wit::WORLD];
+    let mut exported_functions = BTreeSet::new();
+
+    for (key, item) in &resolve.worlds[world].exports {
+        let WorldItem::Interface { id, .. } = item else {
+            continue;
+        };
+        let interface = match key {
+            WorldKey::Name(name) => name.clone(),
+            WorldKey::Interface(_) => resolve.interfaces[*id]
+                .name
+                .clone()
+                .expect("exported interfaces must be named"),
+        };
+        for function in resolve.interfaces[*id].functions.keys() {
+            exported_functions.insert((interface.clone(), function.clone()));
+        }
+    }
+
+    let keyed_functions: BTreeSet<_> = PluginCall::ALL
+        .iter()
+        .map(|call| {
+            let (interface, function) = call.wit_name();
+            (interface.to_owned(), function.to_owned())
+        })
+        .collect();
+
+    assert_eq!(keyed_functions, exported_functions);
 }
 
 fn assert_default_runtime_limits_except_timeout_ceiling(
@@ -149,9 +223,6 @@ async fn times_out_a_hanging_provider_plugin() {
     fs::write(
         &config_path,
         r#"{
-            "provider": {
-                "deadline_seconds": 1
-            },
             "plugins": {
                 "example": {
                     "component": "provider.wasm"
@@ -160,7 +231,9 @@ async fn times_out_a_hanging_provider_plugin() {
         }"#,
     )
     .unwrap();
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = AgentBuilder::load(&config_path)
+        .unwrap()
+        .call_budget(PluginCall::ProviderComplete, one_second_call_budget());
     builder.approve_plugin("example").await.unwrap();
     let agent = builder.start().await.unwrap();
     let backend = PluginBackend::new(&agent.inner, "example");
@@ -536,9 +609,6 @@ async fn times_out_a_hanging_tool_plugin() {
     fs::write(
         &config_path,
         r#"{
-            "tools": {
-                "deadline_seconds": 1
-            },
             "plugins": {
                 "example.tools": {
                     "component": "tools.wasm"
@@ -548,7 +618,9 @@ async fn times_out_a_hanging_tool_plugin() {
     )
     .unwrap();
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = AgentBuilder::load(&config_path)
+        .unwrap()
+        .call_budget(PluginCall::ToolExecute, one_second_call_budget());
     builder.approve_plugin("example.tools").await.unwrap();
     let agent = builder.start().await.unwrap();
 
@@ -566,6 +638,13 @@ async fn times_out_a_hanging_tool_plugin() {
     );
     assert!(!error.contains(" failed: "), "{error}");
     fs::remove_dir_all(directory).unwrap();
+}
+
+fn one_second_call_budget() -> CallBudget {
+    CallBudget {
+        fuel: PLUGIN_FUEL_PER_CALL,
+        deadline: Duration::from_secs(1),
+    }
 }
 
 #[tokio::test]

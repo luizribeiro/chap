@@ -1,4 +1,4 @@
-use chap_core::AgentBuilder;
+use chap_core::{AgentBuilder, CallBudget, PluginCall};
 use lockgate::{HostBuilder, InvocationCtx, PluginConfig, PluginHandle, RuntimeLimits};
 use serde_json::json;
 use std::{
@@ -197,9 +197,6 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
     std::fs::write(
         &config_path,
         json!({
-            "tools": {
-                "deadline_seconds": 1,
-            },
             "plugins": {
                 "sdk-multi-role": {
                     "component": components.multi_role.display().to_string(),
@@ -213,7 +210,13 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
         .to_string(),
     )
     .unwrap();
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = AgentBuilder::load(&config_path).unwrap().call_budget(
+        PluginCall::ToolDefinitions,
+        CallBudget {
+            fuel: INVOCATION_FUEL,
+            deadline: Duration::from_secs(1),
+        },
+    );
     builder.approve_plugin("sdk-multi-role").await.unwrap();
 
     let error = tokio::time::timeout(Duration::from_secs(5), builder.start())

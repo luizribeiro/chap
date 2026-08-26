@@ -5,7 +5,7 @@ mod provider;
 mod session;
 mod tool;
 
-pub use agent::{Agent, AgentBuilder};
+pub use agent::{Agent, AgentBuilder, CallBudget, PluginCall};
 pub use consent::{ConsentStore, PluginConsentReview};
 pub use lockgate::{
     ConsentManifest, ConsentRecord, DriftChange, DriftKind, DriftReport, GrantReview,

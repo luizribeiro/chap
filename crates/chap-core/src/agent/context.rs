@@ -1,8 +1,8 @@
-use super::{AgentInner, CONTEXT_ASSEMBLY_DEADLINE, PLUGIN_FUEL_PER_CALL, bindings};
+use super::{AgentInner, PluginCall, bindings};
 use crate::{SessionId, config::ContextChannel};
 use bindings::context as context_bindings;
 use futures::future::join_all;
-use lockgate::{CallError, InvocationCtx};
+use lockgate::CallError;
 use std::{collections::BTreeMap, future::Future, pin::Pin};
 
 pub(super) type ContextFuture<'a> =
@@ -93,10 +93,11 @@ impl AgentInner {
         self.lockgate
             .client::<context_bindings::Role>(plugin)
             .map_err(|error| error.to_string())?
-            .segments(InvocationCtx::bounded(
-                PLUGIN_FUEL_PER_CALL,
-                CONTEXT_ASSEMBLY_DEADLINE,
-            ))
+            .segments(
+                self.call_budgets
+                    .resolve(PluginCall::ContextSegments)
+                    .invocation_context(),
+            )
             .await
             .map_err(context_call_error)?
             .map_err(|error| error.to_string())

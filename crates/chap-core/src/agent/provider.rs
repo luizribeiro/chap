@@ -1,5 +1,5 @@
 use super::{
-    AgentInner, PLUGIN_FUEL_PER_CALL, bindings,
+    AgentInner, PluginCall, bindings,
     context::{AssembledContext, ContextFuture},
 };
 use crate::{
@@ -8,7 +8,7 @@ use crate::{
 };
 use bindings::provider as provider_bindings;
 use bindings::types as provider_types;
-use lockgate::{CallError, InvocationCtx};
+use lockgate::CallError;
 use std::{fmt, future::Future, pin::Pin, time::Duration};
 
 pub(super) type CompletionFuture<'a> =
@@ -60,7 +60,9 @@ impl AgentInner {
             .client::<provider_bindings::Role>(&plugin.handle)
             .map_err(|error| plugin_error(provider, error))?
             .complete(
-                InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL, self.plugin_call_deadlines.provider),
+                self.call_budgets
+                    .resolve(PluginCall::ProviderComplete)
+                    .invocation_context(),
                 provider_types::CompletionRequest {
                     messages: messages.into_iter().map(Into::into).collect(),
                     tools: self
