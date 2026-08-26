@@ -1,4 +1,6 @@
-use crate::config::{Config, ConfiguredPlugin, ContextChannel, ToolExecutionSettings};
+use crate::config::{
+    Config, ConfiguredPlugin, agent::ToolExecutionSettings, roles::ContextChannel,
+};
 use crate::consent::{ConsentStore, PluginConsentReview, consent_drift};
 use crate::session::{
     RunError, Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions,

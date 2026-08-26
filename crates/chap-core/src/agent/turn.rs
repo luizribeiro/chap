@@ -3,7 +3,7 @@ use super::{
     provider::{CompletionBackend, FinishReason},
 };
 use crate::{
-    config::ToolExecutionSettings,
+    config::agent::ToolExecutionSettings,
     session::{
         ActiveRun, AssistantContent, Message, RunBoundary, RunError, RunUsage, SessionEventKind,
         SessionState, Steering, ToolCall, ToolResult, Usage,

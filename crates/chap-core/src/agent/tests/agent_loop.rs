@@ -5,7 +5,7 @@ use super::super::{
 };
 use crate::{
     ExecutionMode, ProviderError, RunError, SessionOptions, Tool, ToolDefinition,
-    config::ToolExecutionSettings,
+    config::agent::ToolExecutionSettings,
     session::{
         AssistantContent, Message, Reasoning, RunUsage, SessionEventKind, SessionEvents,
         SessionManager, ToolCall, Usage,

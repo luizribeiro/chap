@@ -1,5 +1,5 @@
 use super::{AgentInner, PluginCall, bindings};
-use crate::{SessionId, config::ContextChannel};
+use crate::{SessionId, config::roles::ContextChannel};
 use bindings::context as context_bindings;
 use futures::future::join_all;
 use lockgate::CallError;
