@@ -60,10 +60,7 @@ impl AgentInner {
             .client::<provider_bindings::Role>(&plugin.handle)
             .map_err(|error| plugin_error(provider, error))?
             .complete(
-                InvocationCtx::bounded_with_deadline(
-                    PLUGIN_FUEL_PER_CALL,
-                    self.plugin_call_deadlines.provider,
-                ),
+                InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL, self.plugin_call_deadlines.provider),
                 provider_types::CompletionRequest {
                     messages: messages.into_iter().map(Into::into).collect(),
                     tools: self

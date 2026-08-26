@@ -93,7 +93,7 @@ impl AgentInner {
         self.lockgate
             .client::<context_bindings::Role>(plugin)
             .map_err(|error| error.to_string())?
-            .segments(InvocationCtx::bounded_with_deadline(
+            .segments(InvocationCtx::bounded(
                 PLUGIN_FUEL_PER_CALL,
                 CONTEXT_ASSEMBLY_DEADLINE,
             ))

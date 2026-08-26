@@ -30,7 +30,7 @@ fn plugin_admission_context_has_expected_deadline() {
         context.budget,
         BudgetClass::Bounded {
             fuel: PLUGIN_FUEL_PER_CALL,
-            deadline: Some(PLUGIN_ADMISSION_DEADLINE),
+            deadline: PLUGIN_ADMISSION_DEADLINE,
         }
     );
 }

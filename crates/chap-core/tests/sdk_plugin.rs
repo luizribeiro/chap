@@ -16,6 +16,7 @@ mod bindings {
 }
 
 const INVOCATION_FUEL: u64 = 25_000_000;
+const INVOCATION_DEADLINE: Duration = Duration::from_secs(30);
 
 #[tokio::test]
 async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
@@ -62,7 +63,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
         .client::<bindings::provider::Role>(&provider)
         .unwrap()
         .complete(
-            InvocationCtx::bounded(INVOCATION_FUEL),
+            InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
             bindings::types::CompletionRequest {
                 messages: vec![bindings::types::Message::User("hello".to_owned())],
                 tools: Vec::new(),
@@ -83,7 +84,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     let segments = host
         .client::<bindings::context::Role>(&context)
         .unwrap()
-        .segments(InvocationCtx::bounded(INVOCATION_FUEL))
+        .segments(InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE))
         .await
         .unwrap()
         .unwrap();
@@ -96,7 +97,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
         .client::<bindings::provider::Role>(&multi_role)
         .unwrap()
         .complete(
-            InvocationCtx::bounded(INVOCATION_FUEL),
+            InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
             bindings::types::CompletionRequest {
                 messages: vec![bindings::types::Message::User("use the tool".to_owned())],
                 tools: Vec::new(),
@@ -119,7 +120,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
 
     let tools = host.client::<bindings::tools::Role>(&multi_role).unwrap();
     let registrations = tools
-        .definitions(InvocationCtx::bounded(INVOCATION_FUEL))
+        .definitions(InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE))
         .await
         .unwrap()
         .unwrap();
@@ -132,7 +133,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     let segments = host
         .client::<bindings::context::Role>(&multi_role)
         .unwrap()
-        .segments(InvocationCtx::bounded(INVOCATION_FUEL))
+        .segments(InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE))
         .await
         .unwrap()
         .unwrap();
@@ -142,7 +143,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     assert_eq!(segments[0].priority, 7);
     let output = tools
         .execute(
-            InvocationCtx::bounded(INVOCATION_FUEL),
+            InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
             &call.name,
             &call.arguments,
         )
@@ -160,7 +161,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
         .client::<bindings::provider::Role>(&multi_role)
         .unwrap()
         .complete(
-            InvocationCtx::bounded(INVOCATION_FUEL),
+            InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
             bindings::types::CompletionRequest {
                 messages: vec![bindings::types::Message::ToolResult(
                     bindings::types::ToolResult {
@@ -252,7 +253,7 @@ async fn admit(
             prepared,
             acceptance,
             RuntimeLimits::default(),
-            InvocationCtx::bounded(INVOCATION_FUEL),
+            InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
         )
         .await
         .unwrap()
@@ -283,7 +284,7 @@ async fn admit_context(builder: &mut HostBuilder<()>, component: &Path) -> Plugi
             prepared,
             acceptance,
             RuntimeLimits::default(),
-            InvocationCtx::bounded(INVOCATION_FUEL),
+            InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
         )
         .await
         .unwrap()

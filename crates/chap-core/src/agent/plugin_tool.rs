@@ -28,10 +28,7 @@ impl PluginTool {
         let definitions = runtime
             .client::<tool_bindings::Role>(&handle)
             .map_err(|error| format!("tool plugin `{plugin}` failed: {error}"))?
-            .definitions(InvocationCtx::bounded_with_deadline(
-                PLUGIN_FUEL_PER_CALL,
-                call_deadline,
-            ))
+            .definitions(InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL, call_deadline))
             .await
             .map_err(|error| format!("tool plugin `{plugin}` failed: {error}"))?
             .map_err(|error| format!("tool plugin `{plugin}`: {error}"))?;
@@ -70,7 +67,7 @@ impl Tool for PluginTool {
                 .client::<tool_bindings::Role>(&self.handle)
                 .map_err(|error| format!("tool plugin `{}` failed: {error}", self.plugin))?
                 .execute(
-                    InvocationCtx::bounded_with_deadline(PLUGIN_FUEL_PER_CALL, self.call_deadline),
+                    InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL, self.call_deadline),
                     &self.definition.name,
                     &arguments,
                 )

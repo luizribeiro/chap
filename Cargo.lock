@@ -1607,7 +1607,7 @@ dependencies = [
 [[package]]
 name = "lockgate"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#4ce5e64ff9098a5ba9cf7f71c0de4b3b72446865"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#03b705e9d8443221cf2954c731965d7235a98a6b"
 dependencies = [
  "anyhow",
  "http",
@@ -1629,7 +1629,7 @@ dependencies = [
 [[package]]
 name = "lockgate-http"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#4ce5e64ff9098a5ba9cf7f71c0de4b3b72446865"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#03b705e9d8443221cf2954c731965d7235a98a6b"
 dependencies = [
  "bytes",
  "http",
@@ -1643,7 +1643,7 @@ dependencies = [
 [[package]]
 name = "lockgate-macros"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#4ce5e64ff9098a5ba9cf7f71c0de4b3b72446865"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#03b705e9d8443221cf2954c731965d7235a98a6b"
 dependencies = [
  "heck",
  "proc-macro-crate",
@@ -1657,7 +1657,7 @@ dependencies = [
 [[package]]
 name = "lockgate-plugin"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#4ce5e64ff9098a5ba9cf7f71c0de4b3b72446865"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#03b705e9d8443221cf2954c731965d7235a98a6b"
 dependencies = [
  "lockgate-plugin-macros",
  "lockgate-policy",
@@ -1670,7 +1670,7 @@ dependencies = [
 [[package]]
 name = "lockgate-plugin-macros"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#4ce5e64ff9098a5ba9cf7f71c0de4b3b72446865"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#03b705e9d8443221cf2954c731965d7235a98a6b"
 dependencies = [
  "lockgate-schema",
  "proc-macro-crate",
@@ -1684,7 +1684,7 @@ dependencies = [
 [[package]]
 name = "lockgate-policy"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#4ce5e64ff9098a5ba9cf7f71c0de4b3b72446865"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#03b705e9d8443221cf2954c731965d7235a98a6b"
 dependencies = [
  "lockgate-macros",
  "url",
@@ -1693,7 +1693,7 @@ dependencies = [
 [[package]]
 name = "lockgate-schema"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#4ce5e64ff9098a5ba9cf7f71c0de4b3b72446865"
+source = "git+https://github.com/luizribeiro/lockgate.git?branch=main#03b705e9d8443221cf2954c731965d7235a98a6b"
 dependencies = [
  "serde",
  "serde_json",

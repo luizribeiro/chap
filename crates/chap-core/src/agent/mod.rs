@@ -551,7 +551,7 @@ impl AgentBuilder {
 }
 
 fn plugin_admission_context() -> InvocationCtx<()> {
-    InvocationCtx::bounded_with_deadline(PLUGIN_FUEL_PER_CALL, PLUGIN_ADMISSION_DEADLINE)
+    InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL, PLUGIN_ADMISSION_DEADLINE)
 }
 
 fn runtime_limits(deadlines: PluginCallDeadlines) -> RuntimeLimits {
