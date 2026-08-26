@@ -140,3 +140,24 @@ fn context_test_reference(plugin: &Ident) -> TokenStream {
         let _ = <#plugin as ::chap_plugin::context::Context>::segments;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_wit_role_has_a_code_generator() {
+        let missing = chap_wit::ROLES
+            .iter()
+            .copied()
+            .filter(|wit| !ROLES.iter().any(|role| std::ptr::eq(role.wit, *wit)))
+            .map(|wit| wit.rust_name)
+            .collect::<Vec<_>>();
+
+        assert!(
+            missing.is_empty(),
+            "roles missing a code generator in crates/chap-plugin-macros/src/roles.rs: {}",
+            missing.join(", ")
+        );
+    }
+}
