@@ -152,6 +152,26 @@ mod tests {
     }
 
     #[test]
+    fn every_parsed_role_section_is_wired_to_has_section() {
+        for role in chap_wit::ROLES {
+            let source = format!(
+                r#"{{ "plugins": {{ "example": {{ "component": "x.wasm", "{}": {{}} }} }} }}"#,
+                role.interface,
+            );
+            let Ok(config) = serde_json::from_str::<Config>(&source) else {
+                continue;
+            };
+            let plugin = config.plugin("example").unwrap();
+
+            assert!(
+                plugin.has_section(role.interface),
+                "role section `{}` parses but ConfiguredPlugin::has_section returns false",
+                role.interface,
+            );
+        }
+    }
+
+    #[test]
     fn passes_api_key_env_through_untouched() {
         let config: Config = serde_json::from_str(
             r#"{

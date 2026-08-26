@@ -80,6 +80,8 @@ fn wit_body(source: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{collections::BTreeSet, path::Path};
+    use wit_parser::{Resolve, WorldItem, WorldKey};
 
     #[test]
     fn role_table_is_self_consistent() {
@@ -87,6 +89,44 @@ mod tests {
             let resolved = resolve(role.rust_name).expect("every role must resolve by rust_name");
             assert!(std::ptr::eq(*role, resolved));
         }
+    }
+
+    #[test]
+    fn host_world_exports_exactly_the_role_interfaces() {
+        let mut resolve = Resolve::new();
+        let (package, _) = resolve
+            .push_path(Path::new(env!("CARGO_MANIFEST_DIR")).join("wit"))
+            .unwrap();
+        let host = resolve.packages[package].worlds["host"];
+        let exports = resolve.worlds[host]
+            .exports
+            .iter()
+            .map(|(key, item)| {
+                let WorldItem::Interface { id, .. } = item else {
+                    panic!("host world export `{key:?}` is not an interface");
+                };
+                match key {
+                    WorldKey::Name(name) => name.clone(),
+                    WorldKey::Interface(_) => resolve.interfaces[*id]
+                        .name
+                        .clone()
+                        .expect("host world exports must be named"),
+                }
+            })
+            .collect::<BTreeSet<_>>();
+        let expected = std::iter::once("types")
+            .chain(ROLES.iter().map(|role| role.interface))
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        let missing = expected.difference(&exports).cloned().collect::<Vec<_>>();
+        let unexpected = exports.difference(&expected).cloned().collect::<Vec<_>>();
+
+        assert!(
+            missing.is_empty() && unexpected.is_empty(),
+            "host world exports disagree with chap_wit::ROLES; missing: [{}]; unexpected: [{}]",
+            missing.join(", "),
+            unexpected.join(", "),
+        );
     }
 
     #[test]

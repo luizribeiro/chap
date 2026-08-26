@@ -412,6 +412,9 @@ version = "0.1.0"
 [[package]]
 name = "chap-wit"
 version = "0.1.0"
+dependencies = [
+ "wit-parser 0.255.0",
+]
 
 [[package]]
 name = "clap"
