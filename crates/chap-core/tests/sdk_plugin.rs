@@ -4,6 +4,8 @@ use serde_json::json;
 use std::{
     path::{Path, PathBuf},
     process::Command,
+    sync::OnceLock,
+    time::Duration,
 };
 
 mod bindings {
@@ -18,7 +20,7 @@ const INVOCATION_FUEL: u64 = 25_000_000;
 #[tokio::test]
 async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let components = build_sdk_components(&workspace);
+    let components = sdk_components(&workspace);
     let config_directory = tempfile::tempdir().unwrap();
     let config_path = config_directory.path().join("chap.json");
     std::fs::write(
@@ -185,6 +187,47 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     ));
 }
 
+#[tokio::test]
+async fn times_out_a_tool_plugin_with_hanging_definitions() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let components = sdk_components(&workspace);
+    let config_directory = tempfile::tempdir().unwrap();
+    let config_path = config_directory.path().join("chap.json");
+    std::fs::write(
+        &config_path,
+        json!({
+            "tools": {
+                "deadline_seconds": 1,
+            },
+            "plugins": {
+                "sdk-multi-role": {
+                    "component": components.multi_role.display().to_string(),
+                    "settings": {
+                        "prefix": "multi:",
+                        "hang_definitions": true,
+                    },
+                },
+            },
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    builder.approve_plugin("sdk-multi-role").await.unwrap();
+
+    let error = tokio::time::timeout(Duration::from_secs(5), builder.start())
+        .await
+        .expect("hanging tool definitions did not respect its deadline")
+        .err()
+        .expect("hanging tool definitions unexpectedly loaded");
+
+    assert!(error.contains("tool plugin `sdk-multi-role`"), "{error}");
+    assert!(
+        error.contains("plugin exceeded its bounded call deadline of 1s"),
+        "{error}"
+    );
+}
+
 async fn admit(
     builder: &mut HostBuilder<()>,
     id: &str,
@@ -250,6 +293,11 @@ struct Components {
     provider: PathBuf,
     multi_role: PathBuf,
     context: PathBuf,
+}
+
+fn sdk_components(workspace: &Path) -> &'static Components {
+    static COMPONENTS: OnceLock<Components> = OnceLock::new();
+    COMPONENTS.get_or_init(|| build_sdk_components(workspace))
 }
 
 fn build_sdk_components(workspace: &Path) -> Components {

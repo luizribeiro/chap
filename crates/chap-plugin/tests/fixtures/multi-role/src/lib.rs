@@ -7,16 +7,20 @@ use chap_plugin::tools::{ToolDefinition, Tools};
 use chap_plugin::{MetadataSource, Needs, Plugin};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::time::Duration;
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Settings {
     #[schemars(regex(pattern = r"\S"))]
     prefix: String,
+    #[serde(default)]
+    hang_definitions: bool,
 }
 
 struct MultiRoleFixture {
     prefix: String,
+    hang_definitions: bool,
 }
 
 impl Plugin for MultiRoleFixture {
@@ -31,6 +35,7 @@ impl Plugin for MultiRoleFixture {
     fn new(settings: Self::Settings) -> Self {
         Self {
             prefix: settings.prefix,
+            hang_definitions: settings.hang_definitions,
         }
     }
 }
@@ -67,6 +72,9 @@ impl Provider for MultiRoleFixture {
 
 impl Tools for MultiRoleFixture {
     fn definitions(&self) -> Result<Vec<ToolDefinition>, String> {
+        if self.hang_definitions {
+            std::thread::sleep(Duration::from_secs(60));
+        }
         Ok(vec![ToolDefinition {
             name: "sdk-echo".to_owned(),
             description: "Echoes its JSON arguments".to_owned(),
