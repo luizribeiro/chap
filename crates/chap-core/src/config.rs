@@ -26,13 +26,13 @@ pub struct AgentSettings {
     tool_execution: ToolExecutionSettings,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolExecutionSettings {
     #[serde(default)]
-    mode: ExecutionMode,
+    pub(crate) mode: ExecutionMode,
     #[serde(default = "default_max_concurrency")]
-    max_concurrency: NonZeroUsize,
+    pub(crate) max_concurrency: NonZeroUsize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,15 +89,15 @@ impl Config {
         self.plugins.get(id)
     }
 
-    pub(crate) fn execution_mode(&self, id: &str) -> ExecutionMode {
+    pub(crate) fn plugin_tools_execution(&self, id: &str) -> ExecutionMode {
         self.plugin(id)
             .and_then(|plugin| plugin.tools.as_ref())
             .map(|tools| tools.execution)
             .unwrap_or_default()
     }
 
-    pub(crate) fn tool_execution(&self) -> &ToolExecutionSettings {
-        &self.agent.tool_execution
+    pub(crate) fn tool_execution(&self) -> ToolExecutionSettings {
+        self.agent.tool_execution
     }
 
     pub(crate) fn component_path(&self, plugin: &ConfiguredPlugin) -> PathBuf {
@@ -115,16 +115,6 @@ impl Default for ToolExecutionSettings {
             mode: ExecutionMode::default(),
             max_concurrency: default_max_concurrency(),
         }
-    }
-}
-
-impl ToolExecutionSettings {
-    pub(crate) fn mode(&self) -> ExecutionMode {
-        self.mode
-    }
-
-    pub(crate) fn max_concurrency(&self) -> NonZeroUsize {
-        self.max_concurrency
     }
 }
 
@@ -235,7 +225,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(config.execution_mode("kagi"), ExecutionMode::Sequential);
+        assert_eq!(
+            config.plugin_tools_execution("kagi"),
+            ExecutionMode::Sequential
+        );
     }
 
     #[test]
@@ -251,7 +244,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(config.execution_mode("kagi"), ExecutionMode::Parallel);
+        assert_eq!(
+            config.plugin_tools_execution("kagi"),
+            ExecutionMode::Parallel
+        );
     }
 
     #[test]

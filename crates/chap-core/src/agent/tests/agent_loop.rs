@@ -1,10 +1,11 @@
 use super::super::{
-    MAX_PROVIDER_STEPS_PER_TURN, ToolExecutionConfig,
+    MAX_PROVIDER_STEPS_PER_TURN,
     provider::{CompletionBackend, CompletionFuture, FinishReason, ProviderCompletion},
     turn::run_agent_loop,
 };
 use crate::{
     ExecutionMode, ProviderError, RunError, SessionOptions, Tool, ToolDefinition,
+    config::ToolExecutionSettings,
     session::{
         AssistantContent, Message, Reasoning, RunUsage, SessionEventKind, SessionEvents,
         SessionManager, ToolCall, Usage,
@@ -13,6 +14,7 @@ use crate::{
 };
 use std::{
     collections::VecDeque,
+    num::NonZeroUsize,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -21,9 +23,9 @@ use std::{
 };
 use tokio::sync::{Barrier, Notify};
 
-const TOOL_EXECUTION: ToolExecutionConfig = ToolExecutionConfig {
+const TOOL_EXECUTION: ToolExecutionSettings = ToolExecutionSettings {
     mode: ExecutionMode::Parallel,
-    max_concurrency: 8,
+    max_concurrency: NonZeroUsize::new(8).expect("tool concurrency is nonzero"),
 };
 
 #[tokio::test]

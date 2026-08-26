@@ -1,10 +1,10 @@
-use crate::config::{Config, ConfiguredPlugin, ContextChannel};
+use crate::config::{Config, ConfiguredPlugin, ContextChannel, ToolExecutionSettings};
 use crate::consent::{ConsentStore, PluginConsentReview, consent_drift};
 use crate::session::{
     RunError, Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions,
 };
 use crate::tool::ToolRegistry;
-use crate::{ExecutionMode, Tool, ToolDefinition};
+use crate::{Tool, ToolDefinition};
 use lockgate::{
     ConsentRecord, ConsentRequired, Host, HostBuilder, InvocationCtx, PluginConfig, PluginHandle,
     Prepared, Role, RuntimeLimits,
@@ -219,19 +219,13 @@ pub struct Agent {
     inner: Arc<AgentInner>,
 }
 
-#[derive(Clone, Copy)]
-struct ToolExecutionConfig {
-    mode: ExecutionMode,
-    max_concurrency: usize,
-}
-
 pub(crate) struct AgentInner {
     lockgate: Arc<InnerHost>,
     plugins: BTreeMap<String, LoadedPlugin>,
     plugin_errors: BTreeMap<String, String>,
     sessions: SessionManager,
     tools: ToolRegistry,
-    tool_execution: ToolExecutionConfig,
+    tool_execution: ToolExecutionSettings,
     call_budgets: CallBudgets,
     context_last_good:
         AsyncMutex<BTreeMap<(crate::SessionId, String), Vec<context::ContextSegment>>>,
@@ -384,10 +378,7 @@ impl AgentBuilder {
             };
         let lockgate = resources.host.take().expect("initialized Lockgate host");
         let tools = resources.tools.take().expect("initialized tool registry");
-        let tool_execution = ToolExecutionConfig {
-            mode: config.tool_execution().mode(),
-            max_concurrency: config.tool_execution().max_concurrency().get(),
-        };
+        let tool_execution = config.tool_execution();
         Ok(Agent {
             inner: Arc::new(AgentInner {
                 lockgate,
@@ -426,7 +417,7 @@ impl AgentBuilder {
                 id,
                 Arc::clone(lockgate),
                 plugin.handle.clone(),
-                config.execution_mode(id),
+                config.plugin_tools_execution(id),
                 call_budgets,
             )
             .await?
