@@ -6,20 +6,18 @@ pub const TYPES_WIT: &str = include_str!("../wit/types.wit");
 
 macro_rules! roles {
     ($(
-        $name:ident, $wit_name:ident = $rust_name:ident {
+        $name:ident = $rust_name:ident {
             interface: $interface:literal,
             display_name: $display_name:literal,
             wit: $wit:literal,
         }
     ),+ $(,)?) => {
         $(
-            pub const $wit_name: &str = include_str!($wit);
-
             pub static $name: Role = Role {
                 rust_name: stringify!($rust_name),
                 interface: $interface,
                 display_name: $display_name,
-                wit: $wit_name,
+                wit: include_str!($wit),
             };
         )+
 
@@ -36,17 +34,17 @@ pub struct Role {
 }
 
 roles! {
-    PROVIDER, PROVIDER_WIT = Provider {
+    PROVIDER = Provider {
         interface: "provider",
         display_name: "provider",
         wit: "../wit/provider.wit",
     },
-    TOOLS, TOOLS_WIT = Tools {
+    TOOLS = Tools {
         interface: "tools",
         display_name: "tool",
         wit: "../wit/tools.wit",
     },
-    CONTEXT, CONTEXT_WIT = Context {
+    CONTEXT = Context {
         interface: "context",
         display_name: "context",
         wit: "../wit/context.wit",
@@ -96,7 +94,7 @@ mod tests {
         let expected = [
             PACKAGE,
             source_body(TYPES_WIT),
-            source_body(PROVIDER_WIT),
+            source_body(PROVIDER.wit),
             "\nworld chap-plugin {\n  import types;\n  export provider;\n}\n",
         ]
         .concat();
@@ -109,8 +107,8 @@ mod tests {
         let expected = [
             PACKAGE,
             source_body(TYPES_WIT),
-            source_body(PROVIDER_WIT),
-            source_body(TOOLS_WIT),
+            source_body(PROVIDER.wit),
+            source_body(TOOLS.wit),
             "\nworld chap-plugin {\n  import types;\n  export provider;\n  export tools;\n}\n",
         ]
         .concat();
@@ -123,9 +121,9 @@ mod tests {
         let expected = [
             PACKAGE,
             source_body(TYPES_WIT),
-            source_body(PROVIDER_WIT),
-            source_body(TOOLS_WIT),
-            source_body(CONTEXT_WIT),
+            source_body(PROVIDER.wit),
+            source_body(TOOLS.wit),
+            source_body(CONTEXT.wit),
             "\nworld chap-plugin {\n  import types;\n  export provider;\n  export tools;\n  export context;\n}\n",
         ]
         .concat();
