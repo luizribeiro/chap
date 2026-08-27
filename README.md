@@ -87,6 +87,27 @@ response byte, and `between_bytes_seconds` limits stalls between later response
 body chunks. All three are unset when omitted. They provide specific transport
 errors within the provider call's separate, outer wall-clock deadline.
 
+### Configuration layers
+
+`chap.json` has three configuration layers:
+
+| Layer | Key | Reader and scope |
+| --- | --- | --- |
+| Plugin settings | `plugins.<id>.settings` | The guest, for its own internals |
+| Role settings | `plugins.<id>.tools` or `.context` | CHAP, per plugin role |
+| Agent settings | `agent` | CHAP, for the agent regardless of loaded plugins |
+
+The names use one noun, "settings", qualified by the scope it applies to.
+
+Plugin settings are opaque to CHAP: the host passes the JSON object through to
+the guest unchanged and never interprets it. [Typed plugin
+settings](#typed-plugin-settings) covers the plugin-published schema contract
+and secret handling.
+
+No role name is ever a top-level key. This is why agent-wide tool-execution
+settings live at `agent.tool_execution` rather than in a top-level `tools`
+section.
+
 ### Tool execution
 
 Tool calls run in parallel by default. Configure the host-wide mode and
