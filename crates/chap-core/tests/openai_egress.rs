@@ -406,6 +406,11 @@ fn build_openai_component_once(workspace: &Path) -> PathBuf {
 }
 
 fn serve(mut stream: TcpStream) -> Result<ReceivedRequest, String> {
+    // Accepted sockets inherit the listener's O_NONBLOCK on macOS, and a read timeout does
+    // nothing on a non-blocking socket.
+    stream
+        .set_nonblocking(false)
+        .map_err(|error| format!("failed to make the mock connection blocking: {error}"))?;
     stream
         .set_read_timeout(Some(SERVER_TIMEOUT))
         .map_err(|error| format!("failed to set mock read timeout: {error}"))?;
