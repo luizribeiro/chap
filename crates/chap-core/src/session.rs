@@ -107,6 +107,8 @@ impl fmt::Display for RunError {
     }
 }
 
+impl std::error::Error for RunError {}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct SessionId(Uuid);
 
@@ -525,6 +527,13 @@ mod tests {
         fn send<'a>(&'a self, _session: &'a Session, input: String) -> SessionFuture<'a> {
             Box::pin(async move { Ok(input) })
         }
+    }
+
+    #[test]
+    fn run_error_implements_std_error() {
+        fn assert_error(_: &dyn std::error::Error) {}
+
+        assert_error(&RunError::Other("run failed".to_owned()));
     }
 
     #[derive(Default)]

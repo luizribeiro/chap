@@ -41,3 +41,5 @@ impl fmt::Display for ProviderError {
         }
     }
 }
+
+impl std::error::Error for ProviderError {}

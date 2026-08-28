@@ -216,6 +216,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn provider_error_implements_std_error() {
+        fn assert_error(_: &dyn std::error::Error) {}
+
+        assert_error(&ProviderError::Other("provider failed".to_owned()));
+    }
+
+    #[test]
     fn maps_each_provider_error() {
         let errors = [
             (
