@@ -1,6 +1,8 @@
 mod tui;
 
-use chap_core::{AgentBuilder, DriftChange, DriftKind, PluginConsentReview};
+use chap_core::{
+    AgentBuilder, DriftChange, DriftKind, ExportDrift, ExportDriftKind, PluginConsentReview,
+};
 use clap::{Args, Parser, Subcommand};
 use std::{collections::BTreeSet, path::PathBuf, process::ExitCode};
 use unicode_width::UnicodeWidthStr;
@@ -158,6 +160,13 @@ fn render_grant_review(review: &PluginConsentReview) -> String {
             output.push_str("Status: CHANGED (non-blocking; prior approval remains valid)\n");
         }
     }
+    output.push_str("Exports:\n");
+    if review.manifest.exported_interfaces.is_empty() {
+        output.push_str("  (none)\n");
+    }
+    for exported_interface in &review.manifest.exported_interfaces {
+        output.push_str(&format!("  - {exported_interface}\n"));
+    }
     output.push_str("Grants:\n");
     if review.manifest.grants.is_empty() {
         output.push_str("  (none)\n");
@@ -181,6 +190,11 @@ fn render_grant_review(review: &PluginConsentReview) -> String {
         for change in &drift.changes {
             output.push_str("  - ");
             output.push_str(&render_drift_change(change));
+            output.push('\n');
+        }
+        for change in &drift.export_changes {
+            output.push_str("  - ");
+            output.push_str(&render_export_drift(change));
             output.push('\n');
         }
     }
@@ -223,6 +237,24 @@ fn render_drift_change(change: &DriftChange) -> String {
             render_optional_scopes(change.after.as_deref())
         ),
         DriftKind::BecameOptional => format!("now treats as optional: {permission} (OPTIONAL)"),
+    }
+}
+
+fn render_export_drift(change: &ExportDrift) -> String {
+    match change.kind {
+        ExportDriftKind::Gained => format!(
+            "now ALSO exports: {} (NEW ROLE, BLOCKING)",
+            change.after.join(", ")
+        ),
+        ExportDriftKind::Lost => {
+            format!("no longer exports: {} (REMOVED)", change.before.join(", "))
+        }
+        ExportDriftKind::VersionChanged => format!(
+            "exports {} at {} (was {})",
+            change.name,
+            change.after.join(", "),
+            change.before.join(", ")
+        ),
     }
 }
 
@@ -315,7 +347,7 @@ mod tests {
             plugin_label: "Example provider".to_owned(),
             request_digest: fingerprint,
             component_digest: format!("sha256:{}", digest_byte.to_string().repeat(64)),
-            exported_interfaces: Vec::new(),
+            exported_interfaces: vec!["chap:agent/provider@0.2.0".to_owned()],
             grants: vec![GrantReview {
                 capability: "net".to_owned(),
                 permission: "egress".to_owned(),
@@ -382,6 +414,10 @@ mod tests {
         assert!(output.contains("Instance: example"), "{output}");
         assert!(output.contains("Plugin: Example provider"), "{output}");
         assert!(output.contains("NEEDS APPROVAL (first run)"), "{output}");
+        assert!(
+            output.contains("Exports:\n  - chap:agent/provider@0.2.0\nGrants:"),
+            "{output}"
+        );
         assert!(output.contains("net.egress"), "{output}");
         assert!(
             output.contains("scopes: https://api.example.com"),
@@ -392,6 +428,20 @@ mod tests {
             output.contains("reason: Call the configured API"),
             "{output}"
         );
+    }
+
+    #[test]
+    fn renders_an_empty_exports_section() {
+        let mut manifest = manifest(&["https://api.example.com"], '1');
+        manifest.exported_interfaces.clear();
+
+        let output = render_grant_review(&PluginConsentReview {
+            manifest,
+            prior: None,
+            drift: None,
+        });
+
+        assert!(output.contains("Exports:\n  (none)\nGrants:"), "{output}");
     }
 
     #[test]
@@ -427,6 +477,56 @@ mod tests {
         assert!(
             output.contains(
                 "now ALSO requests: net.egress → https://evil.example.com (WIDENED, BLOCKING)"
+            ),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn renders_all_export_drift_deltas() {
+        let output = render_grant_review(&PluginConsentReview {
+            manifest: manifest(&["https://api.example.com"], '2'),
+            prior: Some(consent_record("example", '1')),
+            drift: Some(DriftReport {
+                changes: Vec::new(),
+                export_changes: vec![
+                    ExportDrift {
+                        name: "chap:agent/tools".to_owned(),
+                        kind: ExportDriftKind::Gained,
+                        before: Vec::new(),
+                        after: vec!["chap:agent/tools@0.2.0".to_owned()],
+                    },
+                    ExportDrift {
+                        name: "chap:agent/provider".to_owned(),
+                        kind: ExportDriftKind::Lost,
+                        before: vec!["chap:agent/provider@0.1.0".to_owned()],
+                        after: Vec::new(),
+                    },
+                    ExportDrift {
+                        name: "chap:agent/context".to_owned(),
+                        kind: ExportDriftKind::VersionChanged,
+                        before: vec!["chap:agent/context@0.1.0".to_owned()],
+                        after: vec![
+                            "chap:agent/context@0.2.0".to_owned(),
+                            "chap:agent/context@0.3.0".to_owned(),
+                        ],
+                    },
+                ],
+                blocks_admission: true,
+            }),
+        });
+
+        assert!(
+            output.contains("now ALSO exports: chap:agent/tools@0.2.0 (NEW ROLE, BLOCKING)"),
+            "{output}"
+        );
+        assert!(
+            output.contains("no longer exports: chap:agent/provider@0.1.0 (REMOVED)"),
+            "{output}"
+        );
+        assert!(
+            output.contains(
+                "exports chap:agent/context at chap:agent/context@0.2.0, chap:agent/context@0.3.0 (was chap:agent/context@0.1.0)"
             ),
             "{output}"
         );
