@@ -8,7 +8,7 @@ use crate::{
     config::agent::ToolExecutionSettings,
     session::{
         AssistantContent, Message, Reasoning, RunUsage, SessionEventKind, SessionEvents,
-        SessionManager, ToolCall, Usage,
+        SessionManager, SessionState, ToolCall, Usage,
     },
     tool::ToolRegistry,
 };
@@ -30,10 +30,7 @@ const TOOL_EXECUTION: ToolExecutionSettings = ToolExecutionSettings {
 
 #[tokio::test]
 async fn resumes_a_turn_after_executing_a_tool_call() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([
         completion(vec![
@@ -127,10 +124,7 @@ async fn resumes_a_turn_after_executing_a_tool_call() {
 
 #[tokio::test]
 async fn stores_reasoning_in_session_history() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let backend = FakeBackend::new([completion(vec![
         reasoning("I should answer directly.", Some("opaque-signature")),
         AssistantContent::Text("Hello.".to_owned()),
@@ -162,10 +156,7 @@ async fn stores_reasoning_in_session_history() {
 
 #[tokio::test]
 async fn carries_reasoning_into_the_following_provider_request() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let backend = FakeBackend::new([
         completion(vec![
             reasoning("I need the tool.", Some("opaque-signature")),
@@ -194,10 +185,7 @@ async fn carries_reasoning_into_the_following_provider_request() {
 
 #[tokio::test]
 async fn emits_only_text_from_a_completion_with_reasoning() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([completion(vec![
         reasoning("I should be concise.", None),
@@ -234,10 +222,7 @@ async fn emits_only_text_from_a_completion_with_reasoning() {
 
 #[tokio::test]
 async fn emits_no_assistant_message_for_reasoning_alone() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([completion(vec![reasoning("Still thinking.", None)])]);
 
@@ -264,10 +249,7 @@ async fn emits_no_assistant_message_for_reasoning_alone() {
 
 #[tokio::test]
 async fn accumulates_usage_across_provider_steps() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([
         completion_with_detailed_usage(
@@ -369,10 +351,7 @@ async fn accumulates_usage_across_provider_steps() {
 
 #[tokio::test]
 async fn emits_no_usage_events_when_unreported() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([
         completion(vec![tool_call("call-1", "echo")]),
@@ -420,10 +399,7 @@ async fn emits_no_usage_events_when_unreported() {
 
 #[tokio::test]
 async fn emits_usage_with_unreported_subset_counters() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([
         completion_with_usage(vec![tool_call("call-1", "echo")], 12, 4),
@@ -489,10 +465,7 @@ async fn emits_usage_with_unreported_subset_counters() {
 
 #[tokio::test]
 async fn runs_independent_tool_calls_concurrently() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let backend = FakeBackend::new([
         completion(vec![
             tool_call("call-1", "first"),
@@ -543,10 +516,7 @@ async fn runs_independent_tool_calls_concurrently() {
 
 #[tokio::test]
 async fn records_tool_results_in_call_order_regardless_of_completion_order() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([
         completion(vec![
@@ -610,10 +580,7 @@ async fn records_tool_results_in_call_order_regardless_of_completion_order() {
 
 #[tokio::test]
 async fn runs_the_batch_sequentially_when_a_tool_requires_it() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([
         completion(vec![
@@ -668,10 +635,7 @@ async fn runs_the_batch_sequentially_when_a_tool_requires_it() {
 
 #[tokio::test]
 async fn applies_steering_before_the_next_provider_request() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = Arc::new(PausedBackend::new([
         text_completion("My first answer."),
@@ -733,10 +697,7 @@ async fn applies_steering_before_the_next_provider_request() {
 
 #[tokio::test]
 async fn preserves_interrupted_input_for_the_next_provider_request() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = Arc::new(PausedBackend::new([
         text_completion("too late"),
@@ -809,10 +770,7 @@ async fn preserves_interrupted_input_for_the_next_provider_request() {
 
 #[tokio::test]
 async fn closes_unfinished_tool_calls_when_interrupted() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([completion(vec![
         tool_call("call-1", "pause-1"),
@@ -909,10 +867,7 @@ async fn closes_unfinished_tool_calls_when_interrupted() {
 
 #[tokio::test]
 async fn completes_finished_calls_when_interrupted_mid_batch() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([completion(vec![
         tool_call("call-1", "finish"),
@@ -988,10 +943,7 @@ async fn completes_finished_calls_when_interrupted_mid_batch() {
 
 #[tokio::test]
 async fn returns_tool_failures_to_the_provider() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
     let backend = FakeBackend::new([
         completion(vec![AssistantContent::ToolCall(ToolCall {
@@ -1032,10 +984,7 @@ async fn returns_tool_failures_to_the_provider() {
 
 #[tokio::test]
 async fn preserves_the_provider_error_in_the_failed_terminal_event() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let mut events = state.subscribe();
 
     let provider_error = ProviderError::RateLimited {
@@ -1093,10 +1042,7 @@ async fn includes_an_other_finish_reason_in_the_empty_completion_error() {
 
 #[tokio::test]
 async fn reports_the_provider_step_limit_as_other() {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let backend = FakeBackend::new(
         (0..MAX_PROVIDER_STEPS_PER_TURN)
             .map(|index| completion(vec![tool_call(&format!("call-{index}"), "echo")])),
@@ -1120,6 +1066,12 @@ async fn reports_the_provider_step_limit_as_other() {
             "turn exceeded the limit of {MAX_PROVIDER_STEPS_PER_TURN} provider requests"
         ))
     );
+}
+
+fn session_state() -> Arc<SessionState> {
+    SessionManager::new()
+        .create(SessionOptions::new("test-provider"))
+        .unwrap()
 }
 
 async fn receive_event_kinds(events: &mut SessionEvents, count: usize) -> Vec<SessionEventKind> {
@@ -1177,10 +1129,7 @@ fn completion_with_finish_reason(
 }
 
 async fn empty_completion_error(finish_reason: FinishReason) -> RunError {
-    let manager = SessionManager::new();
-    let state = manager
-        .create(SessionOptions::new("test-provider"))
-        .unwrap();
+    let state = session_state();
     let backend = FakeBackend::new([completion_with_finish_reason(Vec::new(), finish_reason)]);
 
     run_agent_loop(
