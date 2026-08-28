@@ -85,16 +85,9 @@ async fn run(cli: Cli) -> Result<(), String> {
         })) => {
             let plugin_count = builder.plugins().count();
             let agent = builder.start().await?;
-            let errors = agent
-                .plugin_errors()
-                .map(|(_, error)| error.to_owned())
-                .collect::<Vec<_>>();
             tokio::task::spawn_blocking(move || drop(agent))
                 .await
                 .map_err(|error| format!("failed to clean up plugin host: {error}"))?;
-            if !errors.is_empty() {
-                return Err(errors.join("\n"));
-            }
             println!("Loaded {plugin_count} plugin(s).");
         }
         Some(Command::Plugins(Plugins {

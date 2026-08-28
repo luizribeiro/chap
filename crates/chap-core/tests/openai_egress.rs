@@ -183,34 +183,15 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
             .iter()
             .any(|change| change.kind == DriftKind::ScopeWidened)
     );
-    let agent = builder.start().await.unwrap();
-    let errors = agent.plugin_errors().collect::<Vec<_>>();
+    let error = builder.start().await.err().unwrap();
 
-    assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].0, "openai");
+    assert!(error.contains("plugin `openai`"), "{error}");
     assert!(
-        errors[0].1.contains("expanded its permission manifest"),
-        "{}",
-        errors[0].1
+        error.contains("expanded its permission manifest"),
+        "{error}"
     );
-    assert!(
-        errors[0].1.contains("chap grants review openai"),
-        "{}",
-        errors[0].1
-    );
-    assert_eq!(
-        agent
-            .session(SessionOptions::new("openai"))
-            .await
-            .err()
-            .unwrap(),
-        errors[0].1
-    );
+    assert!(error.contains("chap grants review openai"), "{error}");
     assert_eq!(std::fs::read(consent_path).unwrap(), stored_before);
-
-    tokio::task::spawn_blocking(move || drop(agent))
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
@@ -244,7 +225,6 @@ async fn admission_after_narrowed_egress_refreshes_the_stored_record() {
         .start()
         .await
         .unwrap();
-    assert!(agent.plugin_errors().next().is_none());
     let refreshed = consent.load("openai").unwrap();
 
     assert_eq!(refreshed.request_digest, approved.request_digest);
@@ -279,7 +259,6 @@ async fn admission_with_a_matching_digest_does_not_rewrite_the_store() {
         .start()
         .await
         .unwrap();
-    assert!(agent.plugin_errors().next().is_none());
     assert_eq!(std::fs::read(consent_path).unwrap(), compact);
 
     tokio::task::spawn_blocking(move || drop(agent))
@@ -297,7 +276,6 @@ async fn complete_through_the_host(mock: MockServer, config_path: &Path) -> Host
     let builder = AgentBuilder::load(config_path).unwrap();
     builder.approve_plugin("openai").await.unwrap();
     let agent = builder.start().await.unwrap();
-    assert!(agent.plugin_errors().next().is_none());
     let session = agent.session(SessionOptions::new("openai")).await.unwrap();
     let mut events = session.subscribe();
     let completion = tokio::time::timeout(INVOCATION_TIMEOUT, session.send("hello"))

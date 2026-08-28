@@ -11,9 +11,7 @@ use super::{
         tool_component_with_schema, unsupported_component,
     },
 };
-use crate::{
-    CallBudget, ExecutionMode, PluginCall, ProviderError, SessionOptions, Tool, ToolDefinition,
-};
+use crate::{CallBudget, ExecutionMode, PluginCall, ProviderError, Tool, ToolDefinition};
 use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role, RuntimeLimits};
 use std::{
     collections::BTreeSet,
@@ -172,7 +170,6 @@ async fn approved_matching_manifest_admits_a_configured_provider() {
         .is_ok()
     );
     let agent = builder.start().await.unwrap();
-    assert!(agent.plugin_errors().next().is_none());
     assert!(agent.inner.plugins.contains_key("example.provider"));
     fs::remove_dir_all(directory).unwrap();
 }
@@ -307,7 +304,7 @@ async fn fast_provider_and_tool_plugins_succeed_with_deadlines() {
 }
 
 #[tokio::test]
-async fn first_run_refuses_only_the_unapproved_plugin() {
+async fn start_refuses_and_names_every_unapproved_plugin() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
@@ -319,10 +316,13 @@ async fn first_run_refuses_only_the_unapproved_plugin() {
         &config_path,
         r#"{
             "plugins": {
+                "alpha-unapproved": {
+                    "component": "provider.wasm"
+                },
                 "approved": {
                     "component": "provider.wasm"
                 },
-                "unapproved": {
+                "bravo-unapproved": {
                     "component": "provider.wasm"
                 }
             }
@@ -332,27 +332,22 @@ async fn first_run_refuses_only_the_unapproved_plugin() {
 
     let builder = AgentBuilder::load(&config_path).unwrap();
     builder.approve_plugin("approved").await.unwrap();
-    let agent = builder.start().await.unwrap();
-    let errors = agent.plugin_errors().collect::<Vec<_>>();
+    let error = builder.start().await.err().unwrap();
 
-    assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].0, "unapproved");
-    assert!(errors[0].1.contains("requires approval"), "{}", errors[0].1);
+    let lines = error.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2, "{error}");
     assert!(
-        errors[0].1.contains("chap grants review unapproved"),
-        "{}",
-        errors[0].1
+        lines[0].contains("plugin `alpha-unapproved`")
+            && lines[0].contains("requires approval")
+            && lines[0].contains("chap grants review alpha-unapproved"),
+        "{error}"
     );
-    assert!(agent.inner.plugins.contains_key("approved"));
-    assert!(!agent.inner.plugins.contains_key("unapproved"));
-    assert_eq!(
-        agent
-            .session(SessionOptions::new("unapproved"))
-            .await
-            .err()
-            .unwrap(),
-        errors[0].1
+    assert!(
+        lines[1].contains("plugin `bravo-unapproved`")
+            && lines[1].contains("chap grants review bravo-unapproved"),
+        "{error}"
     );
+    assert!(!error.contains("plugin `approved`"), "{error}");
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -388,7 +383,6 @@ async fn approving_then_denying_toggles_plugin_admission() {
     );
     builder.approve_plugin("example").await.unwrap();
     let agent = builder.start().await.unwrap();
-    assert!(agent.plugin_errors().next().is_none());
     tokio::task::spawn_blocking(move || drop(agent))
         .await
         .unwrap();
@@ -403,11 +397,10 @@ async fn approving_then_denying_toggles_plugin_admission() {
             .prior
             .is_none()
     );
-    let agent = builder.start().await.unwrap();
+    let error = builder.start().await.err().unwrap();
     assert!(
-        agent
-            .plugin_errors()
-            .any(|(id, error)| id == "example" && error.contains("requires approval"))
+        error.contains("plugin `example`") && error.contains("requires approval"),
+        "{error}"
     );
     fs::remove_dir_all(directory).unwrap();
 }
@@ -603,7 +596,6 @@ async fn loads_definitions_from_an_admitted_tool_plugin() {
     builder.approve_plugin("example.tools").await.unwrap();
     let agent = builder.start().await.unwrap();
 
-    assert!(agent.plugin_errors().next().is_none());
     assert_eq!(agent.tool_definitions()[0].name, "fixture-tool");
     fs::remove_dir_all(directory).unwrap();
 }
@@ -835,8 +827,7 @@ async fn accepts_an_instance_id_that_differs_from_plugin_metadata() {
 
     let builder = AgentBuilder::load(&config_path).unwrap();
     builder.approve_plugin("config-id").await.unwrap();
-    let agent = builder.start().await.unwrap();
-    assert!(agent.plugin_errors().next().is_none());
+    builder.start().await.unwrap();
     fs::remove_dir_all(directory).unwrap();
 }
 

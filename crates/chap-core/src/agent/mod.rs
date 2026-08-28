@@ -223,7 +223,6 @@ pub struct Agent {
 pub(crate) struct AgentInner {
     lockgate: Arc<InnerHost>,
     plugins: BTreeMap<String, LoadedPlugin>,
-    plugin_errors: BTreeMap<String, String>,
     sessions: SessionManager,
     tools: ToolRegistry,
     tool_execution: ToolExecutionSettings,
@@ -355,6 +354,10 @@ impl AgentBuilder {
         Ok(())
     }
 
+    /// Starts the agent, admitting every configured plugin.
+    ///
+    /// Refuses to start unless every configured plugin is admitted; the
+    /// error carries one admission failure per line, remedy included.
     pub async fn start(self) -> Result<Agent, String> {
         let Self {
             config,
@@ -365,7 +368,7 @@ impl AgentBuilder {
         let builder = HostBuilder::new(())
             .map_err(|error| format!("failed to create Lockgate host: {error}"))?;
         let mut resources = StartResources::new(tools, builder);
-        let (plugins, plugin_errors) =
+        let plugins =
             match Self::initialize_plugins(&mut resources, &config, &consent, call_budgets).await {
                 Ok(plugins) => plugins,
                 Err(error) => {
@@ -382,7 +385,6 @@ impl AgentBuilder {
             inner: Arc::new(AgentInner {
                 lockgate,
                 plugins,
-                plugin_errors,
                 sessions: SessionManager::new(),
                 tools,
                 tool_execution,
@@ -396,8 +398,8 @@ impl AgentBuilder {
         config: &Config,
         consent: &ConsentStore,
         call_budgets: CallBudgets,
-    ) -> Result<(BTreeMap<String, LoadedPlugin>, BTreeMap<String, String>), String> {
-        let (admitted, plugin_errors) = Self::load_plugins(
+    ) -> Result<BTreeMap<String, LoadedPlugin>, String> {
+        let admitted = Self::load_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
             config,
             consent,
@@ -427,29 +429,31 @@ impl AgentBuilder {
                     .register(tool)?;
             }
         }
-        Ok((plugins, plugin_errors))
+        Ok(plugins)
     }
 
     async fn load_plugins(
         builder: &mut HostBuilder<()>,
         config: &Config,
         consent: &ConsentStore,
-    ) -> Result<(BTreeMap<String, AdmittedPlugin>, BTreeMap<String, String>), String> {
+    ) -> Result<BTreeMap<String, AdmittedPlugin>, String> {
         let mut plugins = BTreeMap::new();
-        let mut plugin_errors = BTreeMap::new();
+        let mut refusals = Vec::new();
 
         for (id, plugin) in config.plugins() {
             match Self::load_plugin(builder, config, consent, id, plugin).await? {
                 PluginLoad::Admitted(admitted) => {
                     plugins.insert(id.to_owned(), admitted);
                 }
-                PluginLoad::Refused(error) => {
-                    plugin_errors.insert(id.to_owned(), error);
-                }
+                PluginLoad::Refused(error) => refusals.push(error),
             }
         }
 
-        Ok((plugins, plugin_errors))
+        if refusals.is_empty() {
+            Ok(plugins)
+        } else {
+            Err(refusals.join("\n"))
+        }
     }
 
     async fn load_plugin(
@@ -692,21 +696,11 @@ fn now_rfc3339() -> String {
 }
 
 impl Agent {
-    pub fn plugin_errors(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.inner
-            .plugin_errors
-            .iter()
-            .map(|(id, error)| (id.as_str(), error.as_str()))
-    }
-
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
         self.inner.tools.definitions()
     }
 
     pub async fn session(&self, options: SessionOptions) -> Result<Session, String> {
-        if let Some(error) = self.inner.plugin_errors.get(&options.provider) {
-            return Err(error.clone());
-        }
         if !self
             .inner
             .plugins
