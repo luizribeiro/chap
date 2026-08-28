@@ -179,7 +179,8 @@ impl SearchArguments {
         }
         if !(1..=MAX_SEARCH_LIMIT).contains(&self.limit) {
             return Err(format!(
-                "web search limit must be between 1 and {MAX_SEARCH_LIMIT}"
+                "web search limit must be between 1 and {MAX_SEARCH_LIMIT}, got {}",
+                self.limit
             ));
         }
         Ok(())
@@ -212,7 +213,8 @@ impl FetchArguments {
         }
         if !(MIN_MAX_CHARS..=MAX_MAX_CHARS).contains(&self.max_chars_per_page) {
             return Err(format!(
-                "max_chars_per_page must be between {MIN_MAX_CHARS} and {MAX_MAX_CHARS}"
+                "max_chars_per_page must be between {MIN_MAX_CHARS} and {MAX_MAX_CHARS}, got {}",
+                self.max_chars_per_page
             ));
         }
         Ok(())
@@ -462,9 +464,18 @@ mod tests {
         assert_eq!(arguments.limit, DEFAULT_SEARCH_LIMIT);
         arguments.validate().unwrap();
 
+        let arguments: SearchArguments = parse_arguments(WEB_SEARCH, r#"{"query":" "}"#).unwrap();
+        assert_eq!(
+            arguments.validate().unwrap_err(),
+            "web search query cannot be empty"
+        );
+
         let arguments: SearchArguments =
-            parse_arguments(WEB_SEARCH, r#"{"query":" ","limit":21}"#).unwrap();
-        assert!(arguments.validate().is_err());
+            parse_arguments(WEB_SEARCH, r#"{"query":"rust","limit":21}"#).unwrap();
+        assert_eq!(
+            arguments.validate().unwrap_err(),
+            "web search limit must be between 1 and 20, got 21"
+        );
     }
 
     #[test]
@@ -514,6 +525,16 @@ mod tests {
         assert_eq!(
             arguments.validate().unwrap_err(),
             "web fetch URL must be HTTPS: `http://example.com`"
+        );
+
+        let arguments: FetchArguments = parse_arguments(
+            WEB_FETCH,
+            r#"{"urls":["https://example.com"],"max_chars_per_page":999}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            arguments.validate().unwrap_err(),
+            "max_chars_per_page must be between 1000 and 100000, got 999"
         );
     }
 
