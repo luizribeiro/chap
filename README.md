@@ -220,7 +220,10 @@ that instance's approval. CHAP stores approvals in `consent.json` beside the
 selected `chap.json`; concrete scopes remain in `chap.json`. A permission
 expansion, such as changing `base_url` to point at a different origin, blocks
 admission until the new manifest is reviewed and approved. Narrowing or
-removing authority is reported as non-blocking drift.
+removing authority is reported as non-blocking drift. Approval also binds the
+component's exported interfaces: a plugin that starts exporting a role it was
+not approved for blocks admission the same way, while dropping a role or
+changing only an interface version is non-blocking.
 
 `plugins check` verifies that every configured component exists, has matching
 embedded plugin metadata, implements a supported role, publishes a schema that
