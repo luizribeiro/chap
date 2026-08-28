@@ -14,6 +14,15 @@ pub(super) fn provider_component(id: &str) -> Vec<u8> {
     plugin_component(id, &[&PROVIDER], Some(permissive_schema()), RoleCall::Trap)
 }
 
+pub(super) fn provider_and_tool_component(id: &str) -> Vec<u8> {
+    plugin_component(
+        id,
+        &[&PROVIDER, &TOOLS],
+        Some(permissive_schema()),
+        RoleCall::Trap,
+    )
+}
+
 pub(super) fn fast_provider_component(id: &str) -> Vec<u8> {
     plugin_component(
         id,
@@ -79,7 +88,7 @@ world fixture {
         .unwrap();
     let world = resolve.packages[package].worlds["fixture"];
     let module = dummy_module(&resolve, world, ManglingAndAbi::Standard32);
-    let mut module = module_with_schema(&module, permissive_schema(), false, false, RoleCall::Trap);
+    let mut module = module_with_schema(&module, permissive_schema(), &[], RoleCall::Trap);
     embed_component_metadata(&mut module, &resolve, world, StringEncoding::UTF8).unwrap();
     let bytes = ComponentEncoder::default()
         .module(&module)
@@ -160,7 +169,7 @@ world fixture {{
     let world = resolve.packages[package].worlds["fixture"];
     let mut module = dummy_module(&resolve, world, ManglingAndAbi::Standard32);
     if let Some(schema) = schema {
-        module = module_with_schema(&module, schema, true, roles.contains(&&TOOLS), role_call);
+        module = module_with_schema(&module, schema, roles, role_call);
     }
     embed_component_metadata(&mut module, &resolve, world, StringEncoding::UTF8).unwrap();
     let bytes = ComponentEncoder::default()
@@ -174,8 +183,7 @@ world fixture {{
 fn module_with_schema(
     module: &[u8],
     schema: &str,
-    role_export: bool,
-    tool_definitions: bool,
+    roles: &[&Role],
     role_call: RoleCall,
 ) -> Vec<u8> {
     const ROLE_RESULT: usize = 4096;
@@ -184,6 +192,8 @@ fn module_with_schema(
     let function_offset = if has_clock_import { 3 } else { 0 };
     let schema_function_type = if has_clock_import { 2 } else { 0 };
     let role_function_type = if has_clock_import { 3 } else { 2 };
+    let provider_export = roles.contains(&&PROVIDER);
+    let tool_definitions = roles.contains(&&TOOLS);
     let definitions_result = (16 + schema.len() + 3) & !3;
     let mut wat = wasmprinter::print_bytes(module).unwrap();
     wat = wat.replacen("(memory (;0;) 0)", "(memory (;0;) 1)", 1);
@@ -195,16 +205,20 @@ fn module_with_schema(
         "i32.const 0",
     );
     if tool_definitions {
+        let definitions_function = 2 + usize::from(provider_export) * 2 + function_offset;
         replace_trapping_function(
             &mut wat,
-            2 + function_offset,
+            definitions_function,
             schema_function_type,
             "(result i32)",
             &format!("i32.const {definitions_result}"),
         );
     }
-    if role_export {
-        let realloc_function = if tool_definitions { 6 } else { 4 } + function_offset;
+    if !roles.is_empty() {
+        let realloc_function = 2
+            + usize::from(provider_export) * 2
+            + usize::from(tool_definitions) * 4
+            + function_offset;
         replace_trapping_function(
             &mut wat,
             realloc_function,
@@ -212,7 +226,11 @@ fn module_with_schema(
             "(param i32 i32 i32 i32) (result i32)",
             "i32.const 8192",
         );
-        let role_function = if tool_definitions { 4 } else { 2 } + function_offset;
+        let role_function = if tool_definitions {
+            4 + usize::from(provider_export) * 2
+        } else {
+            2
+        } + function_offset;
         let role_signature = "(param i32 i32 i32 i32) (result i32)";
         match role_call {
             RoleCall::Trap => {}

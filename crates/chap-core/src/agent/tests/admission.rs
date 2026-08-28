@@ -6,12 +6,15 @@ use super::{
     },
     fixtures::{
         fast_provider_component, fast_tool_component, hanging_provider_component,
-        hanging_tool_component, provider_component, provider_component_with_schema,
-        provider_component_with_trapping_schema, test_directory, tool_component,
-        tool_component_with_schema, unsupported_component,
+        hanging_tool_component, provider_and_tool_component, provider_component,
+        provider_component_with_schema, provider_component_with_trapping_schema, test_directory,
+        tool_component, tool_component_with_schema, unsupported_component,
     },
 };
-use crate::{CallBudget, ExecutionMode, PluginCall, ProviderError, Tool, ToolDefinition};
+use crate::{
+    CallBudget, ConsentRecord, ExecutionMode, ExportDriftKind, PluginCall, ProviderError, Tool,
+    ToolDefinition,
+};
 use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role, RuntimeLimits};
 use std::{
     collections::BTreeSet,
@@ -406,6 +409,61 @@ async fn approving_then_denying_toggles_plugin_admission() {
 }
 
 #[tokio::test]
+async fn start_refuses_a_plugin_that_gains_a_role_after_approval() {
+    let (directory, component, builder) =
+        role_change_plugin_builder(provider_component("example.plugin"));
+    builder.approve_plugin("example").await.unwrap();
+    fs::write(&component, provider_and_tool_component("example.plugin")).unwrap();
+
+    let error = builder.start().await.err().unwrap();
+
+    assert!(error.contains("plugin `example`"), "{error}");
+    assert!(
+        error.contains("now exports interfaces it was not approved for"),
+        "{error}"
+    );
+    assert!(error.contains("chap grants review example"), "{error}");
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn losing_a_role_admits_and_refreshes_the_consent_record() {
+    let (directory, component, builder) =
+        role_change_plugin_builder(provider_and_tool_component("example.plugin"));
+    builder.approve_plugin("example").await.unwrap();
+    fs::write(&component, provider_component("example.plugin")).unwrap();
+    let narrowed_exports = builder
+        .review_plugin("example")
+        .await
+        .unwrap()
+        .manifest
+        .exported_interfaces;
+
+    builder.start().await.unwrap();
+
+    let records: std::collections::BTreeMap<String, ConsentRecord> =
+        serde_json::from_slice(&fs::read(directory.join("consent.json")).unwrap()).unwrap();
+    assert_eq!(records["example"].exported_interfaces, narrowed_exports);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn review_surfaces_a_gained_export_after_a_role_change() {
+    let (directory, component, builder) =
+        role_change_plugin_builder(provider_component("example.plugin"));
+    builder.approve_plugin("example").await.unwrap();
+    fs::write(&component, provider_and_tool_component("example.plugin")).unwrap();
+
+    let review = builder.review_plugin("example").await.unwrap();
+    let drift = review.drift.expect("the gained role should be reported");
+
+    assert!(drift.export_changes.iter().any(|change| {
+        change.name == "chap:agent/tools" && change.kind == ExportDriftKind::Gained
+    }));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
 async fn nonblocking_drift_errors_are_reported_without_panicking() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
@@ -432,6 +490,7 @@ async fn nonblocking_drift_errors_are_reported_without_panicking() {
             manifest,
             drift: DriftReport {
                 changes: Vec::new(),
+                export_changes: Vec::new(),
                 blocks_admission: false,
             },
         },
@@ -921,6 +980,26 @@ fn unsupported_plugin_builder() -> (PathBuf, PathBuf, AgentBuilder) {
             "plugins": {
                 "example": {
                     "component": "unsupported.wasm"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    let builder = AgentBuilder::load(&config_path).unwrap();
+    (directory, component, builder)
+}
+
+fn role_change_plugin_builder(bytes: Vec<u8>) -> (PathBuf, PathBuf, AgentBuilder) {
+    let directory = test_directory();
+    let component = directory.join("plugin.wasm");
+    fs::write(&component, bytes).unwrap();
+    let config_path = directory.join("chap.json");
+    fs::write(
+        &config_path,
+        r#"{
+            "plugins": {
+                "example": {
+                    "component": "plugin.wasm"
                 }
             }
         }"#,

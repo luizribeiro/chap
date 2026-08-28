@@ -315,6 +315,7 @@ mod tests {
             plugin_label: "Example provider".to_owned(),
             request_digest: fingerprint,
             component_digest: format!("sha256:{}", digest_byte.to_string().repeat(64)),
+            exported_interfaces: Vec::new(),
             grants: vec![GrantReview {
                 capability: "net".to_owned(),
                 permission: "egress".to_owned(),
@@ -413,6 +414,7 @@ mod tests {
                         "https://evil.example.com".to_owned(),
                     ]),
                 }],
+                export_changes: Vec::new(),
                 blocks_admission: true,
             }),
         });

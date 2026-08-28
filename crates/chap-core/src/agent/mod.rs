@@ -1,15 +1,15 @@
 use crate::config::{
     Config, ConfiguredPlugin, agent::ToolExecutionSettings, roles::PluginRoleSettings,
 };
-use crate::consent::{ConsentStore, PluginConsentReview, consent_drift};
+use crate::consent::{ConsentStore, PluginConsentReview};
 use crate::session::{
     RunError, Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions,
 };
 use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition};
 use lockgate::{
-    ConsentRecord, ConsentRequired, Host, HostBuilder, InvocationCtx, PluginConfig, PluginHandle,
-    Prepared, Role, RuntimeLimits,
+    ConsentRecord, ConsentRequired, ExportDriftKind, Host, HostBuilder, InvocationCtx,
+    PluginConfig, PluginHandle, Prepared, Role, RuntimeLimits,
 };
 use plugin_tool::PluginTool;
 use provider::PluginBackend;
@@ -298,8 +298,11 @@ impl AgentBuilder {
         let prior = self.consent.load(id);
         let drift = prior
             .as_ref()
-            .filter(|prior| prior.request_digest != manifest.request_digest)
-            .map(|prior| consent_drift(&prior.grants, &manifest.grants));
+            .filter(|prior| {
+                prior.request_digest != manifest.request_digest
+                    || prior.exported_interfaces != manifest.exported_interfaces
+            })
+            .map(|prior| lockgate::consent_drift(prior, &manifest));
         let review = PluginConsentReview {
             manifest,
             prior,
@@ -480,13 +483,16 @@ impl AgentBuilder {
         };
         let refreshed_record = record.as_ref().and_then(|prior| {
             let manifest = prepared.review();
-            (prior.request_digest != manifest.request_digest).then(|| ConsentRecord {
-                instance_id: manifest.instance_id,
-                request_digest: manifest.request_digest,
-                component_digest: Some(manifest.component_digest),
-                grants: manifest.grants,
-                approved_at: prior.approved_at.clone(),
-            })
+            (prior.request_digest != manifest.request_digest
+                || prior.exported_interfaces != manifest.exported_interfaces)
+                .then(|| ConsentRecord {
+                    instance_id: manifest.instance_id,
+                    request_digest: manifest.request_digest,
+                    component_digest: Some(manifest.component_digest),
+                    exported_interfaces: manifest.exported_interfaces,
+                    grants: manifest.grants,
+                    approved_at: prior.approved_at.clone(),
+                })
         });
         let exported_interfaces = prepared.inspection().exported_interfaces().to_vec();
         let handle = builder
@@ -541,7 +547,13 @@ impl AgentBuilder {
                 path.display()
             ),
             ConsentRequired::Drift { drift, .. } => {
-                let change = if drift.blocks_admission {
+                let change = if drift
+                    .export_changes
+                    .iter()
+                    .any(|change| change.kind == ExportDriftKind::Gained)
+                {
+                    "now exports interfaces it was not approved for"
+                } else if drift.blocks_admission {
                     "expanded its permission manifest"
                 } else {
                     "reported a changed permission manifest"

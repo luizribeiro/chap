@@ -8,7 +8,8 @@ mod tool;
 pub use agent::{Agent, AgentBuilder, CallBudget, PluginCall};
 pub use consent::{ConsentStore, PluginConsentReview};
 pub use lockgate::{
-    ConsentManifest, ConsentRecord, DriftChange, DriftKind, DriftReport, GrantReview,
+    ConsentManifest, ConsentRecord, DriftChange, DriftKind, DriftReport, ExportDrift,
+    ExportDriftKind, GrantReview,
 };
 pub use provider::ProviderError;
 pub use session::{
