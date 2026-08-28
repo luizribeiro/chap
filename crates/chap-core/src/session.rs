@@ -352,10 +352,6 @@ pub(crate) enum RunBoundary {
 }
 
 impl SessionState {
-    pub(crate) fn id(&self) -> SessionId {
-        self.id
-    }
-
     pub(crate) fn subscribe(&self) -> SessionEvents {
         SessionEvents {
             receiver: self.events.subscribe(),

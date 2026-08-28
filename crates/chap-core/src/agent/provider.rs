@@ -3,7 +3,7 @@ use super::{
     context::{AssembledContext, ContextFuture},
 };
 use crate::{
-    ProviderError, SessionId, ToolDefinition,
+    ProviderError, ToolDefinition,
     session::{AssistantContent, Message, Reasoning, ToolCall, Usage},
 };
 use bindings::provider as provider_bindings;
@@ -17,7 +17,7 @@ pub(super) type CompletionFuture<'a> =
 pub(super) trait CompletionBackend: Sync {
     fn complete(&self, messages: Vec<Message>) -> CompletionFuture<'_>;
 
-    fn assemble_context(&self, _session: SessionId) -> ContextFuture<'_> {
+    fn assemble_context(&self) -> ContextFuture<'_> {
         Box::pin(async { Ok(AssembledContext::default()) })
     }
 }
@@ -38,8 +38,8 @@ impl CompletionBackend for PluginBackend<'_> {
         Box::pin(self.runtime.request_completion(self.provider, messages))
     }
 
-    fn assemble_context(&self, session: SessionId) -> ContextFuture<'_> {
-        Box::pin(self.runtime.assemble_context(session))
+    fn assemble_context(&self) -> ContextFuture<'_> {
+        Box::pin(self.runtime.assemble_context())
     }
 }
 

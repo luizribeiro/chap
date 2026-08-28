@@ -20,7 +20,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::sync::Mutex as AsyncMutex;
 use turn::run_agent_loop;
 
 mod bindings;
@@ -229,8 +228,6 @@ pub(crate) struct AgentInner {
     tools: ToolRegistry,
     tool_execution: ToolExecutionSettings,
     call_budgets: CallBudgets,
-    context_last_good:
-        AsyncMutex<BTreeMap<(crate::SessionId, String), Vec<context::ContextSegment>>>,
 }
 
 impl AgentBuilder {
@@ -390,7 +387,6 @@ impl AgentBuilder {
                 tools,
                 tool_execution,
                 call_budgets,
-                context_last_good: AsyncMutex::new(BTreeMap::new()),
             }),
         })
     }

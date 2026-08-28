@@ -81,7 +81,7 @@ async fn run_steps(
     let assembled_context = tokio::select! {
         biased;
         _ = active_run.interrupted() => return RunOutcome::Interrupted,
-        context = backend.assemble_context(session.id()) => match context {
+        context = backend.assemble_context() => match context {
             Ok(context) => context,
             Err(error) => return RunOutcome::Failed(RunError::Other(error)),
         },
