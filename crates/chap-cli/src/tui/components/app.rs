@@ -91,7 +91,10 @@ pub fn Chap(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
                 on_discard: {
                     let session = session.clone();
                     move |id| {
-                        let _ = session.discard_steering(id);
+                        if let Err(error) = session.discard_steering(id) {
+                            let mut transcript = transcript;
+                            transcript.write().messages.push(ChatMessage::error(error));
+                        }
                     }
                 },
             )
