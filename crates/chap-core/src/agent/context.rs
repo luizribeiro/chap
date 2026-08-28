@@ -60,11 +60,16 @@ impl AgentInner {
 fn compose_context(results: PluginResults) -> Result<AssembledContext, String> {
     let mut system = Vec::new();
     let mut context = Vec::new();
+    let mut failures = Vec::new();
 
     for (plugin, result) in results {
-        let segments = result
-            .segments
-            .map_err(|error| format!("context plugin `{plugin}` failed: {error}"))?;
+        let segments = match result.segments {
+            Ok(segments) => segments,
+            Err(error) => {
+                failures.push(format!("context plugin `{plugin}` failed: {error}"));
+                continue;
+            }
+        };
         let ordered = match result.channel {
             ContextChannel::Context => &mut context,
             ContextChannel::System => &mut system,
@@ -77,10 +82,14 @@ fn compose_context(results: PluginResults) -> Result<AssembledContext, String> {
         );
     }
 
-    Ok(AssembledContext {
-        system: render_channel(system),
-        context: render_channel(context),
-    })
+    if failures.is_empty() {
+        Ok(AssembledContext {
+            system: render_channel(system),
+            context: render_channel(context),
+        })
+    } else {
+        Err(failures.join("\n"))
+    }
 }
 
 fn render_channel(mut segments: Vec<(i32, String, usize, String)>) -> Option<String> {
@@ -230,6 +239,47 @@ mod tests {
         assert_eq!(
             assembly,
             Err("context plugin `broken-context` failed: unavailable".to_owned())
+        );
+    }
+
+    #[test]
+    fn reports_every_failure_in_plugin_order() {
+        let assembly = compose_context(BTreeMap::from([
+            (
+                "zeta".to_owned(),
+                failure(ContextChannel::System, "timed out"),
+            ),
+            (
+                "alpha".to_owned(),
+                failure(ContextChannel::Context, "unavailable"),
+            ),
+        ]));
+
+        assert_eq!(
+            assembly,
+            Err(
+                "context plugin `alpha` failed: unavailable\ncontext plugin `zeta` failed: timed out"
+                    .to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn failure_rejects_an_assembly_with_successful_segments() {
+        let assembly = compose_context(BTreeMap::from([
+            (
+                "available".to_owned(),
+                success(ContextChannel::Context, vec![segment("context", 0)]),
+            ),
+            (
+                "broken".to_owned(),
+                failure(ContextChannel::System, "unavailable"),
+            ),
+        ]));
+
+        assert_eq!(
+            assembly,
+            Err("context plugin `broken` failed: unavailable".to_owned())
         );
     }
 
