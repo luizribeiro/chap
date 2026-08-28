@@ -52,7 +52,6 @@ impl AgentInner {
             )
             .await
             .map_err(context_call_error)?
-            .map_err(|error| error.to_string())
             .map(|segments| segments.into_iter().map(Into::into).collect())
     }
 }
