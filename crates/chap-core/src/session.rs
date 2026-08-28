@@ -545,12 +545,16 @@ mod tests {
         }
     }
 
+    fn session_state(manager: &SessionManager) -> Arc<SessionState> {
+        manager
+            .create(SessionOptions::new("provider"), AssembledContext::default())
+            .unwrap()
+    }
+
     #[tokio::test]
     async fn sessions_start_with_empty_history() {
         let manager = SessionManager::new();
-        let state = manager
-            .create(SessionOptions::new("provider"), AssembledContext::default())
-            .unwrap();
+        let state = session_state(&manager);
 
         assert!(state.messages.read().await.is_empty());
         assert!(manager.owns(&state));
@@ -558,10 +562,7 @@ mod tests {
 
     #[tokio::test]
     async fn sessions_send_through_their_executor() {
-        let manager = SessionManager::new();
-        let state = manager
-            .create(SessionOptions::new("provider"), AssembledContext::default())
-            .unwrap();
+        let state = session_state(&SessionManager::new());
         let session = Session::new(state, Arc::new(EchoExecutor));
 
         assert_eq!(session.send("hello").await.unwrap(), "hello");
@@ -569,10 +570,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_runs_outlive_their_callers() {
-        let manager = SessionManager::new();
-        let state = manager
-            .create(SessionOptions::new("provider"), AssembledContext::default())
-            .unwrap();
+        let state = session_state(&SessionManager::new());
         let executor = Arc::new(ControlledExecutor::default());
         let session = Session::new(state, executor.clone());
 
@@ -589,10 +587,7 @@ mod tests {
 
     #[tokio::test]
     async fn sessions_can_discard_queued_steering() {
-        let manager = SessionManager::new();
-        let state = manager
-            .create(SessionOptions::new("provider"), AssembledContext::default())
-            .unwrap();
+        let state = session_state(&SessionManager::new());
         let session = Session::new(Arc::clone(&state), Arc::new(EchoExecutor));
         let mut events = session.subscribe();
 
@@ -641,10 +636,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_subscribers_observe_events_independently_and_in_order() {
-        let manager = SessionManager::new();
-        let state = manager
-            .create(SessionOptions::new("provider"), AssembledContext::default())
-            .unwrap();
+        let state = session_state(&SessionManager::new());
         let session = Session::new(Arc::clone(&state), Arc::new(EchoExecutor));
         let mut first = session.subscribe();
         let mut second = session.subscribe();
@@ -672,10 +664,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_subscribers_report_lag() {
-        let manager = SessionManager::new();
-        let state = manager
-            .create(SessionOptions::new("provider"), AssembledContext::default())
-            .unwrap();
+        let state = session_state(&SessionManager::new());
         let session = Session::new(Arc::clone(&state), Arc::new(EchoExecutor));
         let mut events = session.subscribe();
 
