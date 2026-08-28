@@ -172,7 +172,7 @@ and Lockgate resolves that URL's origin as the granted scope. The scheme and
 effective port are part of the origin. Kagi declares the literal origin
 `https://kagi.com` and therefore needs no configurable origin. Persona exports
 only the context role and requests no capabilities; it contributes its
-configured text at run start without storing it in session history.
+configured text at session creation without storing it in session history.
 
 Context plugins use the `context` channel by default, contributing one leading
 user message. Set a plugin's `context.channel` to `system` when that plugin

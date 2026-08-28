@@ -19,7 +19,7 @@ pub async fn run(agent: chap_core::Agent) -> Result<(), String> {
         return Err("the terminal interface requires an interactive terminal".into());
     }
 
-    let session = agent.session(SessionOptions::new(PROVIDER))?;
+    let session = agent.session(SessionOptions::new(PROVIDER)).await?;
     let mut element = element! {
         ContextProvider(value: Context::owned(TuiContext { session })) {
             Chap

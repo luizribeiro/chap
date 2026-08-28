@@ -7,8 +7,8 @@ use crate::{
     ExecutionMode, ProviderError, RunError, SessionOptions, Tool, ToolDefinition,
     config::agent::ToolExecutionSettings,
     session::{
-        AssistantContent, Message, Reasoning, RunUsage, SessionEventKind, SessionEvents,
-        SessionManager, SessionState, ToolCall, Usage,
+        AssembledContext, AssistantContent, Message, Reasoning, RunUsage, SessionEventKind,
+        SessionEvents, SessionManager, SessionState, ToolCall, Usage,
     },
     tool::ToolRegistry,
 };
@@ -1068,9 +1068,56 @@ async fn reports_the_provider_step_limit_as_other() {
     );
 }
 
+#[tokio::test]
+async fn prepends_the_session_context_to_every_provider_request() {
+    let state = session_state_with_context(AssembledContext {
+        system: Some("operator guidance".to_owned()),
+        context: Some("project notes".to_owned()),
+    });
+    let backend = FakeBackend::new([
+        completion(vec![tool_call("call-1", "echo")]),
+        text_completion("done"),
+    ]);
+    let mut tools = ToolRegistry::new();
+    tools.register(EchoTool).unwrap();
+
+    run_agent_loop(&state, "hello".to_owned(), &tools, TOOL_EXECUTION, &backend)
+        .await
+        .unwrap();
+
+    {
+        let requests = backend.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        for request in requests.iter() {
+            assert_eq!(
+                request[..3],
+                [
+                    Message::System("operator guidance".to_owned()),
+                    Message::User("project notes".to_owned()),
+                    Message::User("hello".to_owned()),
+                ]
+            );
+        }
+    }
+
+    let history = state.messages.read().await;
+    assert!(
+        !history.iter().any(|message| match message {
+            Message::System(_) => true,
+            Message::User(input) => input == "project notes",
+            _ => false,
+        }),
+        "assembled context must never be stored in session history: {history:?}"
+    );
+}
+
 fn session_state() -> Arc<SessionState> {
+    session_state_with_context(AssembledContext::default())
+}
+
+fn session_state_with_context(context: AssembledContext) -> Arc<SessionState> {
     SessionManager::new()
-        .create(SessionOptions::new("test-provider"))
+        .create(SessionOptions::new("test-provider"), context)
         .unwrap()
 }
 

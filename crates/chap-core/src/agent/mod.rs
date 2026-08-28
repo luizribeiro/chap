@@ -703,7 +703,7 @@ impl Agent {
         self.inner.tools.definitions()
     }
 
-    pub fn session(&self, options: SessionOptions) -> Result<Session, String> {
+    pub async fn session(&self, options: SessionOptions) -> Result<Session, String> {
         if let Some(error) = self.inner.plugin_errors.get(&options.provider) {
             return Err(error.clone());
         }
@@ -718,7 +718,8 @@ impl Agent {
                 options.provider
             ));
         }
-        let state = self.inner.sessions.create(options)?;
+        let assembled_context = self.inner.assemble_context().await?;
+        let state = self.inner.sessions.create(options, assembled_context)?;
         Ok(Session::new(state, self.inner.clone()))
     }
 }

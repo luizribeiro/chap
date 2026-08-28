@@ -78,20 +78,12 @@ async fn run_steps(
     active_run: &mut ActiveRun<'_>,
 ) -> RunOutcome {
     let mut total_usage = Usage::default();
-    let assembled_context = tokio::select! {
-        biased;
-        _ = active_run.interrupted() => return RunOutcome::Interrupted,
-        context = backend.assemble_context() => match context {
-            Ok(context) => context,
-            Err(error) => return RunOutcome::Failed(RunError::Other(error)),
-        },
-    };
     for _ in 0..MAX_PROVIDER_STEPS_PER_TURN {
         let mut messages = session.messages.read().await.clone();
-        if let Some(context) = &assembled_context.context {
+        if let Some(context) = &session.assembled_context.context {
             messages.insert(0, Message::User(context.clone()));
         }
-        if let Some(system) = &assembled_context.system {
+        if let Some(system) = &session.assembled_context.system {
             messages.insert(0, Message::System(system.clone()));
         }
         let completion = tokio::select! {

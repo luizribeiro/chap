@@ -55,6 +55,7 @@ async fn real_context_plugins_use_configured_channels_without_reaching_history()
     .await;
     let session = agent
         .session(SessionOptions::new("fixture-provider"))
+        .await
         .unwrap();
 
     assert_eq!(
@@ -73,31 +74,27 @@ async fn real_context_plugins_use_configured_channels_without_reaching_history()
 }
 
 #[tokio::test]
-async fn hanging_real_context_plugin_hits_the_assembly_deadline() {
+async fn hanging_real_context_plugin_fails_session_creation_at_the_deadline() {
     let (agent, _directory) =
         start_agent([context_plugin("hanging-context", json!({ "hang": true }))]).await;
-    let session = agent
-        .session(SessionOptions::new("fixture-provider"))
-        .unwrap();
     let context_deadline = CallBudgets::default()
         .resolve(PluginCall::ContextSegments)
         .deadline;
 
     let error = tokio::time::timeout(
         context_deadline + Duration::from_secs(5),
-        session.send("hello"),
+        agent.session(SessionOptions::new("fixture-provider")),
     )
     .await
     .expect("context call did not respect its assembly deadline")
-    .unwrap_err();
+    .err()
+    .expect("session creation should fail while a context plugin hangs");
 
     assert!(
-        error
-            .to_string()
-            .contains("context plugin `hanging-context`"),
+        error.contains("context plugin `hanging-context`"),
         "{error}"
     );
-    assert!(error.to_string().contains("timed out after 10s"), "{error}");
+    assert!(error.contains("timed out after 10s"), "{error}");
 }
 
 async fn start_agent(

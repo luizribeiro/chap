@@ -348,6 +348,7 @@ async fn first_run_refuses_only_the_unapproved_plugin() {
     assert_eq!(
         agent
             .session(SessionOptions::new("unapproved"))
+            .await
             .err()
             .unwrap(),
         errors[0].1

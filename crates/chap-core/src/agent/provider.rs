@@ -1,7 +1,4 @@
-use super::{
-    AgentInner, PluginCall, bindings,
-    context::{AssembledContext, ContextFuture},
-};
+use super::{AgentInner, PluginCall, bindings};
 use crate::{
     ProviderError, ToolDefinition,
     session::{AssistantContent, Message, Reasoning, ToolCall, Usage},
@@ -16,10 +13,6 @@ pub(super) type CompletionFuture<'a> =
 
 pub(super) trait CompletionBackend: Sync {
     fn complete(&self, messages: Vec<Message>) -> CompletionFuture<'_>;
-
-    fn assemble_context(&self) -> ContextFuture<'_> {
-        Box::pin(async { Ok(AssembledContext::default()) })
-    }
 }
 
 pub(super) struct PluginBackend<'a> {
@@ -36,10 +29,6 @@ impl<'a> PluginBackend<'a> {
 impl CompletionBackend for PluginBackend<'_> {
     fn complete(&self, messages: Vec<Message>) -> CompletionFuture<'_> {
         Box::pin(self.runtime.request_completion(self.provider, messages))
-    }
-
-    fn assemble_context(&self) -> ContextFuture<'_> {
-        Box::pin(self.runtime.assemble_context())
     }
 }
 

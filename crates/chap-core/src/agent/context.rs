@@ -1,18 +1,9 @@
 use super::{AgentInner, PluginCall, bindings};
-use crate::config::roles::ContextChannel;
+use crate::{config::roles::ContextChannel, session::AssembledContext};
 use bindings::context as context_bindings;
 use futures::future::join_all;
 use lockgate::CallError;
-use std::{collections::BTreeMap, future::Future, pin::Pin};
-
-pub(super) type ContextFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<AssembledContext, String>> + Send + 'a>>;
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(super) struct AssembledContext {
-    pub(super) system: Option<String>,
-    pub(super) context: Option<String>,
-}
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ContextSegment {

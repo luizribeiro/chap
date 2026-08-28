@@ -11,6 +11,14 @@ use uuid::Uuid;
 
 const EVENT_CHANNEL_CAPACITY: usize = 256;
 
+/// Context-plugin output assembled once at session creation and prepended
+/// to the history clone sent with every provider request.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct AssembledContext {
+    pub(crate) system: Option<String>,
+    pub(crate) context: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Message {
     System(String),
@@ -290,7 +298,11 @@ impl SessionManager {
         }
     }
 
-    pub(crate) fn create(&self, options: SessionOptions) -> Result<Arc<SessionState>, String> {
+    pub(crate) fn create(
+        &self,
+        options: SessionOptions,
+        assembled_context: AssembledContext,
+    ) -> Result<Arc<SessionState>, String> {
         if options.provider.trim().is_empty() {
             return Err("a session provider is required".to_owned());
         }
@@ -299,6 +311,7 @@ impl SessionManager {
         let state = Arc::new(SessionState {
             id,
             provider: options.provider,
+            assembled_context,
             turn_lock: AsyncMutex::new(()),
             run: Mutex::new(RunState::default()),
             messages: RwLock::new(Vec::new()),
@@ -324,6 +337,7 @@ impl SessionManager {
 pub(crate) struct SessionState {
     id: SessionId,
     provider: String,
+    pub(crate) assembled_context: AssembledContext,
     pub(crate) turn_lock: AsyncMutex<()>,
     run: Mutex<RunState>,
     pub(crate) messages: RwLock<Vec<Message>>,
@@ -534,7 +548,9 @@ mod tests {
     #[tokio::test]
     async fn sessions_start_with_empty_history() {
         let manager = SessionManager::new();
-        let state = manager.create(SessionOptions::new("provider")).unwrap();
+        let state = manager
+            .create(SessionOptions::new("provider"), AssembledContext::default())
+            .unwrap();
 
         assert!(state.messages.read().await.is_empty());
         assert!(manager.owns(&state));
@@ -543,7 +559,9 @@ mod tests {
     #[tokio::test]
     async fn sessions_send_through_their_executor() {
         let manager = SessionManager::new();
-        let state = manager.create(SessionOptions::new("provider")).unwrap();
+        let state = manager
+            .create(SessionOptions::new("provider"), AssembledContext::default())
+            .unwrap();
         let session = Session::new(state, Arc::new(EchoExecutor));
 
         assert_eq!(session.send("hello").await.unwrap(), "hello");
@@ -552,7 +570,9 @@ mod tests {
     #[tokio::test]
     async fn session_runs_outlive_their_callers() {
         let manager = SessionManager::new();
-        let state = manager.create(SessionOptions::new("provider")).unwrap();
+        let state = manager
+            .create(SessionOptions::new("provider"), AssembledContext::default())
+            .unwrap();
         let executor = Arc::new(ControlledExecutor::default());
         let session = Session::new(state, executor.clone());
 
@@ -570,7 +590,9 @@ mod tests {
     #[tokio::test]
     async fn sessions_can_discard_queued_steering() {
         let manager = SessionManager::new();
-        let state = manager.create(SessionOptions::new("provider")).unwrap();
+        let state = manager
+            .create(SessionOptions::new("provider"), AssembledContext::default())
+            .unwrap();
         let session = Session::new(Arc::clone(&state), Arc::new(EchoExecutor));
         let mut events = session.subscribe();
 
@@ -620,7 +642,9 @@ mod tests {
     #[tokio::test]
     async fn session_subscribers_observe_events_independently_and_in_order() {
         let manager = SessionManager::new();
-        let state = manager.create(SessionOptions::new("provider")).unwrap();
+        let state = manager
+            .create(SessionOptions::new("provider"), AssembledContext::default())
+            .unwrap();
         let session = Session::new(Arc::clone(&state), Arc::new(EchoExecutor));
         let mut first = session.subscribe();
         let mut second = session.subscribe();
@@ -649,7 +673,9 @@ mod tests {
     #[tokio::test]
     async fn session_subscribers_report_lag() {
         let manager = SessionManager::new();
-        let state = manager.create(SessionOptions::new("provider")).unwrap();
+        let state = manager
+            .create(SessionOptions::new("provider"), AssembledContext::default())
+            .unwrap();
         let session = Session::new(Arc::clone(&state), Arc::new(EchoExecutor));
         let mut events = session.subscribe();
 

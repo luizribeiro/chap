@@ -199,7 +199,11 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
         errors[0].1
     );
     assert_eq!(
-        agent.session(SessionOptions::new("openai")).err().unwrap(),
+        agent
+            .session(SessionOptions::new("openai"))
+            .await
+            .err()
+            .unwrap(),
         errors[0].1
     );
     assert_eq!(std::fs::read(consent_path).unwrap(), stored_before);
@@ -294,7 +298,7 @@ async fn complete_through_the_host(mock: MockServer, config_path: &Path) -> Host
     builder.approve_plugin("openai").await.unwrap();
     let agent = builder.start().await.unwrap();
     assert!(agent.plugin_errors().next().is_none());
-    let session = agent.session(SessionOptions::new("openai")).unwrap();
+    let session = agent.session(SessionOptions::new("openai")).await.unwrap();
     let mut events = session.subscribe();
     let completion = tokio::time::timeout(INVOCATION_TIMEOUT, session.send("hello"))
         .await
