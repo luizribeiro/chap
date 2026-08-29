@@ -147,6 +147,10 @@ type StartDropResources = (
     Option<HostBuilder<()>>,
 );
 
+fn host_builder() -> Result<HostBuilder<()>, String> {
+    HostBuilder::new(()).map_err(|error| format!("failed to create Lockgate host: {error}"))
+}
+
 struct StartResources {
     tools: Option<ToolRegistry>,
     host: Option<Arc<InnerHost>>,
@@ -320,8 +324,7 @@ impl AgentBuilder {
             .config
             .plugin(id)
             .ok_or_else(|| format!("plugin `{id}` is not configured"))?;
-        let builder = HostBuilder::new(())
-            .map_err(|error| format!("failed to create Lockgate host: {error}"))?;
+        let builder = host_builder()?;
         let mut resources = StartResources::new(ToolRegistry::new(), builder);
         let prepared = match Self::prepare_plugin(
             resources.builder.as_mut().expect("uninitialized host"),
@@ -368,8 +371,7 @@ impl AgentBuilder {
             tools,
             call_budgets,
         } = self;
-        let builder = HostBuilder::new(())
-            .map_err(|error| format!("failed to create Lockgate host: {error}"))?;
+        let builder = host_builder()?;
         let mut resources = StartResources::new(tools, builder);
         let plugins =
             match Self::initialize_plugins(&mut resources, &config, &consent, call_budgets).await {
