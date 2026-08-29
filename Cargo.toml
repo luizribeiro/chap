@@ -27,6 +27,7 @@ clap = { version = "4.6.6", features = ["derive"] }
 futures = "0.3.31"
 iocraft = { git = "https://github.com/luizribeiro/iocraft.git", rev = "619ee083dd84dc0070758221dee6a3936c7897de" }
 jsonschema = { version = "0.49.2", default-features = false }
+libc = "0.2.189"
 lockgate = { git = "https://github.com/luizribeiro/lockgate.git", branch = "main" }
 lockgate-http = { git = "https://github.com/luizribeiro/lockgate.git", branch = "main" }
 lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", branch = "main", default-features = false }
@@ -44,7 +45,7 @@ shlex = "2.0.1"
 syn = { version = "2.0.119", features = ["full"] }
 tempfile = "3.27.0"
 time = { version = "0.3.41", features = ["formatting", "parsing"] }
-tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.48.0", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 two-face = "0.5.1"
 unicode-segmentation = "1.13.3"
 unicode-width = "0.2.2"

@@ -4,6 +4,12 @@
 
 extern crate alloc;
 
+#[cfg(feature = "host")]
+extern crate std;
+
+#[cfg(feature = "host")]
+pub mod host;
+
 #[lockgate_policy::capability("exec")]
 pub mod exec {
     use alloc::{format, string::String, vec::Vec};
