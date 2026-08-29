@@ -4,6 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    crane.url = "github:ipetkov/crane";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -18,6 +19,7 @@
     {
       nixpkgs,
       flake-utils,
+      crane,
       rust-overlay,
       git-hooks,
       ...
@@ -38,6 +40,54 @@
           ];
           targets = [ "wasm32-wasip2" ];
         };
+        stableRust = pkgs.rust-bin.stable.latest.default;
+        craneLib = (crane.mkLib pkgs).overrideToolchain stableRust;
+        packageSrc = craneLib.path ./.;
+        cargoVendorDir = craneLib.vendorCargoDeps {
+          src = packageSrc;
+          overrideVendorGitCheckout =
+            packages: checkout:
+            if
+              pkgs.lib.any (
+                package:
+                pkgs.lib.hasPrefix "git+https://github.com/bytecodealliance/wasmtime" (
+                  package.source or ""
+                )
+              ) packages
+            then
+              checkout.overrideAttrs (old: {
+                # Crane inspects unpublished workspace crates whose declared
+                # README files are absent from the pinned Wasmtime checkout.
+                postPatch = (old.postPatch or "") + ''
+                  for crate in crates/bench-api crates/c-api/artifact; do
+                    [ -e "$crate/README.md" ] || cp README.md "$crate/README.md"
+                  done
+                '';
+              })
+            else
+              checkout;
+        };
+        packageArgs = {
+          pname = "chap";
+          version = "0.1.0";
+          src = packageSrc;
+          inherit cargoVendorDir;
+          cargoExtraArgs = "--locked -p chap-cli";
+          doCheck = false;
+        };
+        cargoArtifacts = craneLib.buildDepsOnly packageArgs;
+        chap = pkgs.lib.makeOverridable (
+          { withExec ? false }:
+          craneLib.buildPackage (
+            packageArgs
+            // {
+              inherit cargoArtifacts;
+              cargoExtraArgs =
+                packageArgs.cargoExtraArgs
+                + pkgs.lib.optionalString withExec " --features chap-cli/exec";
+            }
+          )
+        ) { };
         wasiSysroot = import ./nix/wasip3-sysroot.nix { inherit pkgs system; };
         rustfmtHook = {
           enable = true;
@@ -102,10 +152,18 @@
         };
       in
       {
-        # Cargo's Git dependencies are unavailable in the Nix build sandbox, so
-        # the sandboxed check is limited to formatting. Clippy and tests run in
-        # the development shell's commit and push hooks instead.
-        checks.formatting = formattingCheck;
+        # Tests compile WASM components in-process, so Clippy and tests remain
+        # in the development shell's commit and push hooks.
+        packages = {
+          inherit chap;
+          chap-exec = chap.override { withExec = true; };
+          default = chap;
+        };
+
+        checks = {
+          formatting = formattingCheck;
+          chap = chap;
+        };
 
         devShells.default = pkgs.mkShell {
           packages = [
