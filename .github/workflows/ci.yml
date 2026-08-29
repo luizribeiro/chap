@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      # The stock runner image leaves ~14G free, which the Nix store plus a
+      # full workspace build exhaust; drop the unused preinstalled toolchains.
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force >/dev/null
+
+      # The lockgate git dependency is a private repository, so every fetch
+      # of it needs the read-only deploy key held in this secret.
+      - name: Grant access to the lockgate repository
+        env:
+          DEPLOY_KEY: ${{ secrets.LOCKGATE_DEPLOY_KEY }}
+        run: |
+          [ -n "$DEPLOY_KEY" ] || { echo "the LOCKGATE_DEPLOY_KEY secret is not set" >&2; exit 1; }
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/lockgate_deploy_key
+          chmod 600 ~/.ssh/lockgate_deploy_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git config --global core.sshCommand "ssh -i ~/.ssh/lockgate_deploy_key -o IdentitiesOnly=yes"
+          git config --global url."ssh://git@github.com/luizribeiro/lockgate".insteadOf "https://github.com/luizribeiro/lockgate"
+
+      - uses: nixbuild/nix-quick-install-action@v35
+        with:
+          nix_conf: |
+            keep-env-derivations = true
+            keep-outputs = true
+
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-flake-${{ hashFiles('flake.lock', 'Cargo.lock', '**/*.nix') }}
+          restore-prefixes-first-match: |
+            nix-flake-
+            nix-dev-
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-flake-
+          purge-created: 0
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
+
+      - name: Check flake
+        run: nix flake check -L
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      # The stock runner image leaves ~14G free, which the Nix store plus a
+      # full workspace build exhaust; drop the unused preinstalled toolchains.
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force >/dev/null
+
+      - name: Grant access to the lockgate repository
+        env:
+          DEPLOY_KEY: ${{ secrets.LOCKGATE_DEPLOY_KEY }}
+        run: |
+          [ -n "$DEPLOY_KEY" ] || { echo "the LOCKGATE_DEPLOY_KEY secret is not set" >&2; exit 1; }
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/lockgate_deploy_key
+          chmod 600 ~/.ssh/lockgate_deploy_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git config --global core.sshCommand "ssh -i ~/.ssh/lockgate_deploy_key -o IdentitiesOnly=yes"
+          git config --global url."ssh://git@github.com/luizribeiro/lockgate".insteadOf "https://github.com/luizribeiro/lockgate"
+          # Cargo must fetch through the git CLI for the rewrite and the
+          # deploy key to apply to its lockgate checkout.
+          mkdir -p ~/.cargo
+          printf '[net]\ngit-fetch-with-cli = true\n' >> ~/.cargo/config.toml
+
+      - uses: nixbuild/nix-quick-install-action@v35
+        with:
+          nix_conf: |
+            keep-env-derivations = true
+            keep-outputs = true
+
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-dev-${{ hashFiles('flake.lock', 'Cargo.lock', '**/*.nix') }}
+          restore-prefixes-first-match: |
+            nix-dev-
+            nix-flake-
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-dev-
+          purge-created: 0
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
+
+      - name: Restore and save Cargo cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      # WASI-only plugin crates fail host clippy, so lint only the host crates.
+      - name: Clippy
+        run: nix develop -c cargo clippy -p chap-core -p chap-cli -p chap-plugin --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: nix develop -c cargo test-all
