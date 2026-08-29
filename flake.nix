@@ -67,14 +67,21 @@
             plugin-clippy = {
               enable = true;
               name = "cargo clippy (WASI plugins)";
-              entry = "${rust}/bin/cargo clippy -p chap-openai-compatible -p chap-kagi --target wasm32-wasip2 --all-targets --locked -- -D warnings";
+              entry = "${rust}/bin/cargo clippy -p chap-openai-compatible -p chap-exec-plugin -p chap-kagi --target wasm32-wasip2 --all-targets --locked -- -D warnings";
+              files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
+              pass_filenames = false;
+            };
+            exec-clippy = {
+              enable = true;
+              name = "cargo clippy (exec feature)";
+              entry = "${rust}/bin/cargo clippy -p chap-core --features exec --all-targets --locked -- -D warnings";
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
             };
             cargo-test = {
               enable = true;
               name = "cargo test";
-              entry = "${rust}/bin/cargo test --workspace --all-targets --locked --exclude chap-openai-compatible --exclude chap-kagi";
+              entry = "${rust}/bin/cargo test --workspace --all-targets --locked --exclude chap-openai-compatible --exclude chap-exec-plugin --exclude chap-kagi";
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
               stages = [ "pre-push" ];

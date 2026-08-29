@@ -24,6 +24,18 @@ fn main() -> ExitCode {
             ],
         ),
         (
+            &workspace,
+            &[
+                "test",
+                "-p",
+                "chap-core",
+                "--features",
+                "exec",
+                "--all-targets",
+                "--locked",
+            ],
+        ),
+        (
             &workspace.join("plugins/openai-compatible"),
             &["test", "--locked"],
         ),
