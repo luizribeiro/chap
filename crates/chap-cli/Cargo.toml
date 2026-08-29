@@ -8,6 +8,9 @@ publish.workspace = true
 name = "chap"
 path = "src/main.rs"
 
+[features]
+exec = ["chap-core/exec"]
+
 [dependencies]
 clap.workspace = true
 iocraft.workspace = true

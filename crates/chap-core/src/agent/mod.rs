@@ -149,7 +149,13 @@ type StartDropResources = (
 );
 
 fn host_builder() -> Result<HostBuilder<HostImports>, String> {
-    HostBuilder::new(()).map_err(|error| format!("failed to create Lockgate host: {error}"))
+    let builder =
+        HostBuilder::new(()).map_err(|error| format!("failed to create Lockgate host: {error}"))?;
+    #[cfg(feature = "exec")]
+    let builder = builder
+        .register::<chap_exec::exec::Contract>()
+        .map_err(|error| format!("failed to register exec capability: {error}"))?;
+    Ok(builder)
 }
 
 struct StartResources {

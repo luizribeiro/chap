@@ -1,6 +1,7 @@
 use super::Config;
 use crate::tool::ExecutionMode;
 use serde::Deserialize;
+use serde_json::Value;
 use std::num::NonZeroUsize;
 
 /// Settings that control agent-wide behavior.
@@ -10,6 +11,7 @@ pub(crate) struct AgentSettings {
     /// How tool calls are scheduled across the agent.
     #[serde(default)]
     tool_execution: ToolExecutionSettings,
+    exec: Option<Value>,
 }
 
 /// Settings that control tool-call scheduling.
@@ -27,6 +29,31 @@ pub(crate) struct ToolExecutionSettings {
 impl Config {
     pub(crate) fn tool_execution(&self) -> ToolExecutionSettings {
         self.agent.tool_execution
+    }
+
+    pub(crate) fn validate_agent_settings(&self) -> Result<(), String> {
+        if self.agent.exec.is_some() && !cfg!(feature = "exec") {
+            return Err(
+                "agent.exec is configured, but this build lacks exec support; rebuild with the `exec` feature"
+                    .to_owned(),
+            );
+        }
+
+        #[cfg(feature = "exec")]
+        self.exec_config()?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "exec")]
+    pub(crate) fn exec_config(&self) -> Result<chap_exec::host::ExecConfig, String> {
+        self.agent
+            .exec
+            .clone()
+            .map(serde_json::from_value)
+            .transpose()
+            .map(Option::unwrap_or_default)
+            .map_err(|error| format!("failed to parse the `agent.exec` config section: {error}"))
     }
 }
 
@@ -107,5 +134,86 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("unknown field `concurrency`"));
+    }
+
+    #[test]
+    fn accepts_an_absent_exec_section() {
+        let config: Config = serde_json::from_str(r#"{ "agent": {} }"#).unwrap();
+
+        assert!(config.agent.exec.is_none());
+        config.validate_agent_settings().unwrap();
+    }
+
+    #[cfg(not(feature = "exec"))]
+    #[test]
+    fn rejects_exec_settings_when_exec_support_is_absent() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "exec": { "timeout_ceiling_ms": 1000 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let error = config.validate_agent_settings().unwrap_err();
+        assert!(error.contains("this build lacks exec support"));
+        assert!(error.contains("rebuild with the `exec` feature"));
+    }
+
+    #[cfg(feature = "exec")]
+    #[test]
+    fn parses_exec_settings_without_teaching_core_the_schema() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "exec": {
+                        "path": ["/bin", "/usr/bin"],
+                        "env_passthrough": ["TERM"],
+                        "timeout_ceiling_ms": 1000
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let exec = config.exec_config().unwrap();
+        assert_eq!(
+            exec.path.unwrap(),
+            [
+                std::path::PathBuf::from("/bin"),
+                std::path::PathBuf::from("/usr/bin")
+            ]
+        );
+        assert_eq!(exec.env_passthrough, ["TERM"]);
+        assert_eq!(exec.timeout_ceiling_ms, 1000);
+    }
+
+    #[cfg(feature = "exec")]
+    #[test]
+    fn defaults_exec_settings_when_the_section_is_absent() {
+        let config: Config = serde_json::from_str("{}").unwrap();
+        let exec = config.exec_config().unwrap();
+
+        assert!(exec.path.is_none());
+        assert!(exec.env_passthrough.is_empty());
+        assert_eq!(exec.timeout_ceiling_ms, 120_000);
+    }
+
+    #[cfg(feature = "exec")]
+    #[test]
+    fn names_the_agent_exec_section_when_settings_are_invalid() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "exec": { "timeout_ceiling_ms": "soon" }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let error = config.validate_agent_settings().unwrap_err();
+        assert!(error.contains("`agent.exec` config section"));
+        assert!(error.contains("invalid type"));
     }
 }

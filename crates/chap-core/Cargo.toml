@@ -4,7 +4,11 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+exec = ["dep:chap-exec", "chap-wit/exec"]
+
 [dependencies]
+chap-exec = { path = "../chap-exec", features = ["host"], optional = true }
 chap-wit.workspace = true
 futures.workspace = true
 lockgate.workspace = true

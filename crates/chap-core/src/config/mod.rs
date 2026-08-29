@@ -49,6 +49,7 @@ impl Config {
         let mut config: Self = serde_json::from_str(&source)
             .map_err(|error| format!("failed to parse `{}`: {error}", path.display()))?;
         config.directory = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
+        config.validate_agent_settings()?;
         Ok(config)
     }
 
