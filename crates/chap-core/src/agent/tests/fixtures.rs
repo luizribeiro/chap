@@ -44,6 +44,16 @@ pub(super) fn provider_component_with_trapping_schema(id: &str) -> Vec<u8> {
     plugin_component(id, &[&PROVIDER], None, RoleCall::Trap)
 }
 
+pub(super) fn provider_component_requiring_exec(id: &str) -> Vec<u8> {
+    plugin_component_with_needs(
+        id,
+        &[&PROVIDER],
+        Some(permissive_schema()),
+        RoleCall::Trap,
+        br#"{"format":1,"optional":{},"reasons":{},"required":{"exec.run":["setting:/allowed_commands"]}}"#,
+    )
+}
+
 pub(super) fn tool_component(id: &str) -> Vec<u8> {
     plugin_component(id, &[&TOOLS], Some(permissive_schema()), RoleCall::Trap)
 }
@@ -95,7 +105,7 @@ world fixture {
         .unwrap()
         .encode()
         .unwrap();
-    with_plugin_sections(bytes, id)
+    with_plugin_sections(bytes, id, empty_needs())
 }
 
 fn plugin_component(
@@ -103,6 +113,16 @@ fn plugin_component(
     roles: &[&Role],
     schema: Option<&str>,
     role_call: RoleCall,
+) -> Vec<u8> {
+    plugin_component_with_needs(id, roles, schema, role_call, empty_needs())
+}
+
+fn plugin_component_with_needs(
+    id: &str,
+    roles: &[&Role],
+    schema: Option<&str>,
+    role_call: RoleCall,
+    needs: &[u8],
 ) -> Vec<u8> {
     let mut resolve = Resolve::new();
     resolve
@@ -177,7 +197,7 @@ world fixture {{
         .unwrap()
         .encode()
         .unwrap();
-    with_plugin_sections(bytes, id)
+    with_plugin_sections(bytes, id, needs)
 }
 
 fn module_with_schema(
@@ -332,15 +352,15 @@ fn permissive_schema() -> &'static str {
     r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}"#
 }
 
-fn with_plugin_sections(bytes: Vec<u8>, id: &str) -> Vec<u8> {
+fn empty_needs() -> &'static [u8] {
+    br#"{"format":1,"optional":{},"reasons":{},"required":{}}"#
+}
+
+fn with_plugin_sections(bytes: Vec<u8>, id: &str, needs: &[u8]) -> Vec<u8> {
     let metadata =
         format!(r#"{{"format":1,"id":"{id}","name":"Test provider","version":"0.1.0"}}"#);
     let bytes = with_custom_section(bytes, "lockgate:plugin", metadata.as_bytes());
-    with_custom_section(
-        bytes,
-        "lockgate:needs",
-        br#"{"format":1,"optional":{},"reasons":{},"required":{}}"#,
-    )
+    with_custom_section(bytes, "lockgate:needs", needs)
 }
 
 fn with_custom_section(mut bytes: Vec<u8>, section_name: &str, contents: &[u8]) -> Vec<u8> {

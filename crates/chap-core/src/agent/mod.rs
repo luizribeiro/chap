@@ -140,17 +140,25 @@ impl Default for CallBudgets {
     }
 }
 
+#[cfg(not(feature = "exec"))]
 type HostImports = ();
-type InnerHost = Host<HostImports>;
+#[cfg(feature = "exec")]
+type HostImports = bindings::ExecImports;
+type InnerHost = Host<()>;
 type StartDropResources = (
     Option<ToolRegistry>,
     Option<Arc<InnerHost>>,
-    Option<HostBuilder<HostImports>>,
+    Option<HostBuilder<()>>,
 );
 
-fn host_builder() -> Result<HostBuilder<HostImports>, String> {
-    let builder =
-        HostBuilder::new(()).map_err(|error| format!("failed to create Lockgate host: {error}"))?;
+fn host_builder(_config: &Config) -> Result<HostBuilder<()>, String> {
+    #[cfg(not(feature = "exec"))]
+    let imports: HostImports = ();
+    #[cfg(feature = "exec")]
+    let imports: HostImports =
+        bindings::ExecImports::new(_config.exec_config()?, _config.project_root());
+    let builder = HostBuilder::new(imports)
+        .map_err(|error| format!("failed to create Lockgate host: {error}"))?;
     #[cfg(feature = "exec")]
     let builder = builder
         .register::<chap_exec::exec::Contract>()
@@ -161,11 +169,11 @@ fn host_builder() -> Result<HostBuilder<HostImports>, String> {
 struct StartResources {
     tools: Option<ToolRegistry>,
     host: Option<Arc<InnerHost>>,
-    builder: Option<HostBuilder<HostImports>>,
+    builder: Option<HostBuilder<()>>,
 }
 
 impl StartResources {
-    fn new(tools: ToolRegistry, builder: HostBuilder<HostImports>) -> Self {
+    fn new(tools: ToolRegistry, builder: HostBuilder<()>) -> Self {
         Self {
             tools: Some(tools),
             host: None,
@@ -331,7 +339,7 @@ impl AgentBuilder {
             .config
             .plugin(id)
             .ok_or_else(|| format!("plugin `{id}` is not configured"))?;
-        let builder = host_builder()?;
+        let builder = host_builder(&self.config)?;
         let mut resources = StartResources::new(ToolRegistry::new(), builder);
         let prepared = match Self::prepare_plugin(
             resources.builder.as_mut().expect("uninitialized host"),
@@ -378,7 +386,7 @@ impl AgentBuilder {
             tools,
             call_budgets,
         } = self;
-        let builder = host_builder()?;
+        let builder = host_builder(&config)?;
         let mut resources = StartResources::new(tools, builder);
         let plugins =
             match Self::initialize_plugins(&mut resources, &config, &consent, call_budgets).await {
@@ -445,7 +453,7 @@ impl AgentBuilder {
     }
 
     async fn load_plugins(
-        builder: &mut HostBuilder<HostImports>,
+        builder: &mut HostBuilder<()>,
         config: &Config,
         consent: &ConsentStore,
     ) -> Result<BTreeMap<String, AdmittedPlugin>, String> {
@@ -469,7 +477,7 @@ impl AgentBuilder {
     }
 
     async fn load_plugin(
-        builder: &mut HostBuilder<HostImports>,
+        builder: &mut HostBuilder<()>,
         config: &Config,
         consent: &ConsentStore,
         id: &str,
@@ -524,7 +532,7 @@ impl AgentBuilder {
     }
 
     async fn prepare_plugin(
-        builder: &mut HostBuilder<HostImports>,
+        builder: &mut HostBuilder<()>,
         config: &Config,
         id: &str,
         plugin: &ConfiguredPlugin,

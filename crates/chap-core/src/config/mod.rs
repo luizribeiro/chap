@@ -67,6 +67,11 @@ impl Config {
         self.directory.join(&plugin.component)
     }
 
+    #[cfg(feature = "exec")]
+    pub(crate) fn project_root(&self) -> &Path {
+        &self.directory
+    }
+
     pub(crate) fn consent_path(&self) -> PathBuf {
         self.directory.join("consent.json")
     }

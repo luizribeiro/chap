@@ -7,8 +7,9 @@ use super::{
     fixtures::{
         fast_provider_component, fast_tool_component, hanging_provider_component,
         hanging_tool_component, provider_and_tool_component, provider_component,
-        provider_component_with_schema, provider_component_with_trapping_schema, test_directory,
-        tool_component, tool_component_with_schema, unsupported_component,
+        provider_component_requiring_exec, provider_component_with_schema,
+        provider_component_with_trapping_schema, test_directory, tool_component,
+        tool_component_with_schema, unsupported_component,
     },
 };
 use crate::{
@@ -127,6 +128,122 @@ fn assert_default_runtime_limits_except_timeout_ceiling(
     assert_eq!(limits.instantiation_fuel, default.instantiation_fuel);
     assert_eq!(limits.max_memory_bytes, default.max_memory_bytes);
     assert_eq!(limits.max_detached_jobs, default.max_detached_jobs);
+}
+
+#[cfg(not(feature = "exec"))]
+#[tokio::test]
+async fn rejects_exec_needs_when_the_capability_is_not_registered() {
+    let (directory, config_path) = exec_plugin_config(&["cargo", "git commit"]);
+    let builder = AgentBuilder::load(&config_path).unwrap();
+
+    let error = builder.review_plugin("example").await.unwrap_err();
+
+    assert!(error.contains("exec.run"), "{error}");
+    assert!(error.contains("application did not register it"), "{error}");
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(feature = "exec")]
+#[tokio::test]
+async fn resolves_exec_setting_arrays_into_canonical_review_scopes() {
+    let (directory, config_path) = exec_plugin_config(&["cargo", "git commit"]);
+    let builder = AgentBuilder::load(&config_path).unwrap();
+
+    let manifest = builder.review_plugin("example").await.unwrap().manifest;
+    let grant = manifest
+        .grants
+        .iter()
+        .find(|grant| grant.capability == "exec" && grant.permission == "run")
+        .expect("the exec.run grant should be reviewable");
+
+    assert_eq!(
+        grant.scopes,
+        vec!["cargo".to_owned(), "git commit".to_owned()]
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(feature = "exec")]
+#[tokio::test]
+async fn expanded_exec_settings_drift_and_block_readmission() {
+    let (directory, config_path) = exec_plugin_config(&["cargo", "git commit"]);
+    AgentBuilder::load(&config_path)
+        .unwrap()
+        .approve_plugin("example")
+        .await
+        .unwrap();
+    write_exec_plugin_config(&directory, &["cargo", "git commit", "rg"]);
+    let builder = AgentBuilder::load(&config_path).unwrap();
+
+    let review = builder.review_plugin("example").await.unwrap();
+    let drift = review.drift.expect("the added command should cause drift");
+    assert!(drift.blocks_admission);
+    assert!(drift.changes.iter().any(|change| {
+        change.capability == "exec"
+            && change.permission == "run"
+            && change
+                .after
+                .as_ref()
+                .is_some_and(|scopes| scopes.iter().any(|scope| scope == "rg"))
+    }));
+
+    let error = builder.start().await.err().unwrap();
+    assert!(
+        error.contains("expanded its permission manifest"),
+        "{error}"
+    );
+    assert!(error.contains("chap grants review example"), "{error}");
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(feature = "exec")]
+#[tokio::test]
+async fn rejects_an_empty_required_exec_setting_array() {
+    let (directory, config_path) = exec_plugin_config(&[]);
+    let builder = AgentBuilder::load(&config_path).unwrap();
+
+    let error = builder.review_plugin("example").await.unwrap_err();
+
+    assert!(
+        error.contains("setting reference `/allowed_commands`"),
+        "{error}"
+    );
+    assert!(error.contains("resolved to an empty array"), "{error}");
+    assert!(
+        error.contains("must supply at least one JSON string"),
+        "{error}"
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+fn exec_plugin_config(allowed_commands: &[&str]) -> (PathBuf, PathBuf) {
+    let directory = test_directory();
+    let config_path = directory.join("chap.json");
+    write_exec_plugin_config(&directory, allowed_commands);
+    (directory, config_path)
+}
+
+fn write_exec_plugin_config(directory: &Path, allowed_commands: &[&str]) {
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component_requiring_exec("example.provider"),
+    )
+    .unwrap();
+    let config = serde_json::json!({
+        "plugins": {
+            "example": {
+                "component": "provider.wasm",
+                "settings": {
+                    "allowed_commands": allowed_commands,
+                }
+            }
+        }
+    });
+    fs::write(
+        directory.join("chap.json"),
+        serde_json::to_vec_pretty(&config).unwrap(),
+    )
+    .unwrap();
 }
 
 #[tokio::test]
