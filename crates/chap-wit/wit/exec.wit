@@ -1,0 +1,30 @@
+package chap:agent@0.2.0;
+
+interface exec {
+  /// One process invocation, argv-style. Never a shell string: the
+  /// capability guard keys on these tokens.
+  record command {
+    program: string,
+    args: list<string>,
+  }
+
+  record exec-result {
+    exit-code: s32,
+    stdout: string,
+    stderr: string,
+    truncated: bool,
+  }
+
+  variant exec-error {
+    /// The capability guard refused the argv.
+    denied(string),
+    /// The program failed resolution (path separator, not on the pinned PATH).
+    rejected(string),
+    /// The deadline elapsed; the process group was killed.
+    timed-out,
+    /// Spawning or supervising the process failed.
+    failed(string),
+  }
+
+  run: async func(command: command, timeout-ms: option<u64>) -> result<exec-result, exec-error>;
+}

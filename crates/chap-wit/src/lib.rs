@@ -33,6 +33,14 @@ pub struct Role {
     pub wit: &'static str,
 }
 
+#[cfg(feature = "exec")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Import {
+    pub rust_name: &'static str,
+    pub interface: &'static str,
+    pub wit: &'static str,
+}
+
 roles! {
     PROVIDER = Provider {
         interface: "provider",
@@ -51,19 +59,58 @@ roles! {
     },
 }
 
+#[cfg(feature = "exec")]
+pub static EXEC: Import = Import {
+    rust_name: "Exec",
+    interface: "exec",
+    wit: include_str!("../wit/exec.wit"),
+};
+
+#[cfg(feature = "exec")]
+pub static IMPORTS: &[&Import] = &[&EXEC];
+
 pub fn resolve(name: &str) -> Option<&'static Role> {
     ROLES.iter().copied().find(|role| role.rust_name == name)
 }
 
+#[cfg(feature = "exec")]
+pub fn resolve_import(name: &str) -> Option<&'static Import> {
+    IMPORTS
+        .iter()
+        .copied()
+        .find(|import| import.rust_name == name)
+}
+
 pub fn world(roles: &[&Role]) -> String {
+    compose_world(roles, &[])
+}
+
+#[cfg(feature = "exec")]
+pub fn world_with_imports(roles: &[&Role], imports: &[&Import]) -> String {
+    let imports = imports
+        .iter()
+        .map(|import| (import.interface, import.wit))
+        .collect::<Vec<_>>();
+    compose_world(roles, &imports)
+}
+
+fn compose_world(roles: &[&Role], imports: &[(&str, &str)]) -> String {
     let mut wit = String::from(PACKAGE);
     wit.push_str(wit_body(TYPES_WIT));
+    for (_, import_wit) in imports {
+        wit.push_str(wit_body(import_wit));
+    }
     for role in roles {
         wit.push_str(wit_body(role.wit));
     }
     wit.push_str("\nworld ");
     wit.push_str(WORLD);
     wit.push_str(" {\n  import types;\n");
+    for (interface, _) in imports {
+        wit.push_str("  import ");
+        wit.push_str(interface);
+        wit.push_str(";\n");
+    }
     for role in roles {
         wit.push_str("  export ");
         wit.push_str(role.interface);
@@ -129,6 +176,55 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "exec")]
+    #[test]
+    fn host_exec_world_imports_exec_and_exports_exactly_the_role_interfaces() {
+        let mut resolve = Resolve::new();
+        let (package, _) = resolve
+            .push_path(Path::new(env!("CARGO_MANIFEST_DIR")).join("wit"))
+            .unwrap();
+        let host = resolve.packages[package].worlds["host-exec"];
+        let imports = resolve.worlds[host]
+            .imports
+            .iter()
+            .map(|(key, item)| {
+                let WorldItem::Interface { id, .. } = item else {
+                    panic!("host-exec world import `{key:?}` is not an interface");
+                };
+                match key {
+                    WorldKey::Name(name) => name.clone(),
+                    WorldKey::Interface(_) => resolve.interfaces[*id]
+                        .name
+                        .clone()
+                        .expect("host-exec world imports must be named"),
+                }
+            })
+            .collect::<BTreeSet<_>>();
+        let exports = resolve.worlds[host]
+            .exports
+            .iter()
+            .map(|(key, item)| {
+                let WorldItem::Interface { id, .. } = item else {
+                    panic!("host-exec world export `{key:?}` is not an interface");
+                };
+                match key {
+                    WorldKey::Name(name) => name.clone(),
+                    WorldKey::Interface(_) => resolve.interfaces[*id]
+                        .name
+                        .clone()
+                        .expect("host-exec world exports must be named"),
+                }
+            })
+            .collect::<BTreeSet<_>>();
+        let expected_exports = std::iter::once("types")
+            .chain(ROLES.iter().map(|role| role.interface))
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(imports, BTreeSet::from([EXEC.interface.to_owned()]));
+        assert_eq!(exports, expected_exports);
+    }
+
     #[test]
     fn composes_a_single_role_world() {
         let expected = [
@@ -140,6 +236,21 @@ mod tests {
         .concat();
 
         assert_eq!(world(&[&PROVIDER]), expected);
+    }
+
+    #[cfg(feature = "exec")]
+    #[test]
+    fn composes_a_single_role_world_with_an_exec_import() {
+        let expected = [
+            PACKAGE,
+            source_body(TYPES_WIT),
+            source_body(EXEC.wit),
+            source_body(PROVIDER.wit),
+            "\nworld chap-plugin {\n  import types;\n  import exec;\n  export provider;\n}\n",
+        ]
+        .concat();
+
+        assert_eq!(world_with_imports(&[&PROVIDER], &[&EXEC]), expected);
     }
 
     #[test]

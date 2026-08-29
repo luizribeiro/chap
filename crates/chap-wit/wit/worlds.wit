@@ -4,9 +4,21 @@ world sdk-types {
   import types;
 }
 
+world sdk-exec {
+  import exec;
+}
+
 world host {
   export types;
   export provider;
   export tools;
   export context;
+}
+
+world host-exec {
+  export types;
+  export provider;
+  export tools;
+  export context;
+  import exec;
 }

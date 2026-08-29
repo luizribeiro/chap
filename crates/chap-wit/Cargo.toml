@@ -4,5 +4,8 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+exec = []
+
 [dev-dependencies]
 wit-parser.workspace = true
