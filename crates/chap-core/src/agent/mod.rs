@@ -140,25 +140,26 @@ impl Default for CallBudgets {
     }
 }
 
-type InnerHost = Host<()>;
+type HostImports = ();
+type InnerHost = Host<HostImports>;
 type StartDropResources = (
     Option<ToolRegistry>,
     Option<Arc<InnerHost>>,
-    Option<HostBuilder<()>>,
+    Option<HostBuilder<HostImports>>,
 );
 
-fn host_builder() -> Result<HostBuilder<()>, String> {
+fn host_builder() -> Result<HostBuilder<HostImports>, String> {
     HostBuilder::new(()).map_err(|error| format!("failed to create Lockgate host: {error}"))
 }
 
 struct StartResources {
     tools: Option<ToolRegistry>,
     host: Option<Arc<InnerHost>>,
-    builder: Option<HostBuilder<()>>,
+    builder: Option<HostBuilder<HostImports>>,
 }
 
 impl StartResources {
-    fn new(tools: ToolRegistry, builder: HostBuilder<()>) -> Self {
+    fn new(tools: ToolRegistry, builder: HostBuilder<HostImports>) -> Self {
         Self {
             tools: Some(tools),
             host: None,
@@ -438,7 +439,7 @@ impl AgentBuilder {
     }
 
     async fn load_plugins(
-        builder: &mut HostBuilder<()>,
+        builder: &mut HostBuilder<HostImports>,
         config: &Config,
         consent: &ConsentStore,
     ) -> Result<BTreeMap<String, AdmittedPlugin>, String> {
@@ -462,7 +463,7 @@ impl AgentBuilder {
     }
 
     async fn load_plugin(
-        builder: &mut HostBuilder<()>,
+        builder: &mut HostBuilder<HostImports>,
         config: &Config,
         consent: &ConsentStore,
         id: &str,
@@ -517,7 +518,7 @@ impl AgentBuilder {
     }
 
     async fn prepare_plugin(
-        builder: &mut HostBuilder<()>,
+        builder: &mut HostBuilder<HostImports>,
         config: &Config,
         id: &str,
         plugin: &ConfiguredPlugin,
