@@ -11,8 +11,11 @@ use agent::AgentSettings;
 use roles::{ContextSettings, ToolsSettings};
 use serde::Deserialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
+    env,
+    ffi::OsStr,
     fs,
     path::{Path, PathBuf},
 };
@@ -28,6 +31,8 @@ pub struct Config {
     agent: AgentSettings,
     #[serde(skip)]
     directory: PathBuf,
+    #[serde(skip)]
+    source_path: PathBuf,
 }
 
 /// Settings for one configured plugin and its roles.
@@ -50,6 +55,14 @@ impl Config {
         let mut config: Self = serde_json::from_str(&source)
             .map_err(|error| format!("failed to parse `{}`: {error}", path.display()))?;
         config.directory = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
+        config.source_path = fs::canonicalize(path)
+            .or_else(|_| std::path::absolute(path))
+            .map_err(|error| {
+                format!(
+                    "failed to resolve config path `{}` as an absolute path: {error}",
+                    path.display()
+                )
+            })?;
         config.validate_name()?;
         config.validate_agent_settings()?;
         Ok(config)
@@ -95,9 +108,46 @@ impl Config {
         &self.directory
     }
 
-    pub(crate) fn consent_path(&self) -> PathBuf {
-        self.directory.join("consent.json")
+    pub(crate) fn source_path(&self) -> &Path {
+        &self.source_path
     }
+
+    pub(crate) fn consent_path(&self) -> Result<PathBuf, String> {
+        let xdg_state_home = env::var_os("XDG_STATE_HOME");
+        let home = env::var_os("HOME");
+        consent_path(
+            &self.source_path,
+            self.name(),
+            xdg_state_home.as_deref(),
+            home.as_deref(),
+        )
+    }
+}
+
+fn consent_path(
+    config_path: &Path,
+    name: Option<&str>,
+    xdg_state_home: Option<&OsStr>,
+    home: Option<&OsStr>,
+) -> Result<PathBuf, String> {
+    let state_root = if let Some(path) = xdg_state_home.filter(|path| !path.is_empty()) {
+        PathBuf::from(path)
+    } else if let Some(path) = home.filter(|path| !path.is_empty()) {
+        PathBuf::from(path).join(".local/state")
+    } else {
+        return Err(
+            "cannot locate CHAP state: neither XDG_STATE_HOME nor HOME is set to a non-empty value"
+                .to_owned(),
+        );
+    };
+    let instance_directory = match name {
+        Some(name) => state_root.join("chap/named").join(name),
+        None => {
+            let digest = Sha256::digest(config_path.as_os_str().as_encoded_bytes());
+            state_root.join("chap/by-path").join(format!("{digest:x}"))
+        }
+    };
+    Ok(instance_directory.join("consent.json"))
 }
 
 impl ConfiguredPlugin {
@@ -143,6 +193,83 @@ mod tests {
 
             assert_eq!(config.name(), Some(name));
         }
+    }
+
+    #[test]
+    fn named_instance_uses_xdg_state_home() {
+        let path = consent_path(
+            Path::new("/tmp/example/chap.json"),
+            Some("work"),
+            Some(OsStr::new("/state")),
+            Some(OsStr::new("/home/example")),
+        )
+        .unwrap();
+
+        assert_eq!(path, Path::new("/state/chap/named/work/consent.json"));
+    }
+
+    #[test]
+    fn unnamed_instance_uses_full_config_path_digest() {
+        let path = consent_path(
+            Path::new("/tmp/example/chap.json"),
+            None,
+            Some(OsStr::new("/state")),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            path,
+            Path::new(
+                "/state/chap/by-path/0eeafb260cf31e5547071d36a94c1a43fda733c7767a64ad6d6387c81620fcac/consent.json"
+            )
+        );
+    }
+
+    #[test]
+    fn empty_xdg_state_home_falls_back_to_home() {
+        let path = consent_path(
+            Path::new("/tmp/example/chap.json"),
+            Some("work"),
+            Some(OsStr::new("")),
+            Some(OsStr::new("/home/example")),
+        )
+        .unwrap();
+
+        assert_eq!(
+            path,
+            Path::new("/home/example/.local/state/chap/named/work/consent.json")
+        );
+    }
+
+    #[test]
+    fn state_location_requires_xdg_state_home_or_home() {
+        for (xdg_state_home, home) in [
+            (None, None),
+            (Some(OsStr::new("")), None),
+            (None, Some(OsStr::new(""))),
+        ] {
+            let error = consent_path(
+                Path::new("/tmp/example/chap.json"),
+                Some("work"),
+                xdg_state_home,
+                home,
+            )
+            .unwrap_err();
+
+            assert!(error.contains("neither XDG_STATE_HOME nor HOME"), "{error}");
+        }
+    }
+
+    #[test]
+    fn load_stores_the_canonical_config_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("chap.json");
+        fs::write(&path, "{}").unwrap();
+
+        let config = Config::load(&path).unwrap();
+
+        assert_eq!(config.source_path(), fs::canonicalize(path).unwrap());
     }
 
     #[test]

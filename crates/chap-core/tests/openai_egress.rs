@@ -21,6 +21,12 @@ const SERVER_TIMEOUT: Duration = Duration::from_secs(60);
 const INVOCATION_TIMEOUT: Duration = Duration::from_secs(20);
 const RESPONSE_BODY: &str = r#"{"id":"chatcmpl-mock","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"mocked response"},"finish_reason":"stop"}]}"#;
 
+fn load_builder(config_path: &Path) -> AgentBuilder {
+    AgentBuilder::load(config_path)
+        .unwrap()
+        .state_dir(config_path.parent().unwrap())
+}
+
 struct ReceivedRequest {
     head: String,
     body: Vec<u8>,
@@ -165,15 +171,14 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
     let config_path = directory.path().join("chap.json");
     write_openai_config(&config_path, &component, "http://127.0.0.1:41001");
 
-    AgentBuilder::load(&config_path)
-        .unwrap()
+    load_builder(&config_path)
         .approve_plugin("openai")
         .await
         .unwrap();
     let consent_path = directory.path().join("consent.json");
     let stored_before = std::fs::read(&consent_path).unwrap();
     write_openai_config(&config_path, &component, "http://127.0.0.1:41002");
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_builder(&config_path);
     let review = builder.review_plugin("openai").await.unwrap();
     let drift = review.drift.as_ref().expect("expanded manifest must drift");
     assert!(drift.blocks_admission);
@@ -203,12 +208,11 @@ async fn admission_after_narrowed_egress_refreshes_the_stored_record() {
     let origin = "http://127.0.0.1:41001";
     write_openai_config(&config_path, &component, origin);
 
-    let approved = AgentBuilder::load(&config_path)
-        .unwrap()
+    let approved = load_builder(&config_path)
         .approve_plugin("openai")
         .await
         .unwrap();
-    let consent = ConsentStore::new(directory.path().join("consent.json"));
+    let consent = ConsentStore::new(directory.path().join("consent.json"), &config_path);
     let mut prior = with_different_fingerprint(approved.clone());
     prior
         .grants
@@ -220,11 +224,7 @@ async fn admission_after_narrowed_egress_refreshes_the_stored_record() {
     prior.approved_at = "2026-08-01T12:00:00Z".to_owned();
     consent.save(prior.clone()).unwrap();
 
-    let agent = AgentBuilder::load(&config_path)
-        .unwrap()
-        .start()
-        .await
-        .unwrap();
+    let agent = load_builder(&config_path).start().await.unwrap();
     let refreshed = consent.load("openai").unwrap();
 
     assert_eq!(refreshed.request_digest, approved.request_digest);
@@ -245,8 +245,7 @@ async fn admission_with_a_matching_digest_does_not_rewrite_the_store() {
     let config_path = directory.path().join("chap.json");
     write_openai_config(&config_path, &component, "http://127.0.0.1:41001");
 
-    let approved = AgentBuilder::load(&config_path)
-        .unwrap()
+    let approved = load_builder(&config_path)
         .approve_plugin("openai")
         .await
         .unwrap();
@@ -254,11 +253,7 @@ async fn admission_with_a_matching_digest_does_not_rewrite_the_store() {
     let compact = serde_json::to_vec(&serde_json::json!({ "openai": approved })).unwrap();
     std::fs::write(&consent_path, &compact).unwrap();
 
-    let agent = AgentBuilder::load(&config_path)
-        .unwrap()
-        .start()
-        .await
-        .unwrap();
+    let agent = load_builder(&config_path).start().await.unwrap();
     assert_eq!(std::fs::read(consent_path).unwrap(), compact);
 
     tokio::task::spawn_blocking(move || drop(agent))
@@ -273,7 +268,7 @@ struct HostCompletion {
 }
 
 async fn complete_through_the_host(mock: MockServer, config_path: &Path) -> HostCompletion {
-    let builder = AgentBuilder::load(config_path).unwrap();
+    let builder = load_builder(config_path);
     builder.approve_plugin("openai").await.unwrap();
     let agent = builder.start().await.unwrap();
     let session = agent.session(SessionOptions::new("openai")).await.unwrap();

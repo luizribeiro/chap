@@ -28,7 +28,9 @@ async fn migrated_kagi_component_admits_and_classifies_as_tools_only() {
     )
     .unwrap();
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = AgentBuilder::load(&config_path)
+        .unwrap()
+        .state_dir(directory.path());
     assert_eq!(builder.plugin_roles("kagi").unwrap(), ["tool"]);
     builder.approve_plugin("kagi").await.unwrap();
     let agent = builder.start().await.unwrap();

@@ -1,4 +1,4 @@
-use super::super::{Agent, AgentBuilder, CallBudgets, PluginCall};
+use super::super::{Agent, CallBudgets, PluginCall};
 use crate::{SessionOptions, session::Message};
 use serde_json::{Map, Value, json};
 use std::{
@@ -123,7 +123,7 @@ async fn start_agent(
     let config_path = directory.path().join("chap.json");
     std::fs::write(&config_path, json!({ "plugins": plugins }).to_string()).unwrap();
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = super::load_test_builder(&config_path);
     for id in plugins.keys() {
         builder.approve_plugin(id).await.unwrap();
     }

@@ -11,6 +11,7 @@ use super::{
         provider_component_with_trapping_schema, test_directory, tool_component,
         tool_component_with_schema, unsupported_component,
     },
+    load_test_builder,
 };
 use crate::{
     CallBudget, ConsentRecord, ExecutionMode, ExportDriftKind, PluginCall, ProviderError, Tool,
@@ -134,7 +135,7 @@ fn assert_default_runtime_limits_except_timeout_ceiling(
 #[tokio::test]
 async fn rejects_exec_needs_when_the_capability_is_not_registered() {
     let (directory, config_path) = exec_plugin_config(&["cargo", "git commit"]);
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
 
     let error = builder.review_plugin("example").await.unwrap_err();
 
@@ -147,7 +148,7 @@ async fn rejects_exec_needs_when_the_capability_is_not_registered() {
 #[tokio::test]
 async fn resolves_exec_setting_arrays_into_canonical_review_scopes() {
     let (directory, config_path) = exec_plugin_config(&["cargo", "git commit"]);
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
 
     let manifest = builder.review_plugin("example").await.unwrap().manifest;
     let grant = manifest
@@ -167,13 +168,12 @@ async fn resolves_exec_setting_arrays_into_canonical_review_scopes() {
 #[tokio::test]
 async fn expanded_exec_settings_drift_and_block_readmission() {
     let (directory, config_path) = exec_plugin_config(&["cargo", "git commit"]);
-    AgentBuilder::load(&config_path)
-        .unwrap()
+    load_test_builder(&config_path)
         .approve_plugin("example")
         .await
         .unwrap();
     write_exec_plugin_config(&directory, &["cargo", "git commit", "rg"]);
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
 
     let review = builder.review_plugin("example").await.unwrap();
     let drift = review.drift.expect("the added command should cause drift");
@@ -200,7 +200,7 @@ async fn expanded_exec_settings_drift_and_block_readmission() {
 #[tokio::test]
 async fn rejects_an_empty_required_exec_setting_array() {
     let (directory, config_path) = exec_plugin_config(&[]);
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
 
     let error = builder.review_plugin("example").await.unwrap_err();
 
@@ -274,7 +274,7 @@ async fn approved_matching_manifest_admits_a_configured_provider() {
     )
     .unwrap();
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
 
     assert_eq!(builder.plugins().count(), 1);
     assert_eq!(
@@ -282,6 +282,13 @@ async fn approved_matching_manifest_admits_a_configured_provider() {
         ["provider"]
     );
     let record = builder.approve_plugin("example.provider").await.unwrap();
+    assert_eq!(
+        fs::read(directory.join("config-path")).unwrap(),
+        fs::canonicalize(&config_path)
+            .unwrap()
+            .as_os_str()
+            .as_encoded_bytes()
+    );
     assert!(
         time::OffsetDateTime::parse(
             &record.approved_at,
@@ -314,7 +321,7 @@ async fn classifies_a_trapping_provider_as_a_plugin_failure() {
         }"#,
     )
     .unwrap();
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
     builder.approve_plugin("example").await.unwrap();
     let agent = builder.start().await.unwrap();
     let backend = PluginBackend::new(&agent.inner, "example");
@@ -348,8 +355,7 @@ async fn times_out_a_hanging_provider_plugin() {
         }"#,
     )
     .unwrap();
-    let builder = AgentBuilder::load(&config_path)
-        .unwrap()
+    let builder = load_test_builder(&config_path)
         .call_budget(PluginCall::ProviderComplete, one_second_call_budget());
     builder.approve_plugin("example").await.unwrap();
     let agent = builder.start().await.unwrap();
@@ -402,7 +408,7 @@ async fn fast_provider_and_tool_plugins_succeed_with_deadlines() {
         }"#,
     )
     .unwrap();
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
     builder.approve_plugin("example.provider").await.unwrap();
     builder.approve_plugin("example.tools").await.unwrap();
     let agent = builder.start().await.unwrap();
@@ -450,7 +456,7 @@ async fn start_refuses_and_names_every_unapproved_plugin() {
     )
     .unwrap();
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
     builder.approve_plugin("approved").await.unwrap();
     let error = builder.start().await.err().unwrap();
 
@@ -492,7 +498,7 @@ async fn approving_then_denying_toggles_plugin_admission() {
     )
     .unwrap();
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
     assert!(
         builder
             .review_plugin("example")
@@ -507,7 +513,7 @@ async fn approving_then_denying_toggles_plugin_admission() {
         .await
         .unwrap();
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
     builder.deny_plugin("example").unwrap();
     assert!(
         builder
@@ -597,7 +603,7 @@ async fn nonblocking_drift_errors_are_reported_without_panicking() {
         }"#,
     )
     .unwrap();
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
     let manifest = builder.review_plugin("example").await.unwrap().manifest;
 
     let error = AgentBuilder::consent_error(
@@ -646,7 +652,7 @@ async fn rejects_missing_required_settings_during_prepare() {
     )
     .unwrap();
 
-    let error = match AgentBuilder::load(&config_path).unwrap().start().await {
+    let error = match load_test_builder(&config_path).start().await {
         Ok(_) => panic!("missing required settings should be rejected"),
         Err(error) => error,
     };
@@ -682,7 +688,7 @@ async fn validates_settings_before_loading_tool_definitions() {
     )
     .unwrap();
 
-    let error = match AgentBuilder::load(&config_path).unwrap().start().await {
+    let error = match load_test_builder(&config_path).start().await {
         Ok(_) => panic!("invalid tool settings should be rejected"),
         Err(error) => error,
     };
@@ -715,7 +721,7 @@ async fn reports_framework_schema_transport_errors() {
         provider_component_with_trapping_schema("example"),
     )
     .unwrap();
-    let transport = match AgentBuilder::load(&config_path).unwrap().start().await {
+    let transport = match load_test_builder(&config_path).start().await {
         Ok(_) => panic!("a trapping schema export should be rejected"),
         Err(error) => error,
     };
@@ -741,7 +747,7 @@ fn discovers_a_configured_tool_plugin() {
     )
     .unwrap();
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
 
     assert_eq!(builder.plugin_roles("example.tools").unwrap(), ["tool"]);
     fs::remove_dir_all(directory).unwrap();
@@ -768,7 +774,7 @@ async fn loads_definitions_from_an_admitted_tool_plugin() {
     )
     .unwrap();
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
     builder.approve_plugin("example.tools").await.unwrap();
     let agent = builder.start().await.unwrap();
 
@@ -797,8 +803,7 @@ async fn times_out_a_hanging_tool_plugin() {
     )
     .unwrap();
 
-    let builder = AgentBuilder::load(&config_path)
-        .unwrap()
+    let builder = load_test_builder(&config_path)
         .call_budget(PluginCall::ToolExecute, one_second_call_budget());
     builder.approve_plugin("example.tools").await.unwrap();
     let agent = builder.start().await.unwrap();
@@ -847,7 +852,7 @@ async fn loads_execution_modes_declared_by_an_admitted_tool_plugin() {
     )
     .unwrap();
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
     builder.approve_plugin("example.tools").await.unwrap();
     let agent = builder.start().await.unwrap();
 
@@ -891,7 +896,7 @@ async fn plugin_execution_override_makes_loaded_tools_sequential() {
     )
     .unwrap();
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
     builder.approve_plugin("example.tools").await.unwrap();
     let agent = builder.start().await.unwrap();
 
@@ -927,12 +932,7 @@ async fn rejects_tools_config_for_a_provider_only_plugin() {
     )
     .unwrap();
 
-    let error = AgentBuilder::load(&config_path)
-        .unwrap()
-        .start()
-        .await
-        .err()
-        .unwrap();
+    let error = load_test_builder(&config_path).start().await.err().unwrap();
 
     assert!(error.contains("plugin `example.provider`"), "{error}");
     assert!(error.contains("`tools` section"), "{error}");
@@ -967,12 +967,7 @@ async fn rejects_context_config_for_a_provider_only_plugin() {
     )
     .unwrap();
 
-    let error = AgentBuilder::load(&config_path)
-        .unwrap()
-        .start()
-        .await
-        .err()
-        .unwrap();
+    let error = load_test_builder(&config_path).start().await.err().unwrap();
 
     assert!(error.contains("plugin `example.provider`"), "{error}");
     assert!(error.contains("`context` section"), "{error}");
@@ -1001,7 +996,7 @@ async fn accepts_an_instance_id_that_differs_from_plugin_metadata() {
     )
     .unwrap();
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
     builder.approve_plugin("config-id").await.unwrap();
     builder.start().await.unwrap();
     fs::remove_dir_all(directory).unwrap();
@@ -1032,8 +1027,7 @@ async fn drops_partial_start_resources_on_a_blocking_thread() {
     .unwrap();
     let (dropped, observed_drop) = mpsc::sync_channel(1);
     let async_thread = std::thread::current().id();
-    let builder = AgentBuilder::load(&config_path)
-        .unwrap()
+    let builder = load_test_builder(&config_path)
         .tool(DropProbe { dropped })
         .unwrap();
     builder.approve_plugin("a-provider").await.unwrap();
@@ -1102,7 +1096,7 @@ fn unsupported_plugin_builder() -> (PathBuf, PathBuf, AgentBuilder) {
         }"#,
     )
     .unwrap();
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
     (directory, component, builder)
 }
 
@@ -1122,7 +1116,7 @@ fn role_change_plugin_builder(bytes: Vec<u8>) -> (PathBuf, PathBuf, AgentBuilder
         }"#,
     )
     .unwrap();
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = load_test_builder(&config_path);
     (directory, component, builder)
 }
 

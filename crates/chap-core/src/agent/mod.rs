@@ -16,7 +16,7 @@ use provider::PluginBackend;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
@@ -230,7 +230,7 @@ impl LoadedPlugin {
 
 pub struct AgentBuilder {
     config: Config,
-    consent: ConsentStore,
+    state_dir: Option<PathBuf>,
     tools: ToolRegistry,
     call_budgets: CallBudgets,
 }
@@ -251,13 +251,31 @@ pub(crate) struct AgentInner {
 impl AgentBuilder {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         let config = Config::load(path.as_ref())?;
-        let consent = ConsentStore::new(config.consent_path());
         Ok(Self {
             config,
-            consent,
+            state_dir: None,
             tools: ToolRegistry::new(),
             call_budgets: CallBudgets::default(),
         })
+    }
+
+    pub fn state_dir(mut self, state_dir: impl Into<PathBuf>) -> Self {
+        self.state_dir = Some(state_dir.into());
+        self
+    }
+
+    pub fn consent_path(&self) -> Result<PathBuf, String> {
+        match &self.state_dir {
+            Some(state_dir) => Ok(state_dir.join("consent.json")),
+            None => self.config.consent_path(),
+        }
+    }
+
+    fn consent_store(&self) -> Result<ConsentStore, String> {
+        Ok(ConsentStore::new(
+            self.consent_path()?,
+            self.config.source_path(),
+        ))
     }
 
     /// Overrides the execution budget for one exported plugin call on every plugin.
@@ -294,9 +312,10 @@ impl AgentBuilder {
     }
 
     pub async fn approve_plugin(&self, id: &str) -> Result<ConsentRecord, String> {
+        let consent = self.consent_store()?;
         let (prepared, resources) = self.prepare_configured_plugin(id).await?;
         let record = prepared.approve(now_rfc3339());
-        let save_result = self.consent.save(record.clone());
+        let save_result = consent.save(record.clone());
         let cleanup_result = Self::cleanup_prepared_plugin(id, prepared, resources).await;
 
         save_result?;
@@ -308,13 +327,14 @@ impl AgentBuilder {
         if self.config.plugin(id).is_none() {
             return Err(format!("plugin `{id}` is not configured"));
         }
-        self.consent.remove(id)
+        self.consent_store()?.remove(id)
     }
 
     pub async fn review_plugin(&self, id: &str) -> Result<PluginConsentReview, String> {
+        let consent = self.consent_store()?;
         let (prepared, resources) = self.prepare_configured_plugin(id).await?;
         let manifest = prepared.review();
-        let prior = self.consent.load(id);
+        let prior = consent.load(id);
         let drift = prior
             .as_ref()
             .filter(|prior| {
@@ -380,9 +400,10 @@ impl AgentBuilder {
     /// Refuses to start unless every configured plugin is admitted; the
     /// error carries one admission failure per line, remedy included.
     pub async fn start(self) -> Result<Agent, String> {
+        let consent = self.consent_store()?;
         let Self {
             config,
-            consent,
+            state_dir: _,
             tools,
             call_budgets,
         } = self;

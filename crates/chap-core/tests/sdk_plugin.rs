@@ -36,7 +36,9 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
         .to_string(),
     )
     .unwrap();
-    let chap_builder = AgentBuilder::load(&config_path).unwrap();
+    let chap_builder = AgentBuilder::load(&config_path)
+        .unwrap()
+        .state_dir(config_directory.path());
     assert_eq!(
         chap_builder.plugin_roles("sdk-multi-role").unwrap(),
         ["provider", "tool", "context"]
@@ -210,13 +212,16 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
         .to_string(),
     )
     .unwrap();
-    let builder = AgentBuilder::load(&config_path).unwrap().call_budget(
-        PluginCall::ToolDefinitions,
-        CallBudget {
-            fuel: INVOCATION_FUEL,
-            deadline: Duration::from_secs(1),
-        },
-    );
+    let builder = AgentBuilder::load(&config_path)
+        .unwrap()
+        .state_dir(config_directory.path())
+        .call_budget(
+            PluginCall::ToolDefinitions,
+            CallBudget {
+                fuel: INVOCATION_FUEL,
+                deadline: Duration::from_secs(1),
+            },
+        );
     builder.approve_plugin("sdk-multi-role").await.unwrap();
 
     let error = tokio::time::timeout(Duration::from_secs(5), builder.start())

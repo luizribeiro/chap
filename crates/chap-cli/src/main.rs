@@ -120,6 +120,7 @@ async fn grants_review(
     builder: &AgentBuilder,
     instance_id: Option<&str>,
 ) -> Result<String, String> {
+    let mut output = format!("Consent store: {}\n", builder.consent_path()?.display());
     let ids = match instance_id {
         Some(id) => vec![id.to_owned()],
         None => builder
@@ -128,10 +129,11 @@ async fn grants_review(
             .collect::<Vec<_>>(),
     };
     if ids.is_empty() {
-        return Ok("No plugins are configured.\n".to_owned());
+        output.push_str("No plugins are configured.\n");
+        return Ok(output);
     }
 
-    let mut output = String::from(
+    output.push_str(
         "Concrete scopes come from chap.json; approval grants this exact resolved manifest.\n",
     );
     for (index, id) in ids.iter().enumerate() {
@@ -401,6 +403,27 @@ mod tests {
                 command: GrantsCommand::Deny { instance_id }
             })) if instance_id == "openai"
         ));
+    }
+
+    #[tokio::test]
+    async fn grants_review_starts_with_the_consent_store_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let config_path = directory.path().join("chap.json");
+        std::fs::write(&config_path, "{}").unwrap();
+        let state_dir = directory.path().join("state");
+        let builder = AgentBuilder::load(&config_path)
+            .unwrap()
+            .state_dir(&state_dir);
+
+        let output = grants_review(&builder, None).await.unwrap();
+
+        assert!(
+            output.starts_with(&format!(
+                "Consent store: {}\n",
+                state_dir.join("consent.json").display()
+            )),
+            "{output}"
+        );
     }
 
     #[test]

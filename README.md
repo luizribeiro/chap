@@ -287,14 +287,16 @@ code execution by design. The constructed environment and the future sandbox
 stage are the compensating layers.
 
 `grants review` also accepts one instance id. `grants deny <instance-id>` removes
-that instance's approval. CHAP stores approvals in `consent.json` beside the
-selected `chap.json`; concrete scopes remain in `chap.json`. A permission
-expansion, such as changing `base_url` to point at a different origin, blocks
-admission until the new manifest is reviewed and approved. Narrowing or
-removing authority is reported as non-blocking drift. Approval also binds the
-component's exported interfaces: a plugin that starts exporting a role it was
-not approved for blocks admission the same way, while dropping a role or
-changing only an interface version is non-blocking.
+that instance's approval. CHAP stores approvals below `$XDG_STATE_HOME/chap`, or
+`$HOME/.local/state/chap` when `XDG_STATE_HOME` is unset or empty. Named
+configurations use `named/<name>/consent.json`; unnamed configurations use
+`by-path/<sha256-of-absolute-config-path>/consent.json`. Concrete scopes remain
+in `chap.json`. A permission expansion, such as changing `base_url` to point at
+a different origin, blocks admission until the new manifest is reviewed and
+approved. Narrowing or removing authority is reported as non-blocking drift.
+Approval also binds the component's exported interfaces: a plugin that starts
+exporting a role it was not approved for blocks admission the same way, while
+dropping a role or changing only an interface version is non-blocking.
 
 `plugins check` verifies that every configured component exists, has matching
 embedded plugin metadata, implements a supported role, publishes a schema that

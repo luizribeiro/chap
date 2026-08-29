@@ -190,7 +190,9 @@ async fn run_scenario(
     let config_path = directory.path().join("chap.json");
     write_config(&config_path, components, &mock.origin, allowed_commands);
 
-    let builder = AgentBuilder::load(&config_path).unwrap();
+    let builder = AgentBuilder::load(&config_path)
+        .unwrap()
+        .state_dir(directory.path());
     builder.approve_plugin("exec").await.unwrap();
     builder.approve_plugin("openai").await.unwrap();
     let agent = builder.start().await.unwrap();

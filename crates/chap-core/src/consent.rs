@@ -15,11 +15,15 @@ pub struct PluginConsentReview {
 #[derive(Clone, Debug)]
 pub struct ConsentStore {
     path: PathBuf,
+    config_path: PathBuf,
 }
 
 impl ConsentStore {
-    pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+    pub fn new(path: impl Into<PathBuf>, config_path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            config_path: config_path.into(),
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -151,6 +155,15 @@ impl ConsentStore {
                 self.path.display()
             ));
         }
+        let breadcrumb = self.path.with_file_name("config-path");
+        fs::write(&breadcrumb, self.config_path.as_os_str().as_encoded_bytes()).map_err(
+            |error| {
+                format!(
+                    "failed to write config path breadcrumb `{}`: {error}",
+                    breadcrumb.display()
+                )
+            },
+        )?;
         Ok(())
     }
 }
@@ -158,6 +171,10 @@ impl ConsentStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn store(directory: &Path) -> ConsentStore {
+        ConsentStore::new(directory.join("consent.json"), directory.join("chap.json"))
+    }
 
     fn record(instance_id: &str, digest_byte: char) -> ConsentRecord {
         serde_json::from_value(serde_json::json!({
@@ -179,7 +196,7 @@ mod tests {
     fn consent_record_round_trips_through_json_storage() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("consent.json");
-        let store = ConsentStore::new(&path);
+        let store = store(directory.path());
         let record = record("example", '0');
 
         store.save(record.clone()).unwrap();
@@ -196,7 +213,7 @@ mod tests {
     #[test]
     fn save_merges_with_other_plugin_records() {
         let directory = tempfile::tempdir().unwrap();
-        let store = ConsentStore::new(directory.path().join("consent.json"));
+        let store = store(directory.path());
         let first = record("first", '1');
         let second = record("second", '2');
 
@@ -212,7 +229,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("consent.json");
         let corrupt_path = directory.path().join("consent.json.corrupt");
-        let store = ConsentStore::new(&path);
+        let store = store(directory.path());
         let corrupt = b"{ definitely not valid JSON";
         fs::write(&path, corrupt).unwrap();
 
@@ -227,10 +244,25 @@ mod tests {
     fn missing_or_unreadable_storage_has_no_approvals() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("consent.json");
-        let store = ConsentStore::new(&path);
+        let store = store(directory.path());
 
         assert_eq!(store.load("example"), None);
         fs::write(path, b"not JSON").unwrap();
         assert_eq!(store.load("example"), None);
+    }
+
+    #[test]
+    fn save_writes_the_config_path_breadcrumb() {
+        let directory = tempfile::tempdir().unwrap();
+        let config_path = directory.path().join("chap.json");
+        fs::write(directory.path().join("config-path"), "stale").unwrap();
+        let store = store(directory.path());
+
+        store.save(record("example", '4')).unwrap();
+
+        assert_eq!(
+            fs::read(directory.path().join("config-path")).unwrap(),
+            config_path.as_os_str().as_encoded_bytes()
+        );
     }
 }
