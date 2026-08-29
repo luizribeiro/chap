@@ -198,6 +198,232 @@
           inherit cargoVendorDir;
           cargoArtifacts = pluginCargoArtifacts;
         };
+        pluginRoleSettings = spec:
+          pkgs.lib.optionalAttrs ((spec.tools or null) != null) { inherit (spec) tools; }
+          // pkgs.lib.optionalAttrs ((spec.context or null) != null) { inherit (spec) context; };
+        normalizeChapPlugin =
+          id: spec:
+          let
+            fromPlugin = source:
+              let
+                plugin = source.plugin;
+                metadata =
+                  assert pkgs.lib.assertMsg (pkgs.lib.isDerivation plugin) "mkChap: plugin `${id}`'s `plugin` must be a derivation";
+                  assert pkgs.lib.assertMsg (plugin ? chapPlugin) "mkChap: plugin `${id}`'s derivation must provide `passthru.chapPlugin`";
+                  plugin.chapPlugin;
+              in
+              {
+                config = {
+                  component = metadata.component;
+                  settings = (metadata.defaultSettings or { }) // (source.settings or { });
+                }
+                // pluginRoleSettings source;
+                witVersionFile = metadata.witVersionFile or null;
+              };
+          in
+          if pkgs.lib.isDerivation spec then
+            fromPlugin { plugin = spec; }
+          else if !builtins.isAttrs spec then
+            throw "mkChap: plugin `${id}` must be a plugin derivation or an attribute set"
+          else if spec ? plugin then
+            assert pkgs.lib.assertMsg (!(spec ? component)) "mkChap: plugin `${id}` cannot define both `plugin` and `component`";
+            fromPlugin spec
+          else if spec ? component then
+            assert pkgs.lib.assertMsg (builtins.isPath spec.component || builtins.isString spec.component)
+              "mkChap: plugin `${id}`'s `component` must be a path or string";
+            {
+              config = {
+                inherit (spec) component;
+                settings = spec.settings or { };
+              }
+              // pluginRoleSettings spec;
+              witVersionFile = null;
+            }
+          else
+            throw "mkChap: plugin `${id}` must define either `plugin` or `component`";
+        mkChap =
+          {
+            name,
+            settings ? { },
+            plugins ? { },
+            package ? chap,
+          }:
+          let
+            normalizedPlugins = pkgs.lib.mapAttrs normalizeChapPlugin plugins;
+            pluginIds = builtins.attrNames normalizedPlugins;
+            config = { inherit name; } // settings // { plugins = pkgs.lib.mapAttrs (_: normalized: normalized.config) normalizedPlugins; };
+            configFile = pkgs.writeText "chap-${name}.json" (builtins.toJSON config);
+            chapBinary = "${package}/bin/chap";
+            witChecks = pkgs.lib.concatMapStringsSep "\n" (
+              id:
+              let
+                normalized = normalizedPlugins.${id};
+                # Plugin packages validated and recorded their WIT version at
+                # build time; only raw components need extraction here.
+                readVersions =
+                  if normalized.witVersionFile != null then
+                    ''
+                      actual_wit_versions="$(cat ${pkgs.lib.escapeShellArg (toString normalized.witVersionFile)})"
+                    ''
+                  else
+                    ''
+                      actual_wit_versions="$(
+                        wasm-tools component wit ${pkgs.lib.escapeShellArg (toString normalized.config.component)} \
+                          | grep -Eo 'chap:agent@[0-9]+\.[0-9]+\.[0-9]+' \
+                          | cut -d@ -f2 \
+                          | sort -u \
+                          || true
+                      )"
+                    '';
+              in
+              ''
+                plugin_id=${pkgs.lib.escapeShellArg id}
+                ${readVersions}
+                if [ "$actual_wit_versions" != "$expected_wit_version" ]; then
+                  displayed_wit_versions="$(printf '%s\n' "$actual_wit_versions" | paste -sd, -)"
+                  [ -n "$displayed_wit_versions" ] || displayed_wit_versions='<none>'
+                  printf 'mkChap: plugin "%s" WIT version mismatch: component references "%s", CHAP expects "%s"\n' \
+                    "$plugin_id" "$displayed_wit_versions" "$expected_wit_version" >&2
+                  exit 1
+                fi
+              ''
+            ) pluginIds;
+            approvals = pkgs.lib.concatMapStringsSep "\n" (
+              id: ''
+                ${pkgs.lib.escapeShellArg chapBinary} --config ${pkgs.lib.escapeShellArg configFile} grants approve ${pkgs.lib.escapeShellArg id}
+              ''
+            ) pluginIds;
+          in
+          assert pkgs.lib.assertMsg (!(settings ? name)) "mkChap: `settings` must not define `name`; use the top-level `name` argument";
+          assert pkgs.lib.assertMsg (!(settings ? plugins)) "mkChap: `settings` must not define `plugins`; use the top-level `plugins` argument";
+          pkgs.stdenvNoCC.mkDerivation {
+            name = "chap-${name}";
+            dontUnpack = true;
+            nativeBuildInputs = [
+              pkgs.makeWrapper
+              pkgs.wasm-tools
+            ];
+
+            buildPhase = ''
+              runHook preBuild
+
+              expected_wit_version=${pkgs.lib.escapeShellArg witVersion}
+              ${witChecks}
+
+              export XDG_STATE_HOME="$TMPDIR/state"
+              ${approvals}
+              ${pkgs.lib.escapeShellArg chapBinary} --config ${pkgs.lib.escapeShellArg configFile} plugins check
+
+              runHook postBuild
+            '';
+
+            installPhase = ''
+              runHook preInstall
+
+              mkdir -p "$out/etc" "$out/bin"
+              cp ${pkgs.lib.escapeShellArg configFile} "$out/etc/chap.json"
+              makeWrapper ${pkgs.lib.escapeShellArg chapBinary} "$out/bin/chap" \
+                --set-default CHAP_CONFIG "$out/etc/chap.json"
+
+              runHook postInstall
+            '';
+
+            meta.mainProgram = "chap";
+          };
+        mkChapExample =
+          (mkChap {
+            name = "example";
+            plugins = {
+              openai = {
+                plugin = pluginOpenaiCompatible;
+                settings = {
+                  base_url = "http://127.0.0.1:8080/v1";
+                  model = "example-model";
+                };
+              };
+              kagi = {
+                plugin = pluginKagi;
+                settings.api_key_env = "KAGI_API_KEY";
+              };
+              persona = {
+                plugin = pluginPersona;
+                settings.persona = "Be concise and practical.";
+              };
+            };
+          }).overrideAttrs {
+            # Admission injects a required env grant, but does not use its value.
+            KAGI_API_KEY = "admission-check-placeholder";
+          };
+        mkChapExecExample = mkChap {
+          name = "example-exec";
+          package = chap.override { withExec = true; };
+          settings.agent.exec = { };
+          plugins.exec = {
+            plugin = pluginExec;
+            settings.allowed_commands = [ "echo" ];
+          };
+        };
+        mkChapFormsExample =
+          (mkChap {
+            name = "example-forms";
+            plugins = {
+              kagi = pluginKagi;
+              persona = {
+                component = "${pluginPersona}/lib/chap_persona.wasm";
+                settings.persona = "Be concise and practical.";
+              };
+            };
+          }).overrideAttrs
+            {
+              # Admission injects a required env grant, but does not use its value.
+              KAGI_API_KEY = "admission-check-placeholder";
+            };
+        mkChapEvalGuards =
+          let
+            rejects = args: !(builtins.tryEval (mkChap args).drvPath).success;
+            guards = {
+              non-attrset-spec = rejects {
+                name = "guard";
+                plugins.bad = 42;
+              };
+              empty-spec = rejects {
+                name = "guard";
+                plugins.bad = { };
+              };
+              plugin-and-component = rejects {
+                name = "guard";
+                plugins.bad = {
+                  plugin = pluginPersona;
+                  component = "/component.wasm";
+                };
+              };
+              plugin-not-derivation = rejects {
+                name = "guard";
+                plugins.bad.plugin = 42;
+              };
+              plugin-without-passthru = rejects {
+                name = "guard";
+                plugins.bad.plugin = pkgs.hello;
+              };
+              component-wrong-type = rejects {
+                name = "guard";
+                plugins.bad.component = 42;
+              };
+              settings-name-clobber = rejects {
+                name = "guard";
+                settings.name = "other";
+              };
+              settings-plugins-clobber = rejects {
+                name = "guard";
+                settings.plugins = { };
+              };
+            };
+            accepted = builtins.attrNames (pkgs.lib.filterAttrs (_: rejected: !rejected) guards);
+          in
+          if accepted == [ ] then
+            pkgs.runCommand "mkchap-eval-guards" { } "touch $out"
+          else
+            throw "mkChap accepted invalid arguments: ${builtins.concatStringsSep ", " accepted}";
         wasiSysroot = import ./nix/wasip3-sysroot.nix { inherit pkgs system; };
         rustfmtHook = {
           enable = true;
@@ -281,10 +507,14 @@
           plugin-kagi = pluginKagi;
           plugin-exec = pluginExec;
           plugin-persona = pluginPersona;
+          mkchap-example = mkChapExample;
+          mkchap-exec-example = mkChapExecExample;
+          mkchap-forms-example = mkChapFormsExample;
+          mkchap-eval-guards = mkChapEvalGuards;
         };
 
         lib = {
-          inherit buildChapPlugin witVersion;
+          inherit buildChapPlugin mkChap witVersion;
         };
 
         devShells.default = pkgs.mkShell {
