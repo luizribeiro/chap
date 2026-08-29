@@ -53,38 +53,39 @@
             throw "crates/chap-wit/wit/worlds.wit does not declare a versioned chap:agent package"
           else
             builtins.elemAt witVersionMatch 0;
+        overrideVendorGitCheckout =
+          packages: checkout:
+          let
+            fromGit =
+              repo:
+              pkgs.lib.any (
+                package: pkgs.lib.hasPrefix "git+https://github.com/${repo}" (package.source or "")
+              ) packages;
+          in
+          if fromGit "bytecodealliance/wasmtime" then
+            checkout.overrideAttrs (old: {
+              # Crane inspects unpublished workspace crates whose declared
+              # README files are absent from the pinned Wasmtime checkout.
+              postPatch = (old.postPatch or "") + ''
+                for crate in crates/bench-api crates/c-api/artifact; do
+                  [ -e "$crate/README.md" ] || cp README.md "$crate/README.md"
+                done
+              '';
+            })
+          else if fromGit "luizribeiro/lockgate" then
+            checkout.overrideAttrs (old: {
+              # The proc macro reads this sibling contract after Crane has
+              # extracted the git workspace into individual crate trees.
+              postInstall = (old.postInstall or "") + ''
+                mkdir -p "$out/lockgate/wit"
+                cp crates/lockgate/wit/config.wit "$out/lockgate/wit/"
+              '';
+            })
+          else
+            checkout;
         cargoVendorDir = craneLib.vendorCargoDeps {
           src = packageSrc;
-          overrideVendorGitCheckout =
-            packages: checkout:
-            let
-              fromGit =
-                repo:
-                pkgs.lib.any (
-                  package: pkgs.lib.hasPrefix "git+https://github.com/${repo}" (package.source or "")
-                ) packages;
-            in
-            if fromGit "bytecodealliance/wasmtime" then
-              checkout.overrideAttrs (old: {
-                # Crane inspects unpublished workspace crates whose declared
-                # README files are absent from the pinned Wasmtime checkout.
-                postPatch = (old.postPatch or "") + ''
-                  for crate in crates/bench-api crates/c-api/artifact; do
-                    [ -e "$crate/README.md" ] || cp README.md "$crate/README.md"
-                  done
-                '';
-              })
-            else if fromGit "luizribeiro/lockgate" then
-              checkout.overrideAttrs (old: {
-                # The proc macro reads this sibling contract after Crane has
-                # extracted the git workspace into individual crate trees.
-                postInstall = (old.postInstall or "") + ''
-                  mkdir -p "$out/lockgate/wit"
-                  cp crates/lockgate/wit/config.wit "$out/lockgate/wit/"
-                '';
-              })
-            else
-              checkout;
+          inherit overrideVendorGitCheckout;
         };
         packageArgs = {
           pname = "chap";
@@ -115,6 +116,9 @@
             pname,
             src,
             cargoExtraArgs ? "--locked -p ${pname}",
+            cargoVendorDir ? craneLib.vendorCargoDeps {
+              inherit src overrideVendorGitCheckout;
+            },
             defaultSettings ? { },
             ...
           }@args:
@@ -128,7 +132,7 @@
                 "defaultSettings"
               ]
               // {
-                inherit pname src;
+                inherit pname src cargoVendorDir;
                 cargoExtraArgs = "${cargoExtraArgs} --target wasm32-wasip2";
                 doCheck = false;
                 nativeBuildInputs = (args.nativeBuildInputs or [ ]) ++ [ pkgs.wasm-tools ];
@@ -196,6 +200,13 @@
           pname = "chap-persona";
           src = packageSrc;
           inherit cargoVendorDir;
+          cargoArtifacts = pluginCargoArtifacts;
+        };
+        # Exercises buildChapPlugin's default vendoring, the path third-party
+        # builds rely on; every other in-tree package passes cargoVendorDir.
+        pluginDefaultVendor = buildChapPlugin {
+          pname = "chap-persona";
+          src = packageSrc;
           cargoArtifacts = pluginCargoArtifacts;
         };
         pluginRoleSettings = spec:
@@ -507,6 +518,7 @@
           plugin-kagi = pluginKagi;
           plugin-exec = pluginExec;
           plugin-persona = pluginPersona;
+          plugin-default-vendor = pluginDefaultVendor;
           mkchap-example = mkChapExample;
           mkchap-exec-example = mkChapExecExample;
           mkchap-forms-example = mkChapFormsExample;
