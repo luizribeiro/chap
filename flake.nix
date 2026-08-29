@@ -40,21 +40,23 @@
           ];
           targets = [ "wasm32-wasip2" ];
         };
-        stableRust = pkgs.rust-bin.stable.latest.default;
+        stableRust = pkgs.rust-bin.stable.latest.default.override {
+          targets = [ "wasm32-wasip2" ];
+        };
         craneLib = (crane.mkLib pkgs).overrideToolchain stableRust;
         packageSrc = craneLib.path ./.;
         cargoVendorDir = craneLib.vendorCargoDeps {
           src = packageSrc;
           overrideVendorGitCheckout =
             packages: checkout:
-            if
-              pkgs.lib.any (
-                package:
-                pkgs.lib.hasPrefix "git+https://github.com/bytecodealliance/wasmtime" (
-                  package.source or ""
-                )
-              ) packages
-            then
+            let
+              fromGit =
+                repo:
+                pkgs.lib.any (
+                  package: pkgs.lib.hasPrefix "git+https://github.com/${repo}" (package.source or "")
+                ) packages;
+            in
+            if fromGit "bytecodealliance/wasmtime" then
               checkout.overrideAttrs (old: {
                 # Crane inspects unpublished workspace crates whose declared
                 # README files are absent from the pinned Wasmtime checkout.
@@ -62,6 +64,15 @@
                   for crate in crates/bench-api crates/c-api/artifact; do
                     [ -e "$crate/README.md" ] || cp README.md "$crate/README.md"
                   done
+                '';
+              })
+            else if fromGit "luizribeiro/lockgate" then
+              checkout.overrideAttrs (old: {
+                # The proc macro reads this sibling contract after Crane has
+                # extracted the git workspace into individual crate trees.
+                postInstall = (old.postInstall or "") + ''
+                  mkdir -p "$out/lockgate/wit"
+                  cp crates/lockgate/wit/config.wit "$out/lockgate/wit/"
                 '';
               })
             else
@@ -88,6 +99,75 @@
             }
           )
         ) { };
+        # pname must equal the Cargo package name: the default cargoExtraArgs
+        # builds `-p pname`, and the install step expects cargo's artifact
+        # naming for that package (dashes become underscores).
+        buildChapPlugin =
+          {
+            pname,
+            src,
+            cargoExtraArgs ? "--locked -p ${pname}",
+            defaultSettings ? { },
+            ...
+          }@args:
+          let
+            componentName = builtins.replaceStrings [ "-" ] [ "_" ] pname;
+            component = "${plugin}/lib/${componentName}.wasm";
+            plugin = craneLib.buildPackage (
+              builtins.removeAttrs args [
+                "cargoExtraArgs"
+                "defaultSettings"
+              ]
+              // {
+                inherit pname src;
+                cargoExtraArgs = "${cargoExtraArgs} --target wasm32-wasip2";
+                doCheck = false;
+                installPhaseCommand = ''
+                  mkdir -p "$out/lib"
+                  cp "target/wasm32-wasip2/release/${componentName}.wasm" "$out/lib/"
+                '';
+                passthru = (args.passthru or { }) // {
+                  chapPlugin = {
+                    inherit component defaultSettings;
+                  };
+                };
+              }
+            );
+          in
+          plugin;
+        pluginCargoArtifacts = craneLib.buildDepsOnly {
+          pname = "chap-plugins";
+          version = "0.1.0";
+          src = packageSrc;
+          inherit cargoVendorDir;
+          cargoExtraArgs = "--locked -p chap-openai-compatible -p chap-kagi -p chap-exec-plugin -p chap-persona --target wasm32-wasip2";
+          doCheck = false;
+        };
+        pluginOpenaiCompatible = buildChapPlugin {
+          pname = "chap-openai-compatible";
+          src = packageSrc;
+          inherit cargoVendorDir;
+          cargoArtifacts = pluginCargoArtifacts;
+        };
+        pluginKagi = buildChapPlugin {
+          pname = "chap-kagi";
+          src = packageSrc;
+          inherit cargoVendorDir;
+          cargoArtifacts = pluginCargoArtifacts;
+          defaultSettings.api_key_env = "KAGI_API_KEY";
+        };
+        pluginExec = buildChapPlugin {
+          pname = "chap-exec-plugin";
+          src = packageSrc;
+          inherit cargoVendorDir;
+          cargoArtifacts = pluginCargoArtifacts;
+        };
+        pluginPersona = buildChapPlugin {
+          pname = "chap-persona";
+          src = packageSrc;
+          inherit cargoVendorDir;
+          cargoArtifacts = pluginCargoArtifacts;
+        };
         wasiSysroot = import ./nix/wasip3-sysroot.nix { inherit pkgs system; };
         rustfmtHook = {
           enable = true;
@@ -158,11 +238,23 @@
           inherit chap;
           chap-exec = chap.override { withExec = true; };
           default = chap;
+          plugin-openai-compatible = pluginOpenaiCompatible;
+          plugin-kagi = pluginKagi;
+          plugin-exec = pluginExec;
+          plugin-persona = pluginPersona;
         };
 
         checks = {
           formatting = formattingCheck;
           chap = chap;
+          plugin-openai-compatible = pluginOpenaiCompatible;
+          plugin-kagi = pluginKagi;
+          plugin-exec = pluginExec;
+          plugin-persona = pluginPersona;
+        };
+
+        lib = {
+          inherit buildChapPlugin;
         };
 
         devShells.default = pkgs.mkShell {
