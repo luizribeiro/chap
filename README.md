@@ -48,6 +48,7 @@ its component and settings:
 
 ```json
 {
+  "name": "work",
   "plugins": {
     "openai": {
       "component": "./target/wasm32-wasip2/release/chap_openai_compatible.wasm",
@@ -75,6 +76,9 @@ its component and settings:
   }
 }
 ```
+
+The optional top-level `name` identifies this CHAP instance. It may contain
+letters, digits, `.`, `_`, and `-`, except the reserved values `.` and `..`.
 
 `api_key_env` is optional and names the environment variable holding the API
 key. The plugin declares an `env.read` grant for it, so the access appears in

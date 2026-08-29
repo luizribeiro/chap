@@ -21,6 +21,7 @@ use std::{
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    name: Option<String>,
     #[serde(default)]
     plugins: BTreeMap<String, ConfiguredPlugin>,
     #[serde(default)]
@@ -49,8 +50,30 @@ impl Config {
         let mut config: Self = serde_json::from_str(&source)
             .map_err(|error| format!("failed to parse `{}`: {error}", path.display()))?;
         config.directory = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
+        config.validate_name()?;
         config.validate_agent_settings()?;
         Ok(config)
+    }
+
+    fn validate_name(&self) -> Result<(), String> {
+        let Some(name) = self.name() else {
+            return Ok(());
+        };
+        if name.is_empty()
+            || matches!(name, "." | "..")
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        {
+            return Err(format!(
+                "invalid instance name `{name}`: expected a non-empty value containing only A-Z, a-z, 0-9, '.', '_', or '-', other than '.' or '..'"
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
     }
 
     pub fn plugins(&self) -> impl Iterator<Item = (&str, &ConfiguredPlugin)> {
@@ -98,6 +121,64 @@ impl ConfiguredPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn load_config(source: &str) -> Result<Config, String> {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("chap.json");
+        fs::write(&path, source).unwrap();
+        Config::load(&path)
+    }
+
+    #[test]
+    fn instance_name_is_optional() {
+        let config = load_config("{}").unwrap();
+
+        assert_eq!(config.name(), None);
+    }
+
+    #[test]
+    fn accepts_valid_instance_names() {
+        for name in ["work", "Work_42", "team.alpha-beta"] {
+            let config = load_config(&format!(r#"{{ "name": "{name}" }}"#)).unwrap();
+
+            assert_eq!(config.name(), Some(name));
+        }
+    }
+
+    #[test]
+    fn rejects_empty_instance_name() {
+        let error = load_config(r#"{ "name": "" }"#).unwrap_err();
+
+        assert!(error.contains("invalid instance name ``"));
+    }
+
+    #[test]
+    fn rejects_instance_name_with_invalid_characters() {
+        let error = load_config(r#"{ "name": "team/alpha" }"#).unwrap_err();
+
+        assert!(error.contains("invalid instance name `team/alpha`"));
+    }
+
+    #[test]
+    fn rejects_non_ascii_instance_name() {
+        let error = load_config(r#"{ "name": "café" }"#).unwrap_err();
+
+        assert!(error.contains("invalid instance name `café`"));
+    }
+
+    #[test]
+    fn rejects_dot_instance_name() {
+        let error = load_config(r#"{ "name": "." }"#).unwrap_err();
+
+        assert!(error.contains("invalid instance name `.`"));
+    }
+
+    #[test]
+    fn rejects_dot_dot_instance_name() {
+        let error = load_config(r#"{ "name": ".." }"#).unwrap_err();
+
+        assert!(error.contains("invalid instance name `..`"));
+    }
 
     #[test]
     fn parses_plugins() {
