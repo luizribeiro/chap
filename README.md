@@ -34,11 +34,13 @@ cargo run -- plugins list
 Use `--config /path/to/chap.json` to read a different file.
 
 The repository includes an OpenAI-compatible Chat Completions provider, Kagi
-web tools, and a persona context contributor. Build their configured release
-components with the system Cargo:
+web tools, and a persona context contributor. The exec plugin exposes an
+argv-style process tool mediated by command-prefix grants.
+
+Build the configured release components with the system Cargo:
 
 ```console
-cargo build -p chap-openai-compatible -p chap-kagi -p chap-persona --release --target wasm32-wasip2
+cargo build -p chap-openai-compatible -p chap-exec-plugin -p chap-kagi -p chap-persona --release --target wasm32-wasip2
 ```
 
 Each plugin is keyed by an operator-assigned instance id and maps directly to
@@ -107,6 +109,43 @@ and secret handling.
 No role name is ever a top-level key. This is why agent-wide tool-execution
 settings live at `agent.tool_execution` rather than in a top-level `tools`
 section.
+
+### Exec capability
+
+The optional, host-owned `agent.exec` section configures command resolution,
+environment passthrough, and the hard timeout ceiling:
+
+```json
+{
+  "agent": {
+    "exec": {
+      "path": ["/usr/local/bin", "/usr/bin", "/bin"],
+      "env_passthrough": ["CARGO_HOME", "RUSTUP_HOME"],
+      "timeout_ceiling_ms": 120000
+    }
+  }
+}
+```
+
+`path` is a list of directories used to resolve bare program names; when it is
+omitted, CHAP snapshots its startup `PATH`. `env_passthrough` names additional
+host variables to copy, and `timeout_ceiling_ms` caps every plugin-requested
+deadline and defaults to 120 seconds.
+
+Spawned processes receive a constructed environment, never CHAP's inherited
+environment. CHAP supplies the pinned `PATH`, copies `HOME`, `TERM`, `LANG`, and
+`TMPDIR` when present, and adds only variables named in `env_passthrough`.
+Provider API keys are therefore not visible to spawned processes unless an
+operator explicitly names them for passthrough.
+
+The entire stack is behind the Cargo `exec` feature, which is off by default:
+
+```console
+cargo build -p chap-cli --features exec
+```
+
+A build without the feature refuses an `agent.exec` section at startup and
+refuses any plugin needing `exec.run` at admission.
 
 ### Tool execution
 
@@ -214,6 +253,34 @@ cargo run -- grants approve kagi
 cargo run -- grants approve persona
 cargo run -- plugins check
 ```
+
+With an exec-enabled build, configure the exec plugin's command scopes in its
+settings:
+
+```json
+{
+  "plugins": {
+    "exec": {
+      "component": "./target/wasm32-wasip2/release/chap_exec_plugin.wasm",
+      "settings": {
+        "allowed_commands": ["cargo", "git commit", "rg"]
+      }
+    }
+  }
+}
+```
+
+Command scopes are argv prefixes matched by exact tokens, not string prefixes.
+A bare program name is the one-token case. `git commit` allows
+`git commit -m ...`, but not `git push`; `git -c x=y commit` does not match and
+is denied. Fail-to-match is fail-safe. The resolved prefixes are digest-bound,
+appear in `chap grants review`, and changing `allowed_commands` is scope drift
+that requires review and re-approval.
+
+Prefix scopes bound entry points, not effects: anything after a matched prefix
+is unconstrained, and allowing `sh`, interpreters, or build tools is arbitrary
+code execution by design. The constructed environment and the future sandbox
+stage are the compensating layers.
 
 `grants review` also accepts one instance id. `grants deny <instance-id>` removes
 that instance's approval. CHAP stores approvals in `consent.json` beside the
