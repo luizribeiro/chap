@@ -104,6 +104,29 @@ async fn allowed_command_runs_through_the_guarded_import() {
 }
 
 #[tokio::test]
+async fn command_runs_from_the_invoking_directory() {
+    let invoking_directory = std::env::current_dir().unwrap();
+    let result = run_scenario(
+        &["pwd"],
+        &[ToolRequest {
+            id: "working-directory",
+            arguments: json!({"program": "pwd", "args": []}),
+        }],
+    )
+    .await;
+
+    let output = tool_result(&result.events, "working-directory")
+        .as_ref()
+        .unwrap();
+    assert!(
+        output
+            .lines()
+            .any(|line| line == invoking_directory.to_string_lossy()),
+        "{output}"
+    );
+}
+
+#[tokio::test]
 async fn disallowed_command_is_denied_by_the_capability_guard() {
     let result = run_scenario(
         &["echo"],

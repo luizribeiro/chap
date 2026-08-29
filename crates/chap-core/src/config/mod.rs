@@ -103,11 +103,6 @@ impl Config {
         self.directory.join(&plugin.component)
     }
 
-    #[cfg(feature = "exec")]
-    pub(crate) fn project_root(&self) -> &Path {
-        &self.directory
-    }
-
     pub(crate) fn source_path(&self) -> &Path {
         &self.source_path
     }

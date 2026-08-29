@@ -155,8 +155,11 @@ fn host_builder(_config: &Config) -> Result<HostBuilder<()>, String> {
     #[cfg(not(feature = "exec"))]
     let imports: HostImports = ();
     #[cfg(feature = "exec")]
-    let imports: HostImports =
-        bindings::ExecImports::new(_config.exec_config()?, _config.project_root());
+    let imports: HostImports = {
+        let project_root = std::env::current_dir()
+            .map_err(|error| format!("failed to determine current working directory: {error}"))?;
+        bindings::ExecImports::new(_config.exec_config()?, &project_root)
+    };
     let builder = HostBuilder::new(imports)
         .map_err(|error| format!("failed to create Lockgate host: {error}"))?;
     #[cfg(feature = "exec")]

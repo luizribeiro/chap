@@ -140,7 +140,8 @@ Spawned processes receive a constructed environment, never CHAP's inherited
 environment. CHAP supplies the pinned `PATH`, copies `HOME`, `TERM`, `LANG`, and
 `TMPDIR` when present, and adds only variables named in `env_passthrough`.
 Provider API keys are therefore not visible to spawned processes unless an
-operator explicitly names them for passthrough.
+operator explicitly names them for passthrough. Commands run from the directory
+where CHAP was invoked.
 
 The entire stack is behind the Cargo `exec` feature, which is off by default:
 
