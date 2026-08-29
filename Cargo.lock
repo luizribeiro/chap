@@ -323,6 +323,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "chap-exec"
+version = "0.1.0"
+dependencies = [
+ "lockgate-policy",
+]
+
+[[package]]
 name = "chap-kagi"
 version = "0.1.0"
 dependencies = [
