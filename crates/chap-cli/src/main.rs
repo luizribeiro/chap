@@ -11,7 +11,7 @@ use unicode_width::UnicodeWidthStr;
 #[command(version, about = "A plugin-powered coding agent")]
 struct Cli {
     /// Configuration file to read.
-    #[arg(long, default_value = "chap.json", global = true)]
+    #[arg(long, env = "CHAP_CONFIG", default_value = "chap.json", global = true)]
     config: PathBuf,
 
     #[command(subcommand)]
@@ -325,6 +325,8 @@ mod tests {
     use chap_core::{
         ConsentManifest, ConsentRecord, DriftReport, GrantReview, PluginConsentReview,
     };
+    use clap::CommandFactory;
+    use std::ffi::OsStr;
 
     fn consent_record(instance_id: &str, digest_byte: char) -> ConsentRecord {
         serde_json::from_value(serde_json::json!({
@@ -365,6 +367,21 @@ mod tests {
         let cli = Cli::try_parse_from(["chap"]).unwrap();
 
         assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn config_flag_has_an_environment_default_before_the_file_default() {
+        let command = Cli::command();
+        let argument = command
+            .get_arguments()
+            .find(|argument| argument.get_id() == "config")
+            .unwrap();
+
+        assert_eq!(argument.get_env(), Some(OsStr::new("CHAP_CONFIG")));
+        assert_eq!(argument.get_default_values(), [OsStr::new("chap.json")]);
+
+        let cli = Cli::try_parse_from(["chap", "--config", "explicit.json"]).unwrap();
+        assert_eq!(cli.config, PathBuf::from("explicit.json"));
     }
 
     #[test]

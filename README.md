@@ -31,7 +31,9 @@ plugins with:
 cargo run -- plugins list
 ```
 
-Use `--config /path/to/chap.json` to read a different file.
+Use `--config /path/to/chap.json` to read a different file, or set
+`CHAP_CONFIG`. An explicit flag takes precedence over the environment variable;
+without either, CHAP reads `chap.json`.
 
 The repository includes an OpenAI-compatible Chat Completions provider, Kagi
 web tools, and a persona context contributor. The exec plugin exposes an
