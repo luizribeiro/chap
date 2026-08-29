@@ -16,6 +16,8 @@ fn main() -> ExitCode {
                 "--exclude",
                 "chap-openai-compatible",
                 "--exclude",
+                "chap-exec-plugin",
+                "--exclude",
                 "chap-kagi",
                 "--exclude",
                 "chap-persona",
@@ -25,6 +27,7 @@ fn main() -> ExitCode {
             &workspace.join("plugins/openai-compatible"),
             &["test", "--locked"],
         ),
+        (&workspace.join("plugins/exec"), &["test", "--locked"]),
         (&workspace.join("plugins/kagi"), &["test", "--locked"]),
         (&workspace.join("plugins/persona"), &["test", "--locked"]),
     ];

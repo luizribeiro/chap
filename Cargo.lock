@@ -336,6 +336,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "chap-exec-plugin"
+version = "0.1.0"
+dependencies = [
+ "chap-plugin",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "chap-kagi"
 version = "0.1.0"
 dependencies = [

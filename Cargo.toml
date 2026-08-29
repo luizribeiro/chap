@@ -10,6 +10,7 @@ members = [
     "crates/chap-plugin/tests/fixtures/multi-role",
     "crates/chap-plugin/tests/fixtures/context",
     "crates/chap-plugin/tests/fixtures/provider",
+    "plugins/exec",
     "plugins/kagi",
     "plugins/openai-compatible",
     "plugins/persona",
