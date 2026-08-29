@@ -7,6 +7,9 @@ publish.workspace = true
 [lib]
 proc-macro = true
 
+[features]
+exec = ["chap-wit/exec"]
+
 [dependencies]
 chap-wit.workspace = true
 proc-macro2.workspace = true

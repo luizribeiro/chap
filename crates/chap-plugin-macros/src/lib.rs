@@ -3,6 +3,7 @@
 use proc_macro::TokenStream;
 use syn::parse_macro_input;
 
+mod imports;
 mod plugin;
 mod roles;
 
