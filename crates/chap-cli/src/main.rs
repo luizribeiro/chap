@@ -7,6 +7,8 @@ use clap::{Args, Parser, Subcommand};
 use std::{collections::BTreeSet, path::PathBuf, process::ExitCode};
 use unicode_width::UnicodeWidthStr;
 
+const NO_PLUGINS_CONFIGURED: &str = "No plugins are configured.\n";
+
 #[derive(Debug, Parser)]
 #[command(version, about = "A plugin-powered coding agent")]
 struct Cli {
@@ -129,7 +131,7 @@ async fn grants_review(
             .collect::<Vec<_>>(),
     };
     if ids.is_empty() {
-        output.push_str("No plugins are configured.\n");
+        output.push_str(NO_PLUGINS_CONFIGURED);
         return Ok(output);
     }
 
@@ -287,6 +289,9 @@ fn plugin_list(builder: &AgentBuilder) -> Result<String, String> {
             },
             component.to_string_lossy().into_owned(),
         ]);
+    }
+    if rows.is_empty() {
+        return Ok(NO_PLUGINS_CONFIGURED.to_owned());
     }
     Ok(render_table(&rows))
 }
@@ -584,6 +589,19 @@ mod tests {
             "ID           ROLES     COMPONENT\n\
              short        provider  one.wasm\n\
              much-longer  -         two.wasm\n"
+        );
+    }
+
+    #[test]
+    fn describes_an_empty_plugin_list() {
+        let directory = tempfile::tempdir().unwrap();
+        let config_path = directory.path().join("chap.json");
+        std::fs::write(&config_path, "{}").unwrap();
+        let builder = AgentBuilder::load(&config_path).unwrap();
+
+        assert_eq!(
+            plugin_list(&builder).unwrap(),
+            "No plugins are configured.\n"
         );
     }
 }
