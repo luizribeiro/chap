@@ -429,6 +429,13 @@ Consent approvals live per user below the XDG state directory, separated by
 instance name. Settings are world-readable in the Nix store, so they must never
 contain secrets; use environment indirection such as `api_key_env` instead.
 
+### Templates
+
+`nix flake init -t github:luizribeiro/chap#instance` creates a minimal
+declarative instance flake. Plugin authors can use
+`nix flake init -t github:luizribeiro/chap#plugin` for a working tools-plugin
+skeleton; generate its `Cargo.lock` before the first Nix build.
+
 ## Development
 
 Run the project with the system Cargo:

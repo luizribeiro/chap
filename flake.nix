@@ -552,11 +552,16 @@
       }
     )
     // {
-      templates = {
+      templates = rec {
         plugin = {
           path = ./nix/templates/plugin;
           description = "A third-party CHAP tools plugin";
         };
+        instance = {
+          path = ./nix/templates/instance;
+          description = "A declarative CHAP instance";
+        };
+        default = instance;
       };
     };
 }
