@@ -550,5 +550,13 @@
           CARGO_TARGET_WASM32_WASIP2_RUSTFLAGS = "";
         };
       }
-    );
+    )
+    // {
+      templates = {
+        plugin = {
+          path = ./nix/templates/plugin;
+          description = "A third-party CHAP tools plugin";
+        };
+      };
+    };
 }
