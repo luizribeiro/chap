@@ -3,6 +3,9 @@
 //! The shared `chap:agent` WIT package and plugin-world composition live in the
 //! `chap-wit` crate.
 
+#[cfg(feature = "exec")]
+#[doc(hidden)]
+pub mod exec;
 mod plugin;
 mod roles;
 #[doc(hidden)]
@@ -20,6 +23,8 @@ pub use lockgate_plugin::{
 
 /// Capability permissions a plugin can request through [`Plugin::NEEDS`].
 pub mod capabilities {
+    #[cfg(feature = "exec")]
+    pub use chap_exec::exec;
     pub use lockgate_plugin::{env, net};
 }
 

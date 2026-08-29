@@ -367,6 +367,7 @@ dependencies = [
 name = "chap-plugin"
 version = "0.1.0"
 dependencies = [
+ "chap-exec",
  "chap-plugin-macros",
  "lockgate-http",
  "lockgate-plugin",
