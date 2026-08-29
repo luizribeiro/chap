@@ -33,7 +33,7 @@ lockgate = { git = "https://github.com/luizribeiro/lockgate.git", branch = "main
 lockgate-http = { git = "https://github.com/luizribeiro/lockgate.git", branch = "main" }
 lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", branch = "main", default-features = false }
 lockgate-policy = { git = "https://github.com/luizribeiro/lockgate.git", branch = "main" }
-chap-plugin = { path = "crates/chap-plugin" }
+chap-plugin = { path = "crates/chap-plugin", default-features = false }
 chap-plugin-macros = { path = "crates/chap-plugin-macros" }
 chap-wit = { path = "crates/chap-wit" }
 pulldown-cmark = "0.13.4"
