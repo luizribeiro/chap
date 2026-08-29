@@ -139,6 +139,31 @@ mod tests {
     }
 
     #[test]
+    fn wit_files_declare_the_composed_package_version() {
+        let wit_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("wit");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&wit_dir).expect("the wit directory must be readable") {
+            let path = entry
+                .expect("every wit directory entry must be readable")
+                .path();
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+            let declaration = source
+                .lines()
+                .find(|line| line.starts_with("package "))
+                .unwrap_or_else(|| panic!("{} declares no package", path.display()));
+            assert_eq!(
+                declaration,
+                PACKAGE,
+                "{} disagrees with the composed package version",
+                path.display()
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "no wit files were checked");
+    }
+
+    #[test]
     fn host_world_exports_exactly_the_role_interfaces() {
         let mut resolve = Resolve::new();
         let (package, _) = resolve

@@ -45,6 +45,14 @@
         };
         craneLib = (crane.mkLib pkgs).overrideToolchain stableRust;
         packageSrc = craneLib.path ./.;
+        witVersionMatch = builtins.match ".*package chap:agent@([0-9]+\\.[0-9]+\\.[0-9]+);.*" (
+          builtins.readFile ./crates/chap-wit/wit/worlds.wit
+        );
+        witVersion =
+          if witVersionMatch == null then
+            throw "crates/chap-wit/wit/worlds.wit does not declare a versioned chap:agent package"
+          else
+            builtins.elemAt witVersionMatch 0;
         cargoVendorDir = craneLib.vendorCargoDeps {
           src = packageSrc;
           overrideVendorGitCheckout =
@@ -113,6 +121,7 @@
           let
             componentName = builtins.replaceStrings [ "-" ] [ "_" ] pname;
             component = "${plugin}/lib/${componentName}.wasm";
+            witVersionFile = "${plugin}/share/chap-plugin/wit-version";
             plugin = craneLib.buildPackage (
               builtins.removeAttrs args [
                 "cargoExtraArgs"
@@ -122,13 +131,34 @@
                 inherit pname src;
                 cargoExtraArgs = "${cargoExtraArgs} --target wasm32-wasip2";
                 doCheck = false;
+                nativeBuildInputs = (args.nativeBuildInputs or [ ]) ++ [ pkgs.wasm-tools ];
                 installPhaseCommand = ''
                   mkdir -p "$out/lib"
                   cp "target/wasm32-wasip2/release/${componentName}.wasm" "$out/lib/"
+
+                  witVersions=$(
+                    wasm-tools component wit "$out/lib/${componentName}.wasm" \
+                      | grep -Eo 'chap:agent@[0-9]+\.[0-9]+\.[0-9]+' \
+                      | cut -d@ -f2 \
+                      | sort -u \
+                      || true
+                  )
+                  if [ -z "$witVersions" ]; then
+                    echo "component does not import or export a versioned chap:agent package" >&2
+                    exit 1
+                  fi
+                  if [ "$(printf '%s\n' "$witVersions" | wc -l | tr -d ' ')" -ne 1 ]; then
+                    echo "component references multiple chap:agent versions:" >&2
+                    printf '%s\n' "$witVersions" >&2
+                    exit 1
+                  fi
+
+                  mkdir -p "$out/share/chap-plugin"
+                  printf '%s\n' "$witVersions" > "$out/share/chap-plugin/wit-version"
                 '';
                 passthru = (args.passthru or { }) // {
                   chapPlugin = {
-                    inherit component defaultSettings;
+                    inherit component defaultSettings witVersionFile;
                   };
                 };
               }
@@ -254,7 +284,7 @@
         };
 
         lib = {
-          inherit buildChapPlugin;
+          inherit buildChapPlugin witVersion;
         };
 
         devShells.default = pkgs.mkShell {
