@@ -78,8 +78,8 @@ impl Tools for Kagi {
         let (path, request, output) = match name.as_str() {
             WEB_SEARCH => {
                 let arguments: SearchArguments =
-                    parse_arguments(WEB_SEARCH, &arguments).map_err(ToolError::Failed)?;
-                arguments.validate().map_err(ToolError::Failed)?;
+                    parse_arguments(WEB_SEARCH, &arguments).map_err(ToolError::InvalidInput)?;
+                arguments.validate().map_err(ToolError::InvalidInput)?;
                 let request = serde_json::to_vec(&SearchRequest {
                     query: &arguments.query,
                     workflow: "search",
@@ -93,8 +93,8 @@ impl Tools for Kagi {
             }
             WEB_FETCH => {
                 let arguments: FetchArguments =
-                    parse_arguments(WEB_FETCH, &arguments).map_err(ToolError::Failed)?;
-                arguments.validate().map_err(ToolError::Failed)?;
+                    parse_arguments(WEB_FETCH, &arguments).map_err(ToolError::InvalidInput)?;
+                arguments.validate().map_err(ToolError::InvalidInput)?;
                 let request = serde_json::to_vec(&ExtractRequest {
                     pages: arguments.urls.iter().map(|url| PageInput { url }).collect(),
                     format: "json",
@@ -109,7 +109,7 @@ impl Tools for Kagi {
                 )
             }
             _ => {
-                return Err(ToolError::Failed(format!(
+                return Err(ToolError::InvalidInput(format!(
                     "tool `{name}` is not provided by the Kagi plugin"
                 )));
             }
@@ -475,6 +475,17 @@ mod tests {
 
     #[test]
     fn validates_search_arguments() {
+        let Err(error) = parse_arguments::<SearchArguments>(WEB_SEARCH, "not json")
+            .map_err(ToolError::InvalidInput)
+        else {
+            panic!("malformed arguments unexpectedly parsed");
+        };
+        assert!(matches!(
+            error,
+            ToolError::InvalidInput(message)
+                if message.starts_with("invalid `web_search` arguments:")
+        ));
+
         let arguments: SearchArguments =
             parse_arguments(WEB_SEARCH, r#"{"query":"rust"}"#).unwrap();
         assert_eq!(arguments.limit, DEFAULT_SEARCH_LIMIT);
@@ -591,13 +602,16 @@ mod tests {
     }
 
     #[test]
-    fn reports_structured_api_errors() {
-        let error = api_error(
+    fn maps_structured_api_errors_to_failed() {
+        let error = ToolError::Failed(api_error(
             401,
             r#"{"error":[{"code":"auth.invalid","message":"Invalid API key"}]}"#,
-        );
+        ));
 
-        assert_eq!(error, "Kagi API returned HTTP 401: Invalid API key");
+        assert_eq!(
+            error,
+            ToolError::Failed("Kagi API returned HTTP 401: Invalid API key".to_owned())
+        );
     }
 }
 

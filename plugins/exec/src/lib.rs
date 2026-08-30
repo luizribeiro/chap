@@ -56,11 +56,11 @@ impl Tools for Exec {
 
     async fn execute(&self, name: String, arguments: String) -> Result<String, ToolError> {
         if name != EXEC {
-            return Err(ToolError::Failed(format!(
+            return Err(ToolError::InvalidInput(format!(
                 "tool `{name}` is not provided by the exec plugin"
             )));
         }
-        let arguments: ExecArguments = parse_arguments(&arguments).map_err(ToolError::Failed)?;
+        let arguments: ExecArguments = parse_arguments(&arguments)?;
         let timeout_ms = arguments.timeout_ms.or(self.settings.default_timeout_ms);
         chap_plugin::exec::run(
             Command {
@@ -71,12 +71,13 @@ impl Tools for Exec {
         )
         .await
         .map(format_output)
-        .map_err(|error| ToolError::Failed(format_error(error)))
+        .map_err(map_exec_error)
     }
 }
 
-fn parse_arguments(arguments: &str) -> Result<ExecArguments, String> {
-    serde_json::from_str(arguments).map_err(|error| format!("invalid `exec` arguments: {error}"))
+fn parse_arguments(arguments: &str) -> Result<ExecArguments, ToolError> {
+    serde_json::from_str(arguments)
+        .map_err(|error| ToolError::InvalidInput(format!("invalid `exec` arguments: {error}")))
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -110,12 +111,20 @@ fn format_output(result: ExecResult) -> String {
     sections.join("\n\n")
 }
 
-fn format_error(error: ExecError) -> String {
+fn map_exec_error(error: ExecError) -> ToolError {
     match error {
-        ExecError::Denied(message) => format!("command denied by the capability guard: {message}"),
-        ExecError::Rejected(message) => format!("command rejected: {message}"),
-        ExecError::TimedOut => "command timed out and was killed at the deadline".to_owned(),
-        ExecError::Failed(message) => format!("command execution failed: {message}"),
+        ExecError::Denied(message) => {
+            ToolError::Denied(format!("command denied by the capability guard: {message}"))
+        }
+        ExecError::Rejected(message) => {
+            ToolError::InvalidInput(format!("command rejected: {message}"))
+        }
+        ExecError::TimedOut => {
+            ToolError::Failed("command timed out and was killed at the deadline".to_owned())
+        }
+        ExecError::Failed(message) => {
+            ToolError::Failed(format!("command execution failed: {message}"))
+        }
     }
 }
 
@@ -191,7 +200,11 @@ mod tests {
                 timeout_ms: Some(1000),
             }
         );
-        assert!(parse_arguments(r#"{"program":"echo","shell":true}"#).is_err());
+        assert!(matches!(
+            parse_arguments(r#"{"program":"echo","shell":true}"#),
+            Err(ToolError::InvalidInput(message))
+                if message.starts_with("invalid `exec` arguments:")
+        ));
     }
 
     #[test]
@@ -230,24 +243,24 @@ mod tests {
     }
 
     #[test]
-    fn formats_each_exec_error_variant() {
+    fn maps_each_exec_error_variant() {
         assert_eq!(
-            format_error(ExecError::Denied("exec.run".to_owned())),
-            "command denied by the capability guard: exec.run"
+            map_exec_error(ExecError::Denied("exec.run".to_owned())),
+            ToolError::Denied("command denied by the capability guard: exec.run".to_owned())
         );
         assert_eq!(
-            format_error(ExecError::Rejected(
+            map_exec_error(ExecError::Rejected(
                 "program paths are not allowed".to_owned()
             )),
-            "command rejected: program paths are not allowed"
+            ToolError::InvalidInput("command rejected: program paths are not allowed".to_owned())
         );
         assert_eq!(
-            format_error(ExecError::TimedOut),
-            "command timed out and was killed at the deadline"
+            map_exec_error(ExecError::TimedOut),
+            ToolError::Failed("command timed out and was killed at the deadline".to_owned())
         );
         assert_eq!(
-            format_error(ExecError::Failed("could not spawn".to_owned())),
-            "command execution failed: could not spawn"
+            map_exec_error(ExecError::Failed("could not spawn".to_owned())),
+            ToolError::Failed("command execution failed: could not spawn".to_owned())
         );
     }
 
