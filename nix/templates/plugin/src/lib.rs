@@ -1,4 +1,4 @@
-use chap_plugin::tools::{ToolDefinition, Tools};
+use chap_plugin::tools::{ToolDefinition, ToolError, Tools};
 use chap_plugin::{MetadataSource, Needs, Plugin};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -41,12 +41,16 @@ impl Tools for MyPlugin {
         }])
     }
 
-    async fn execute(&self, name: String, arguments: String) -> Result<String, String> {
+    async fn execute(&self, name: String, arguments: String) -> Result<String, ToolError> {
         if name != GREET {
-            return Err(format!("tool `{name}` is not provided by this plugin"));
+            return Err(ToolError::InvalidInput(format!(
+                "tool `{name}` is not provided by this plugin"
+            )));
         }
         let arguments: GreetArguments = serde_json::from_str(&arguments)
-            .map_err(|error| format!("invalid `greet` arguments: {error}"))?;
+            .map_err(|error| {
+                ToolError::InvalidInput(format!("invalid `greet` arguments: {error}"))
+            })?;
         let greeting = self.settings.greeting.as_deref().unwrap_or("Hello");
         Ok(format!("{greeting}, {}!", arguments.name))
     }
@@ -103,7 +107,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            "tool `other` is not provided by this plugin"
+            ToolError::InvalidInput("tool `other` is not provided by this plugin".to_owned())
         );
     }
 }
