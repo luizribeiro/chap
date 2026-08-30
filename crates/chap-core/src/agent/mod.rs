@@ -1,7 +1,7 @@
 use crate::config::{
     Config, ConfiguredPlugin, agent::ToolExecutionSettings, roles::PluginRoleSettings,
 };
-use crate::consent::{ConsentStore, PluginConsentReview};
+use crate::consent::{ConsentError, ConsentStore, PluginConsentReview};
 use crate::session::{
     RunError, Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions,
 };
@@ -151,21 +151,26 @@ type StartDropResources = (
     Option<HostBuilder<()>>,
 );
 
-fn host_builder(_config: &Config) -> Result<HostBuilder<()>, String> {
+fn host_builder(_config: &Config) -> Result<HostBuilder<()>, ConsentError> {
     #[cfg(not(feature = "exec"))]
     let imports: HostImports = ();
     #[cfg(feature = "exec")]
     let imports: HostImports = {
-        let project_root = std::env::current_dir()
-            .map_err(|error| format!("failed to determine current working directory: {error}"))?;
-        bindings::ExecImports::new(_config.exec_config()?, &project_root)
+        let project_root =
+            std::env::current_dir().map_err(|source| ConsentError::CurrentDirectory { source })?;
+        bindings::ExecImports::new(
+            _config
+                .exec_config()
+                .map_err(ConsentError::HostConfiguration)?,
+            &project_root,
+        )
     };
-    let builder = HostBuilder::new(imports)
-        .map_err(|error| format!("failed to create Lockgate host: {error}"))?;
+    let builder =
+        HostBuilder::new(imports).map_err(|source| ConsentError::HostConstruction { source })?;
     #[cfg(feature = "exec")]
     let builder = builder
         .register::<chap_exec::exec::Contract>()
-        .map_err(|error| format!("failed to register exec capability: {error}"))?;
+        .map_err(|source| ConsentError::CapabilityRegistration { source })?;
     Ok(builder)
 }
 
@@ -188,11 +193,11 @@ impl StartResources {
         (self.tools.take(), self.host.take(), self.builder.take())
     }
 
-    async fn cleanup(mut self) -> Result<(), String> {
+    async fn cleanup(mut self) -> Result<(), ConsentError> {
         let resources = self.take_drop_resources();
         tokio::task::spawn_blocking(move || drop(resources))
             .await
-            .map_err(|error| format!("failed to clean up Lockgate host: {error}"))
+            .map_err(|source| ConsentError::HostCleanup { source })
     }
 }
 
@@ -274,9 +279,9 @@ impl AgentBuilder {
         }
     }
 
-    fn consent_store(&self) -> Result<ConsentStore, String> {
+    fn consent_store(&self) -> Result<ConsentStore, ConsentError> {
         Ok(ConsentStore::new(
-            self.consent_path()?,
+            self.consent_path().map_err(ConsentError::StateLocation)?,
             self.config.source_path(),
         ))
     }
@@ -295,14 +300,19 @@ impl AgentBuilder {
             .map(|(id, plugin)| (id, plugin.component()))
     }
 
-    pub fn plugin_roles(&self, id: &str) -> Result<Vec<&'static str>, String> {
+    pub fn plugin_roles(&self, id: &str) -> Result<Vec<&'static str>, ConsentError> {
         let plugin = self
             .config
             .plugin(id)
-            .ok_or_else(|| format!("plugin `{id}` is not configured"))?;
+            .ok_or_else(|| ConsentError::PluginNotConfigured {
+                plugin: id.to_owned(),
+            })?;
         let bytes = Self::plugin_bytes(&self.config, id, plugin)?;
-        let inspection = lockgate::inspect(&bytes)
-            .map_err(|error| format!("failed to inspect plugin `{id}`: {error}"))?;
+        let inspection =
+            lockgate::inspect(&bytes).map_err(|source| ConsentError::InspectPlugin {
+                plugin: id.to_owned(),
+                source: Box::new(source),
+            })?;
         Ok(supported_roles(inspection.exported_interfaces()))
     }
 
@@ -314,7 +324,7 @@ impl AgentBuilder {
         Ok(self)
     }
 
-    pub async fn approve_plugin(&self, id: &str) -> Result<ConsentRecord, String> {
+    pub async fn approve_plugin(&self, id: &str) -> Result<ConsentRecord, ConsentError> {
         let consent = self.consent_store()?;
         let (prepared, resources) = self.prepare_configured_plugin(id).await?;
         let record = prepared.approve(now_rfc3339());
@@ -326,14 +336,16 @@ impl AgentBuilder {
         Ok(record)
     }
 
-    pub fn deny_plugin(&self, id: &str) -> Result<(), String> {
+    pub fn deny_plugin(&self, id: &str) -> Result<(), ConsentError> {
         if self.config.plugin(id).is_none() {
-            return Err(format!("plugin `{id}` is not configured"));
+            return Err(ConsentError::PluginNotConfigured {
+                plugin: id.to_owned(),
+            });
         }
         self.consent_store()?.remove(id)
     }
 
-    pub async fn review_plugin(&self, id: &str) -> Result<PluginConsentReview, String> {
+    pub async fn review_plugin(&self, id: &str) -> Result<PluginConsentReview, ConsentError> {
         let consent = self.consent_store()?;
         let (prepared, resources) = self.prepare_configured_plugin(id).await?;
         let manifest = prepared.review();
@@ -357,11 +369,13 @@ impl AgentBuilder {
     async fn prepare_configured_plugin(
         &self,
         id: &str,
-    ) -> Result<(Prepared, StartResources), String> {
+    ) -> Result<(Prepared, StartResources), ConsentError> {
         let plugin = self
             .config
             .plugin(id)
-            .ok_or_else(|| format!("plugin `{id}` is not configured"))?;
+            .ok_or_else(|| ConsentError::PluginNotConfigured {
+                plugin: id.to_owned(),
+            })?;
         let builder = host_builder(&self.config)?;
         let mut resources = StartResources::new(ToolRegistry::new(), builder);
         let prepared = match Self::prepare_plugin(
@@ -376,7 +390,10 @@ impl AgentBuilder {
             Err(error) => {
                 return match resources.cleanup().await {
                     Ok(()) => Err(error),
-                    Err(cleanup_error) => Err(format!("{error}; {cleanup_error}")),
+                    Err(cleanup) => Err(ConsentError::OperationAndCleanup {
+                        source: Box::new(error),
+                        cleanup: Box::new(cleanup),
+                    }),
                 };
             }
         };
@@ -387,10 +404,13 @@ impl AgentBuilder {
         id: &str,
         prepared: Prepared,
         resources: StartResources,
-    ) -> Result<(), String> {
+    ) -> Result<(), ConsentError> {
         let prepared_cleanup = tokio::task::spawn_blocking(move || drop(prepared))
             .await
-            .map_err(|error| format!("failed to clean up prepared plugin `{id}`: {error}"));
+            .map_err(|source| ConsentError::PreparedPluginCleanup {
+                plugin: id.to_owned(),
+                source,
+            });
         let resource_cleanup = resources.cleanup().await;
 
         prepared_cleanup?;
@@ -403,14 +423,14 @@ impl AgentBuilder {
     /// Refuses to start unless every configured plugin is admitted; the
     /// error carries one admission failure per line, remedy included.
     pub async fn start(self) -> Result<Agent, String> {
-        let consent = self.consent_store()?;
+        let consent = self.consent_store().map_err(|error| error.to_string())?;
         let Self {
             config,
             state_dir: _,
             tools,
             call_budgets,
         } = self;
-        let builder = host_builder(&config)?;
+        let builder = host_builder(&config).map_err(|error| error.to_string())?;
         let mut resources = StartResources::new(tools, builder);
         let plugins =
             match Self::initialize_plugins(&mut resources, &config, &consent, call_budgets).await {
@@ -508,7 +528,9 @@ impl AgentBuilder {
         plugin: &ConfiguredPlugin,
     ) -> Result<PluginLoad, String> {
         let path = config.component_path(plugin);
-        let prepared = Self::prepare_plugin(builder, config, id, plugin).await?;
+        let prepared = Self::prepare_plugin(builder, config, id, plugin)
+            .await
+            .map_err(|error| error.to_string())?;
         let record = consent.load(id);
         let acceptance = match prepared.accept_reviewed(record.as_ref()) {
             Ok(acceptance) => acceptance,
@@ -544,9 +566,16 @@ impl AgentBuilder {
                 plugin_admission_context(),
             )
             .await
-            .map_err(|error| Self::load_error(id, &path, error))?;
+            .map_err(|source| {
+                ConsentError::LoadPlugin {
+                    plugin: id.to_owned(),
+                    path: path.clone(),
+                    source: Box::new(source),
+                }
+                .to_string()
+            })?;
         if let Some(record) = refreshed_record {
-            consent.save(record)?;
+            consent.save(record).map_err(|error| error.to_string())?;
         }
         Ok(PluginLoad::Admitted(AdmittedPlugin {
             handle,
@@ -560,7 +589,7 @@ impl AgentBuilder {
         config: &Config,
         id: &str,
         plugin: &ConfiguredPlugin,
-    ) -> Result<Prepared, String> {
+    ) -> Result<Prepared, ConsentError> {
         let path = config.component_path(plugin);
         let bytes = Self::plugin_bytes(config, id, plugin)?;
         let settings = plugin.settings();
@@ -574,7 +603,11 @@ impl AgentBuilder {
                 },
             )
             .await
-            .map_err(|error| Self::load_error(id, &path, error))?;
+            .map_err(|source| ConsentError::LoadPlugin {
+                plugin: id.to_owned(),
+                path: path.clone(),
+                source: Box::new(source),
+            })?;
         let exported_interfaces = prepared.inspection().exported_interfaces();
         Self::validate_supported_role(id, &path, exported_interfaces)?;
         Self::validate_role_config(id, plugin, exported_interfaces)?;
@@ -607,42 +640,35 @@ impl AgentBuilder {
         }
     }
 
-    fn load_error(id: &str, path: &Path, error: impl std::fmt::Display) -> String {
-        format!(
-            "failed to load plugin `{id}` from `{}`: {error}",
-            path.display()
-        )
-    }
-
     fn validate_supported_role(
         id: &str,
         path: &Path,
         exported_interfaces: &[String],
-    ) -> Result<(), String> {
+    ) -> Result<(), ConsentError> {
         if !supported_roles(exported_interfaces).is_empty() {
             return Ok(());
         }
-        Err(format!(
-            "plugin `{id}` from `{}` does not implement a supported role; expected an export from the `{}` package, but the component exports {}",
-            path.display(),
-            role_package(<bindings::provider::Role as Role>::INTERFACE),
-            describe_exports(exported_interfaces),
-        ))
+        Err(ConsentError::UnsupportedRole {
+            plugin: id.to_owned(),
+            path: path.to_path_buf(),
+            role: role_package(<bindings::provider::Role as Role>::INTERFACE),
+            exported_interfaces: exported_interfaces.to_vec(),
+        })
     }
 
     fn validate_role_config(
         id: &str,
         plugin: &ConfiguredPlugin,
         exported_interfaces: &[String],
-    ) -> Result<(), String> {
+    ) -> Result<(), ConsentError> {
         for role in chap_wit::ROLES {
             if plugin.has_section(role.interface)
                 && !exports_interface_named(role.interface, exported_interfaces)
             {
-                return Err(format!(
-                    "plugin `{id}` configures a `{}` section, but its component does not export the {} interface",
-                    role.interface, role.interface,
-                ));
+                return Err(ConsentError::RoleConfigInvalid {
+                    plugin: id.to_owned(),
+                    role: role.interface.to_owned(),
+                });
             }
         }
         Ok(())
@@ -652,13 +678,12 @@ impl AgentBuilder {
         config: &Config,
         id: &str,
         plugin: &ConfiguredPlugin,
-    ) -> Result<Vec<u8>, String> {
+    ) -> Result<Vec<u8>, ConsentError> {
         let path = config.component_path(plugin);
-        fs::read(&path).map_err(|error| {
-            format!(
-                "failed to read plugin `{id}` from `{}`: {error}",
-                path.display()
-            )
+        fs::read(&path).map_err(|source| ConsentError::ReadPlugin {
+            plugin: id.to_owned(),
+            path,
+            source,
         })
     }
 
@@ -731,6 +756,7 @@ fn role_package(interface: &str) -> String {
     }
 }
 
+#[cfg(test)]
 fn describe_exports(interfaces: &[String]) -> String {
     if interfaces.is_empty() {
         return "no interfaces".to_owned();

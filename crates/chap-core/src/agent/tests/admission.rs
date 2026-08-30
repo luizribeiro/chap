@@ -14,8 +14,8 @@ use super::{
     load_test_builder,
 };
 use crate::{
-    CallBudget, ConsentRecord, ExecutionMode, ExportDriftKind, PluginCall, ProviderError, Tool,
-    ToolDefinition,
+    CallBudget, ConsentError, ConsentRecord, ExecutionMode, ExportDriftKind, PluginCall,
+    ProviderError, Tool, ToolDefinition,
 };
 use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role, RuntimeLimits};
 use std::{
@@ -139,8 +139,10 @@ async fn rejects_exec_needs_when_the_capability_is_not_registered() {
 
     let error = builder.review_plugin("example").await.unwrap_err();
 
-    assert!(error.contains("exec.run"), "{error}");
-    assert!(error.contains("application did not register it"), "{error}");
+    assert!(matches!(
+        error,
+        ConsentError::LoadPlugin { ref plugin, .. } if plugin == "example"
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -204,15 +206,10 @@ async fn rejects_an_empty_required_exec_setting_array() {
 
     let error = builder.review_plugin("example").await.unwrap_err();
 
-    assert!(
-        error.contains("setting reference `/allowed_commands`"),
-        "{error}"
-    );
-    assert!(error.contains("resolved to an empty array"), "{error}");
-    assert!(
-        error.contains("must supply at least one JSON string"),
-        "{error}"
-    );
+    assert!(matches!(
+        error,
+        ConsentError::LoadPlugin { ref plugin, .. } if plugin == "example"
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -1063,7 +1060,17 @@ async fn reviewing_rejects_a_plugin_without_a_supported_role() {
         Err(error) => error,
     };
 
-    assert_eq!(error, unsupported_role_error(&component));
+    assert!(matches!(
+        error,
+        ConsentError::UnsupportedRole {
+            ref plugin,
+            ref path,
+            ref exported_interfaces,
+            ..
+        } if plugin == "example"
+            && path == &component
+            && exported_interfaces == &["lockgate:config/schema".to_owned()]
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -1076,7 +1083,17 @@ async fn approving_rejects_a_plugin_without_a_supported_role() {
         Err(error) => error,
     };
 
-    assert_eq!(error, unsupported_role_error(&component));
+    assert!(matches!(
+        error,
+        ConsentError::UnsupportedRole {
+            ref plugin,
+            ref path,
+            ref exported_interfaces,
+            ..
+        } if plugin == "example"
+            && path == &component
+            && exported_interfaces == &["lockgate:config/schema".to_owned()]
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 

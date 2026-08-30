@@ -103,7 +103,10 @@ async fn run(cli: Cli) -> Result<(), String> {
         Some(Command::Grants(Grants {
             command: GrantsCommand::Approve { instance_id },
         })) => {
-            builder.approve_plugin(&instance_id).await?;
+            builder
+                .approve_plugin(&instance_id)
+                .await
+                .map_err(|error| error.to_string())?;
             println!(
                 "Approved `{instance_id}` for its exact resolved manifest. Concrete scopes remain configured in chap.json."
             );
@@ -111,7 +114,9 @@ async fn run(cli: Cli) -> Result<(), String> {
         Some(Command::Grants(Grants {
             command: GrantsCommand::Deny { instance_id },
         })) => {
-            builder.deny_plugin(&instance_id)?;
+            builder
+                .deny_plugin(&instance_id)
+                .map_err(|error| error.to_string())?;
             println!("Denied `{instance_id}`. It will require approval before its next admission.");
         }
     }
@@ -142,7 +147,12 @@ async fn grants_review(
         if index > 0 {
             output.push('\n');
         }
-        output.push_str(&render_grant_review(&builder.review_plugin(id).await?));
+        output.push_str(&render_grant_review(
+            &builder
+                .review_plugin(id)
+                .await
+                .map_err(|error| error.to_string())?,
+        ));
     }
     Ok(output)
 }
@@ -279,7 +289,9 @@ fn render_scopes(scopes: &[String]) -> String {
 fn plugin_list(builder: &AgentBuilder) -> Result<String, String> {
     let mut rows = Vec::new();
     for (id, component) in builder.plugins() {
-        let roles = builder.plugin_roles(id)?;
+        let roles = builder
+            .plugin_roles(id)
+            .map_err(|error| error.to_string())?;
         rows.push([
             id.to_owned(),
             if roles.is_empty() {
