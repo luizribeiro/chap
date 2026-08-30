@@ -32,7 +32,7 @@ impl AgentInner {
                 (
                     id.clone(),
                     PluginResult {
-                        channel: plugin.role_settings.context().channel(),
+                        channel: plugin.role_settings.context.channel(),
                         segments: self.request_context_segments(&plugin.handle).await,
                     },
                 )

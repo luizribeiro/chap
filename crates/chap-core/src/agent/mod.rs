@@ -319,6 +319,7 @@ pub(crate) struct AgentInner {
     plugins: BTreeMap<String, ActivePlugin>,
     sessions: SessionManager,
     tools: ToolRegistry,
+    /// Agent-level scheduling settings; see [`crate::config`] for the settings layers.
     tool_execution: ToolExecutionSettings,
     call_budgets: CallBudgets,
 }
@@ -549,7 +550,7 @@ impl AgentBuilder {
                 id,
                 Arc::clone(lockgate),
                 plugin.handle.clone(),
-                plugin.role_settings.tools(),
+                &plugin.role_settings.tools,
                 call_budgets,
             )
             .await?

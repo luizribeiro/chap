@@ -32,7 +32,7 @@ impl ContextSettings {
 #[cfg(test)]
 impl ConfiguredPlugin {
     pub(crate) fn context_channel(&self) -> ContextChannel {
-        self.role_settings().context().channel()
+        self.role_settings().context.channel()
     }
 }
 

@@ -9,18 +9,8 @@ use super::ConfiguredPlugin;
 /// Resolved role settings carried with one loaded plugin.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct PluginRoleSettings {
-    tools: ToolsSettings,
-    context: ContextSettings,
-}
-
-impl PluginRoleSettings {
-    pub(crate) fn tools(&self) -> &ToolsSettings {
-        &self.tools
-    }
-
-    pub(crate) fn context(&self) -> &ContextSettings {
-        &self.context
-    }
+    pub(crate) tools: ToolsSettings,
+    pub(crate) context: ContextSettings,
 }
 
 impl ConfiguredPlugin {
