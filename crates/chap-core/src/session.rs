@@ -128,6 +128,21 @@ pub enum SessionError {
     Context(Vec<ContextFailure>),
 }
 
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+#[non_exhaustive]
+pub enum SteerError {
+    #[error("steering input cannot be empty")]
+    EmptyInput,
+    #[error("session has no active run to steer")]
+    NoActiveRunToSteer,
+    #[error("session run is being interrupted")]
+    RunBeingInterrupted,
+    #[error("steering input `{id}` is not queued")]
+    NotQueued { id: SteeringId },
+    #[error("session has no active run to interrupt")]
+    NoActiveRunToInterrupt,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct SessionId(Uuid);
 
@@ -284,19 +299,19 @@ impl Session {
             .map_err(|error| RunError::Other(format!("session run task failed: {error}")))?
     }
 
-    pub fn steer(&self, input: impl Into<String>) -> Result<SteeringId, String> {
+    pub fn steer(&self, input: impl Into<String>) -> Result<SteeringId, SteerError> {
         let input = input.into();
         if input.trim().is_empty() {
-            return Err("steering input cannot be empty".to_owned());
+            return Err(SteerError::EmptyInput);
         }
         self.state.steer(input)
     }
 
-    pub fn discard_steering(&self, id: SteeringId) -> Result<(), String> {
+    pub fn discard_steering(&self, id: SteeringId) -> Result<(), SteerError> {
         self.state.discard_steering(id)
     }
 
-    pub fn interrupt(&self) -> Result<(), String> {
+    pub fn interrupt(&self) -> Result<(), SteerError> {
         self.state.interrupt()
     }
 }
@@ -429,10 +444,10 @@ impl SessionState {
         }
     }
 
-    pub(crate) fn interrupt(&self) -> Result<(), String> {
+    pub(crate) fn interrupt(&self) -> Result<(), SteerError> {
         let mut run = self.run.lock().expect("session run state lock poisoned");
         if !run.active {
-            return Err("session has no active run to interrupt".to_owned());
+            return Err(SteerError::NoActiveRunToInterrupt);
         }
         if !run.interrupted {
             run.interrupted = true;
@@ -444,13 +459,13 @@ impl SessionState {
         Ok(())
     }
 
-    pub(crate) fn steer(&self, input: String) -> Result<SteeringId, String> {
+    pub(crate) fn steer(&self, input: String) -> Result<SteeringId, SteerError> {
         let mut run = self.run.lock().expect("session run state lock poisoned");
         if !run.active {
-            return Err("session has no active run to steer".to_owned());
+            return Err(SteerError::NoActiveRunToSteer);
         }
         if run.interrupted {
-            return Err("session run is being interrupted".to_owned());
+            return Err(SteerError::RunBeingInterrupted);
         }
         let id = SteeringId(Uuid::now_v7());
         run.steering.push_back(Steering {
@@ -461,13 +476,13 @@ impl SessionState {
         Ok(id)
     }
 
-    fn discard_steering(&self, id: SteeringId) -> Result<(), String> {
+    fn discard_steering(&self, id: SteeringId) -> Result<(), SteerError> {
         let mut run = self.run.lock().expect("session run state lock poisoned");
         let index = run
             .steering
             .iter()
             .position(|steering| steering.id == id)
-            .ok_or_else(|| format!("steering input `{id}` is not queued"))?;
+            .ok_or(SteerError::NotQueued { id })?;
         let steering = run
             .steering
             .remove(index)
@@ -560,6 +575,7 @@ mod tests {
         fn assert_error(_: &dyn std::error::Error) {}
 
         assert_error(&SessionError::ProviderRequired);
+        assert_error(&SteerError::EmptyInput);
     }
 
     #[derive(Default)]
@@ -638,16 +654,18 @@ mod tests {
 
         assert_eq!(
             session.steer("too early"),
-            Err("session has no active run to steer".to_owned())
+            Err(SteerError::NoActiveRunToSteer)
         );
-        assert_eq!(
-            session.interrupt(),
-            Err("session has no active run to interrupt".to_owned())
-        );
+        assert_eq!(session.interrupt(), Err(SteerError::NoActiveRunToInterrupt));
+        assert_eq!(session.steer("  \n"), Err(SteerError::EmptyInput));
 
         let run = state.start_run();
         let discarded = session.steer("another detail").unwrap();
         session.discard_steering(discarded).unwrap();
+        assert_eq!(
+            session.discard_steering(discarded),
+            Err(SteerError::NotQueued { id: discarded })
+        );
         let abandoned = session.steer("never applied").unwrap();
         drop(run);
 
@@ -676,6 +694,20 @@ mod tests {
                     input: "never applied".to_owned(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn steering_rejects_a_run_being_interrupted() {
+        let state = session_state(&SessionManager::new());
+        let session = Session::new(Arc::clone(&state), Arc::new(EchoExecutor));
+        let _run = state.start_run();
+
+        session.interrupt().unwrap();
+
+        assert_eq!(
+            session.steer("too late"),
+            Err(SteerError::RunBeingInterrupted)
         );
     }
 
