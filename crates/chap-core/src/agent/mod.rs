@@ -291,13 +291,13 @@ impl Drop for StartResources {
 }
 
 #[derive(Clone)]
-struct LoadedPlugin {
+struct ActivePlugin {
     handle: PluginHandle,
     roles: BTreeSet<&'static str>,
     role_settings: PluginRoleSettings,
 }
 
-impl LoadedPlugin {
+impl ActivePlugin {
     fn has_role(&self, role: &chap_wit::Role) -> bool {
         self.roles.contains(role.interface)
     }
@@ -316,7 +316,7 @@ pub struct Agent {
 
 pub(crate) struct AgentInner {
     lockgate: Arc<InnerHost>,
-    plugins: BTreeMap<String, LoadedPlugin>,
+    plugins: BTreeMap<String, ActivePlugin>,
     sessions: SessionManager,
     tools: ToolRegistry,
     tool_execution: ToolExecutionSettings,
@@ -531,7 +531,7 @@ impl AgentBuilder {
         config: &Config,
         consent: &ConsentStore,
         call_budgets: CallBudgets,
-    ) -> Result<BTreeMap<String, LoadedPlugin>, StartError> {
+    ) -> Result<BTreeMap<String, ActivePlugin>, StartError> {
         let plugins = Self::load_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
             config,
@@ -569,7 +569,7 @@ impl AgentBuilder {
         builder: &mut HostBuilder<()>,
         config: &Config,
         consent: &ConsentStore,
-    ) -> Result<BTreeMap<String, LoadedPlugin>, StartError> {
+    ) -> Result<BTreeMap<String, ActivePlugin>, StartError> {
         let mut plugins = BTreeMap::new();
         let mut refusals = Vec::new();
 
@@ -659,7 +659,7 @@ impl AgentBuilder {
         if let Some(record) = refreshed_record {
             consent.save(record).map_err(StartError::Consent)?;
         }
-        Ok(PluginLoad::Admitted(LoadedPlugin {
+        Ok(PluginLoad::Admitted(ActivePlugin {
             handle,
             roles,
             role_settings: plugin.role_settings(),
@@ -864,7 +864,7 @@ impl Agent {
 
 #[allow(clippy::large_enum_variant)]
 enum PluginLoad {
-    Admitted(LoadedPlugin),
+    Admitted(ActivePlugin),
     Refused(PluginRefusal),
 }
 
