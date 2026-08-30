@@ -297,12 +297,6 @@ struct LoadedPlugin {
     role_settings: PluginRoleSettings,
 }
 
-struct AdmittedPlugin {
-    handle: PluginHandle,
-    exported_interfaces: Vec<String>,
-    role_settings: PluginRoleSettings,
-}
-
 impl LoadedPlugin {
     fn has_role(&self, role: &chap_wit::Role) -> bool {
         self.roles.contains(role.interface)
@@ -538,7 +532,7 @@ impl AgentBuilder {
         consent: &ConsentStore,
         call_budgets: CallBudgets,
     ) -> Result<BTreeMap<String, LoadedPlugin>, StartError> {
-        let admitted = Self::load_plugins(
+        let plugins = Self::load_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
             config,
             consent,
@@ -547,7 +541,6 @@ impl AgentBuilder {
         let builder = resources.builder.take().expect("uninitialized host");
         resources.host = Some(Arc::new(builder.finish()));
         let lockgate = resources.host.as_ref().expect("initialized host");
-        let plugins = Self::classify_plugins(admitted);
         for (id, plugin) in &plugins {
             if !plugin.has_role(&chap_wit::TOOLS) {
                 continue;
@@ -576,7 +569,7 @@ impl AgentBuilder {
         builder: &mut HostBuilder<()>,
         config: &Config,
         consent: &ConsentStore,
-    ) -> Result<BTreeMap<String, AdmittedPlugin>, StartError> {
+    ) -> Result<BTreeMap<String, LoadedPlugin>, StartError> {
         let mut plugins = BTreeMap::new();
         let mut refusals = Vec::new();
 
@@ -637,7 +630,13 @@ impl AgentBuilder {
                     approved_at: prior.approved_at.clone(),
                 })
         });
-        let exported_interfaces = prepared.inspection().exported_interfaces().to_vec();
+        let roles: BTreeSet<&'static str> = chap_wit::ROLES
+            .iter()
+            .filter(|role| {
+                exports_interface_named(role.interface, prepared.inspection().exported_interfaces())
+            })
+            .map(|role| role.interface)
+            .collect();
         let handle = builder
             .admit(
                 prepared,
@@ -660,9 +659,9 @@ impl AgentBuilder {
         if let Some(record) = refreshed_record {
             consent.save(record).map_err(StartError::Consent)?;
         }
-        Ok(PluginLoad::Admitted(AdmittedPlugin {
+        Ok(PluginLoad::Admitted(LoadedPlugin {
             handle,
-            exported_interfaces,
+            roles,
             role_settings: plugin.role_settings(),
         }))
     }
@@ -788,33 +787,6 @@ impl AgentBuilder {
             source,
         })
     }
-
-    fn classify_plugins(
-        admitted: BTreeMap<String, AdmittedPlugin>,
-    ) -> BTreeMap<String, LoadedPlugin> {
-        admitted
-            .into_iter()
-            .map(|(id, admitted)| {
-                let roles = chap_wit::ROLES
-                    .iter()
-                    .filter(|role| {
-                        exports_interface_named(role.interface, &admitted.exported_interfaces)
-                    })
-                    .map(|role| role.interface)
-                    .collect();
-                let handle = admitted.handle;
-                let role_settings = admitted.role_settings;
-                (
-                    id,
-                    LoadedPlugin {
-                        handle,
-                        roles,
-                        role_settings,
-                    },
-                )
-            })
-            .collect()
-    }
 }
 
 fn plugin_admission_context() -> InvocationCtx<()> {
@@ -892,7 +864,7 @@ impl Agent {
 
 #[allow(clippy::large_enum_variant)]
 enum PluginLoad {
-    Admitted(AdmittedPlugin),
+    Admitted(LoadedPlugin),
     Refused(PluginRefusal),
 }
 
