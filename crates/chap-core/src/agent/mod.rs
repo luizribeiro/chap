@@ -3,7 +3,7 @@ use crate::config::{
 };
 use crate::consent::{ConsentError, ConsentStore, PluginConsentReview};
 use crate::session::{
-    RunError, Session, SessionExecutor, SessionFuture, SessionManager, SessionOptions,
+    RunError, Session, SessionError, SessionExecutor, SessionFuture, SessionManager, SessionOptions,
 };
 use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition};
@@ -848,19 +848,22 @@ impl Agent {
         self.inner.tools.definitions()
     }
 
-    pub async fn session(&self, options: SessionOptions) -> Result<Session, String> {
+    pub async fn session(&self, options: SessionOptions) -> Result<Session, SessionError> {
         if !self
             .inner
             .plugins
             .get(&options.provider)
             .is_some_and(|plugin| plugin.has_role(&chap_wit::PROVIDER))
         {
-            return Err(format!(
-                "provider plugin `{}` is not configured",
-                options.provider
-            ));
+            return Err(SessionError::ProviderNotConfigured {
+                provider: options.provider,
+            });
         }
-        let assembled_context = self.inner.assemble_context().await?;
+        let assembled_context = self
+            .inner
+            .assemble_context()
+            .await
+            .map_err(SessionError::Context)?;
         let state = self.inner.sessions.create(options, assembled_context)?;
         Ok(Session::new(state, self.inner.clone()))
     }

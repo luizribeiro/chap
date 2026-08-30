@@ -1,5 +1,8 @@
 use super::{AgentInner, PluginCall, bindings};
-use crate::{config::roles::ContextChannel, session::AssembledContext};
+use crate::{
+    config::roles::ContextChannel,
+    session::{AssembledContext, ContextFailure},
+};
 use bindings::context as context_bindings;
 use futures::future::join_all;
 use lockgate::CallError;
@@ -20,7 +23,7 @@ struct PluginResult {
 }
 
 impl AgentInner {
-    pub(super) async fn assemble_context(&self) -> Result<AssembledContext, String> {
+    pub(super) async fn assemble_context(&self) -> Result<AssembledContext, Vec<ContextFailure>> {
         let calls = self
             .plugins
             .iter()
@@ -56,7 +59,7 @@ impl AgentInner {
     }
 }
 
-fn compose_context(results: PluginResults) -> Result<AssembledContext, String> {
+fn compose_context(results: PluginResults) -> Result<AssembledContext, Vec<ContextFailure>> {
     let mut system = Vec::new();
     let mut context = Vec::new();
     let mut failures = Vec::new();
@@ -65,7 +68,7 @@ fn compose_context(results: PluginResults) -> Result<AssembledContext, String> {
         let segments = match result.segments {
             Ok(segments) => segments,
             Err(error) => {
-                failures.push(format!("context plugin `{plugin}` failed: {error}"));
+                failures.push(ContextFailure { plugin, error });
                 continue;
             }
         };
@@ -87,7 +90,7 @@ fn compose_context(results: PluginResults) -> Result<AssembledContext, String> {
             context: render_channel(context),
         })
     } else {
-        Err(failures.join("\n"))
+        Err(failures)
     }
 }
 
@@ -237,7 +240,10 @@ mod tests {
 
         assert_eq!(
             assembly,
-            Err("context plugin `broken-context` failed: unavailable".to_owned())
+            Err(vec![ContextFailure {
+                plugin: "broken-context".to_owned(),
+                error: "unavailable".to_owned(),
+            }])
         );
     }
 
@@ -256,10 +262,16 @@ mod tests {
 
         assert_eq!(
             assembly,
-            Err(
-                "context plugin `alpha` failed: unavailable\ncontext plugin `zeta` failed: timed out"
-                    .to_owned()
-            )
+            Err(vec![
+                ContextFailure {
+                    plugin: "alpha".to_owned(),
+                    error: "unavailable".to_owned(),
+                },
+                ContextFailure {
+                    plugin: "zeta".to_owned(),
+                    error: "timed out".to_owned(),
+                },
+            ])
         );
     }
 
@@ -278,7 +290,10 @@ mod tests {
 
         assert_eq!(
             assembly,
-            Err("context plugin `broken` failed: unavailable".to_owned())
+            Err(vec![ContextFailure {
+                plugin: "broken".to_owned(),
+                error: "unavailable".to_owned(),
+            }])
         );
     }
 

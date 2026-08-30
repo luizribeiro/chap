@@ -1,5 +1,5 @@
 use super::super::{Agent, CallBudgets, PluginCall};
-use crate::{SessionOptions, session::Message};
+use crate::{SessionError, SessionOptions, session::Message};
 use serde_json::{Map, Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -90,11 +90,28 @@ async fn hanging_real_context_plugin_fails_session_creation_at_the_deadline() {
     .err()
     .expect("session creation should fail while a context plugin hangs");
 
-    assert!(
-        error.contains("context plugin `hanging-context`"),
-        "{error}"
-    );
-    assert!(error.contains("timed out after 10s"), "{error}");
+    let SessionError::Context(failures) = error else {
+        panic!("expected structured context failures")
+    };
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].plugin, "hanging-context");
+    assert_eq!(failures[0].error, "timed out after 10s");
+}
+
+#[tokio::test]
+async fn session_creation_reports_an_unconfigured_provider() {
+    let (agent, _directory) = start_agent([]).await;
+
+    let error = agent
+        .session(SessionOptions::new("missing-provider"))
+        .await
+        .err()
+        .expect("an unconfigured provider should fail session creation");
+
+    assert!(matches!(
+        error,
+        SessionError::ProviderNotConfigured { provider } if provider == "missing-provider"
+    ));
 }
 
 async fn start_agent(

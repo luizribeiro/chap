@@ -6,6 +6,7 @@ use std::{
     pin::Pin,
     sync::{Arc, Mutex},
 };
+use thiserror::Error;
 use tokio::sync::{Mutex as AsyncMutex, RwLock, broadcast, watch};
 use uuid::Uuid;
 
@@ -108,6 +109,24 @@ impl fmt::Display for RunError {
 }
 
 impl std::error::Error for RunError {}
+
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+#[error("context plugin `{plugin}` failed: {error}")]
+pub struct ContextFailure {
+    pub plugin: String,
+    pub error: String,
+}
+
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum SessionError {
+    #[error("a session provider is required")]
+    ProviderRequired,
+    #[error("provider plugin `{provider}` is not configured")]
+    ProviderNotConfigured { provider: String },
+    #[error("{} context plugin(s) failed", .0.len())]
+    Context(Vec<ContextFailure>),
+}
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct SessionId(Uuid);
@@ -304,9 +323,9 @@ impl SessionManager {
         &self,
         options: SessionOptions,
         assembled_context: AssembledContext,
-    ) -> Result<Arc<SessionState>, String> {
+    ) -> Result<Arc<SessionState>, SessionError> {
         if options.provider.trim().is_empty() {
-            return Err("a session provider is required".to_owned());
+            return Err(SessionError::ProviderRequired);
         }
         let id = SessionId(Uuid::now_v7());
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
@@ -536,6 +555,13 @@ mod tests {
         assert_error(&RunError::Other("run failed".to_owned()));
     }
 
+    #[test]
+    fn session_error_implements_std_error() {
+        fn assert_error(_: &dyn std::error::Error) {}
+
+        assert_error(&SessionError::ProviderRequired);
+    }
+
     #[derive(Default)]
     struct ControlledExecutor {
         started: Notify,
@@ -575,6 +601,16 @@ mod tests {
         let session = Session::new(state, Arc::new(EchoExecutor));
 
         assert_eq!(session.send("hello").await.unwrap(), "hello");
+    }
+
+    #[test]
+    fn sessions_require_a_provider() {
+        let error = SessionManager::new()
+            .create(SessionOptions::new(""), AssembledContext::default())
+            .err()
+            .expect("an empty provider should fail");
+
+        assert!(matches!(error, SessionError::ProviderRequired));
     }
 
     #[tokio::test]

@@ -2,7 +2,7 @@ mod tui;
 
 use chap_core::{
     AgentBuilder, ConsentError, DriftChange, DriftKind, ExportDrift, ExportDriftKind, LoadError,
-    PluginConsentReview, PluginRefusal, PluginRefusalReason, StartError,
+    PluginConsentReview, PluginRefusal, PluginRefusalReason, SessionError, StartError,
 };
 use clap::{Args, Parser, Subcommand};
 use std::{
@@ -142,6 +142,17 @@ fn render_start_error(error: StartError) -> String {
     match error {
         StartError::Refused(refusals) => render_plugin_refusals(&refusals),
         StartError::Internal(message) => message,
+        error => error.to_string(),
+    }
+}
+
+fn render_session_error(error: SessionError) -> String {
+    match error {
+        SessionError::Context(failures) => failures
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
         error => error.to_string(),
     }
 }
@@ -452,6 +463,7 @@ fn push_row(output: &mut String, row: [&str; 3], widths: [usize; 3]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chap_core::ContextFailure;
     use chap_core::{
         ConsentManifest, ConsentRecord, DriftReport, GrantReview, PluginConsentReview,
     };
@@ -568,6 +580,31 @@ mod tests {
         assert_eq!(
             render_load_error(LoadError::ExecUnsupported),
             "agent.exec is configured, but this build lacks exec support; rebuild with the `exec` feature"
+        );
+    }
+
+    #[test]
+    fn renders_context_failures_one_per_line() {
+        let error = SessionError::Context(vec![
+            ContextFailure {
+                plugin: "alpha".to_owned(),
+                error: "unavailable".to_owned(),
+            },
+            ContextFailure {
+                plugin: "bravo".to_owned(),
+                error: "timed out after 10s".to_owned(),
+            },
+        ]);
+
+        assert_eq!(
+            render_session_error(error),
+            "context plugin `alpha` failed: unavailable\ncontext plugin `bravo` failed: timed out after 10s"
+        );
+        assert_eq!(
+            render_session_error(SessionError::ProviderNotConfigured {
+                provider: "missing".to_owned(),
+            }),
+            "provider plugin `missing` is not configured"
         );
     }
 
