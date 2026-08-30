@@ -6,7 +6,7 @@ use crate::session::{
     RunError, Session, SessionError, SessionExecutor, SessionFuture, SessionManager, SessionOptions,
 };
 use crate::tool::ToolRegistry;
-use crate::{Tool, ToolDefinition};
+use crate::{Tool, ToolDefinition, ToolRegistrationError};
 use lockgate::{
     ConsentRecord, ConsentRequired, DriftReport, Host, HostBuilder, InvocationCtx, PluginConfig,
     PluginHandle, Prepared, Role, RuntimeLimits,
@@ -362,7 +362,7 @@ impl AgentBuilder {
         Ok(supported_roles(inspection.exported_interfaces()))
     }
 
-    pub fn tool<T>(mut self, tool: T) -> Result<Self, String>
+    pub fn tool<T>(mut self, tool: T) -> Result<Self, ToolRegistrationError>
     where
         T: Tool + 'static,
     {
@@ -542,7 +542,7 @@ impl AgentBuilder {
                     .as_mut()
                     .expect("initialized tool registry")
                     .register(tool)
-                    .map_err(StartError::Internal)?;
+                    .map_err(|error| StartError::Internal(error.to_string()))?;
             }
         }
         Ok(plugins)

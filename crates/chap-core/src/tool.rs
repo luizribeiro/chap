@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
 use serde::Deserialize;
+use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -16,6 +17,21 @@ pub struct ToolDefinition {
     pub description: String,
     /// A JSON Schema describing the tool's arguments.
     pub parameters: String,
+}
+
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum ToolRegistrationError {
+    #[error("tool name cannot be empty")]
+    EmptyName,
+    #[error("tool `{name}` has invalid JSON Schema: {source}")]
+    InvalidParameters {
+        name: String,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("tool `{name}` is already registered")]
+    DuplicateName { name: String },
 }
 
 pub trait Tool: Send + Sync {
@@ -42,14 +58,16 @@ impl ToolRegistry {
         }
     }
 
-    pub(crate) fn register<T>(&mut self, tool: T) -> Result<(), String>
+    pub(crate) fn register<T>(&mut self, tool: T) -> Result<(), ToolRegistrationError>
     where
         T: Tool + 'static,
     {
         let definition = tool.definition();
         validate(&definition)?;
         if self.tools.contains_key(&definition.name) {
-            return Err(format!("tool `{}` is already registered", definition.name));
+            return Err(ToolRegistrationError::DuplicateName {
+                name: definition.name,
+            });
         }
         self.tools.insert(definition.name, Arc::new(tool));
         Ok(())
@@ -74,15 +92,15 @@ impl ToolRegistry {
     }
 }
 
-fn validate(definition: &ToolDefinition) -> Result<(), String> {
+fn validate(definition: &ToolDefinition) -> Result<(), ToolRegistrationError> {
     if definition.name.trim().is_empty() {
-        return Err("tool name cannot be empty".to_owned());
+        return Err(ToolRegistrationError::EmptyName);
     }
-    serde_json::from_str::<serde_json::Value>(&definition.parameters).map_err(|error| {
-        format!(
-            "tool `{}` has invalid JSON Schema: {error}",
-            definition.name
-        )
+    serde_json::from_str::<serde_json::Value>(&definition.parameters).map_err(|source| {
+        ToolRegistrationError::InvalidParameters {
+            name: definition.name.clone(),
+            source,
+        }
     })?;
     Ok(())
 }
@@ -165,7 +183,23 @@ mod tests {
             })
             .unwrap_err();
 
-        assert_eq!(error, "tool `echo` is already registered");
+        assert!(matches!(
+            error,
+            ToolRegistrationError::DuplicateName { name } if name == "echo"
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_tool_names() {
+        let mut registry = ToolRegistry::new();
+        let error = registry
+            .register(TestTool {
+                name: " ",
+                parameters: r#"{"type":"object"}"#,
+            })
+            .unwrap_err();
+
+        assert!(matches!(error, ToolRegistrationError::EmptyName));
     }
 
     #[test]
@@ -178,7 +212,10 @@ mod tests {
             })
             .unwrap_err();
 
-        assert!(error.contains("tool `broken` has invalid JSON Schema"));
+        assert!(matches!(
+            error,
+            ToolRegistrationError::InvalidParameters { name, .. } if name == "broken"
+        ));
     }
 
     #[test]
