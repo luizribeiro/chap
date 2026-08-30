@@ -8,8 +8,8 @@ use crate::session::{
 use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition};
 use lockgate::{
-    ConsentRecord, ConsentRequired, ExportDriftKind, Host, HostBuilder, InvocationCtx,
-    PluginConfig, PluginHandle, Prepared, Role, RuntimeLimits,
+    ConsentRecord, ConsentRequired, DriftReport, Host, HostBuilder, InvocationCtx, PluginConfig,
+    PluginHandle, Prepared, Role, RuntimeLimits,
 };
 use plugin_tool::PluginTool;
 use provider::PluginBackend;
@@ -20,6 +20,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use thiserror::Error;
 use turn::run_agent_loop;
 
 mod bindings;
@@ -86,6 +87,51 @@ impl CallBudget {
     pub fn invocation_context(self) -> InvocationCtx<()> {
         InvocationCtx::bounded(self.fuel, self.deadline)
     }
+}
+
+#[derive(Debug, Error)]
+#[error(
+    "plugin `{instance_id}` from `{}` was refused admission: {reason}",
+    source_path.display()
+)]
+pub struct PluginRefusal {
+    pub instance_id: String,
+    pub source_path: PathBuf,
+    #[source]
+    pub reason: PluginRefusalReason,
+}
+
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum PluginRefusalReason {
+    #[error("requires approval before admission")]
+    ApprovalRequired,
+    #[error("requires renewed approval before admission")]
+    RenewedApprovalRequired { drift: DriftReport },
+    #[error("does not implement a supported role from `{role}`")]
+    UnsupportedRole {
+        role: String,
+        exported_interfaces: Vec<String>,
+    },
+    #[error(
+        "configures a `{role}` section, but its component does not export the {role} interface"
+    )]
+    RoleConfigInvalid { role: String },
+    #[error("could not be loaded: {source}")]
+    ComponentLoad {
+        #[source]
+        source: Box<ConsentError>,
+    },
+}
+
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum StartError {
+    #[error("{} plugin(s) were refused admission", .0.len())]
+    Refused(Vec<PluginRefusal>),
+    /// Deliberate temporary catch-all for start failures not yet typed in issue #9.
+    #[error("{0}")]
+    Internal(String),
 }
 
 /// Production plugin-call budgets, keyed by exported WIT function.
@@ -420,17 +466,19 @@ impl AgentBuilder {
 
     /// Starts the agent, admitting every configured plugin.
     ///
-    /// Refuses to start unless every configured plugin is admitted; the
-    /// error carries one admission failure per line, remedy included.
-    pub async fn start(self) -> Result<Agent, String> {
-        let consent = self.consent_store().map_err(|error| error.to_string())?;
+    /// Refuses to start unless every configured plugin is admitted.
+    pub async fn start(self) -> Result<Agent, StartError> {
+        let consent = self
+            .consent_store()
+            .map_err(|error| StartError::Internal(error.to_string()))?;
         let Self {
             config,
             state_dir: _,
             tools,
             call_budgets,
         } = self;
-        let builder = host_builder(&config).map_err(|error| error.to_string())?;
+        let builder =
+            host_builder(&config).map_err(|error| StartError::Internal(error.to_string()))?;
         let mut resources = StartResources::new(tools, builder);
         let plugins =
             match Self::initialize_plugins(&mut resources, &config, &consent, call_budgets).await {
@@ -438,7 +486,9 @@ impl AgentBuilder {
                 Err(error) => {
                     return match resources.cleanup().await {
                         Ok(()) => Err(error),
-                        Err(cleanup_error) => Err(format!("{error}; {cleanup_error}")),
+                        Err(cleanup_error) => {
+                            Err(StartError::Internal(format!("{error}; {cleanup_error}")))
+                        }
                     };
                 }
             };
@@ -462,7 +512,7 @@ impl AgentBuilder {
         config: &Config,
         consent: &ConsentStore,
         call_budgets: CallBudgets,
-    ) -> Result<BTreeMap<String, LoadedPlugin>, String> {
+    ) -> Result<BTreeMap<String, LoadedPlugin>, StartError> {
         let admitted = Self::load_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
             config,
@@ -484,13 +534,15 @@ impl AgentBuilder {
                 plugin.role_settings.tools(),
                 call_budgets,
             )
-            .await?
+            .await
+            .map_err(StartError::Internal)?
             {
                 resources
                     .tools
                     .as_mut()
                     .expect("initialized tool registry")
-                    .register(tool)?;
+                    .register(tool)
+                    .map_err(StartError::Internal)?;
             }
         }
         Ok(plugins)
@@ -500,7 +552,7 @@ impl AgentBuilder {
         builder: &mut HostBuilder<()>,
         config: &Config,
         consent: &ConsentStore,
-    ) -> Result<BTreeMap<String, AdmittedPlugin>, String> {
+    ) -> Result<BTreeMap<String, AdmittedPlugin>, StartError> {
         let mut plugins = BTreeMap::new();
         let mut refusals = Vec::new();
 
@@ -516,7 +568,7 @@ impl AgentBuilder {
         if refusals.is_empty() {
             Ok(plugins)
         } else {
-            Err(refusals.join("\n"))
+            Err(StartError::Refused(refusals))
         }
     }
 
@@ -526,22 +578,27 @@ impl AgentBuilder {
         consent: &ConsentStore,
         id: &str,
         plugin: &ConfiguredPlugin,
-    ) -> Result<PluginLoad, String> {
+    ) -> Result<PluginLoad, StartError> {
         let path = config.component_path(plugin);
-        let prepared = Self::prepare_plugin(builder, config, id, plugin)
-            .await
-            .map_err(|error| error.to_string())?;
+        let prepared = match Self::prepare_plugin(builder, config, id, plugin).await {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return Ok(PluginLoad::Refused(Self::plugin_refusal(id, &path, error)?));
+            }
+        };
         let record = consent.load(id);
         let acceptance = match prepared.accept_reviewed(record.as_ref()) {
             Ok(acceptance) => acceptance,
             Err(required) => {
-                let error = Self::consent_error(id, &path, required);
+                let refusal = Self::consent_refusal(id, &path, required);
                 tokio::task::spawn_blocking(move || drop(prepared))
                     .await
                     .map_err(|error| {
-                        format!("failed to clean up refused plugin `{id}`: {error}")
+                        StartError::Internal(format!(
+                            "failed to clean up refused plugin `{id}`: {error}"
+                        ))
                     })?;
-                return Ok(PluginLoad::Refused(error));
+                return Ok(PluginLoad::Refused(refusal));
             }
         };
         let refreshed_record = record.as_ref().and_then(|prior| {
@@ -566,16 +623,21 @@ impl AgentBuilder {
                 plugin_admission_context(),
             )
             .await
-            .map_err(|source| {
-                ConsentError::LoadPlugin {
-                    plugin: id.to_owned(),
-                    path: path.clone(),
-                    source: Box::new(source),
-                }
-                .to_string()
-            })?;
+            .map_err(|source| ConsentError::LoadPlugin {
+                plugin: id.to_owned(),
+                path: path.clone(),
+                source: Box::new(source),
+            });
+        let handle = match handle {
+            Ok(handle) => handle,
+            Err(error) => {
+                return Ok(PluginLoad::Refused(Self::plugin_refusal(id, &path, error)?));
+            }
+        };
         if let Some(record) = refreshed_record {
-            consent.save(record).map_err(|error| error.to_string())?;
+            consent
+                .save(record)
+                .map_err(|error| StartError::Internal(error.to_string()))?;
         }
         Ok(PluginLoad::Admitted(AdmittedPlugin {
             handle,
@@ -614,30 +676,49 @@ impl AgentBuilder {
         Ok(prepared)
     }
 
-    fn consent_error(id: &str, path: &Path, required: ConsentRequired) -> String {
-        match required {
-            ConsentRequired::FirstRun { .. } => format!(
-                "plugin `{id}` from `{}` requires approval before admission; run `chap grants review {id}` and then `chap grants approve {id}`",
-                path.display()
-            ),
+    fn consent_refusal(id: &str, path: &Path, required: ConsentRequired) -> PluginRefusal {
+        let reason = match required {
+            ConsentRequired::FirstRun { .. } => PluginRefusalReason::ApprovalRequired,
             ConsentRequired::Drift { drift, .. } => {
-                let change = if drift
-                    .export_changes
-                    .iter()
-                    .any(|change| change.kind == ExportDriftKind::Gained)
-                {
-                    "now exports interfaces it was not approved for"
-                } else if drift.blocks_admission {
-                    "expanded its permission manifest"
-                } else {
-                    "reported a changed permission manifest"
-                };
-                format!(
-                    "plugin `{id}` from `{}` {change} and requires renewed approval before admission; run `chap grants review {id}` and then `chap grants approve {id}`",
-                    path.display()
-                )
+                PluginRefusalReason::RenewedApprovalRequired { drift }
             }
+        };
+        PluginRefusal {
+            instance_id: id.to_owned(),
+            source_path: path.to_path_buf(),
+            reason,
         }
+    }
+
+    fn plugin_refusal(
+        id: &str,
+        path: &Path,
+        error: ConsentError,
+    ) -> Result<PluginRefusal, StartError> {
+        let reason = match error {
+            source @ (ConsentError::ReadPlugin { .. } | ConsentError::LoadPlugin { .. }) => {
+                PluginRefusalReason::ComponentLoad {
+                    source: Box::new(source),
+                }
+            }
+            ConsentError::UnsupportedRole {
+                role,
+                exported_interfaces,
+                ..
+            } => PluginRefusalReason::UnsupportedRole {
+                role,
+                exported_interfaces,
+            },
+            ConsentError::RoleConfigInvalid { role, .. } => {
+                PluginRefusalReason::RoleConfigInvalid { role }
+            }
+            error => return Err(StartError::Internal(error.to_string())),
+        };
+        Ok(PluginRefusal {
+            instance_id: id.to_owned(),
+            source_path: path.to_path_buf(),
+            reason,
+        })
     }
 
     fn validate_supported_role(
@@ -756,18 +837,6 @@ fn role_package(interface: &str) -> String {
     }
 }
 
-#[cfg(test)]
-fn describe_exports(interfaces: &[String]) -> String {
-    if interfaces.is_empty() {
-        return "no interfaces".to_owned();
-    }
-    interfaces
-        .iter()
-        .map(|interface| format!("`{interface}`"))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
@@ -800,7 +869,7 @@ impl Agent {
 #[allow(clippy::large_enum_variant)]
 enum PluginLoad {
     Admitted(AdmittedPlugin),
-    Refused(String),
+    Refused(PluginRefusal),
 }
 
 impl AgentInner {

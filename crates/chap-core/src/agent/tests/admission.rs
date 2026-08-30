@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     CallBudget, ConsentError, ConsentRecord, ExecutionMode, ExportDriftKind, PluginCall,
-    ProviderError, Tool, ToolDefinition,
+    PluginRefusal, PluginRefusalReason, ProviderError, StartError, Tool, ToolDefinition,
 };
 use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role, RuntimeLimits};
 use std::{
@@ -26,6 +26,19 @@ use std::{
     time::Duration,
 };
 use wit_parser::{Resolve, WorldItem, WorldKey};
+
+fn refused_plugins(error: StartError) -> Vec<PluginRefusal> {
+    let StartError::Refused(refusals) = error else {
+        panic!("expected structured plugin refusals")
+    };
+    refusals
+}
+
+fn only_refusal(error: StartError) -> PluginRefusal {
+    let mut refusals = refused_plugins(error);
+    assert_eq!(refusals.len(), 1);
+    refusals.pop().unwrap()
+}
 
 #[test]
 fn plugin_admission_context_has_expected_deadline() {
@@ -190,11 +203,12 @@ async fn expanded_exec_settings_drift_and_block_readmission() {
     }));
 
     let error = builder.start().await.err().unwrap();
-    assert!(
-        error.contains("expanded its permission manifest"),
-        "{error}"
-    );
-    assert!(error.contains("chap grants review example"), "{error}");
+    let refusal = only_refusal(error);
+    assert_eq!(refusal.instance_id, "example");
+    let PluginRefusalReason::RenewedApprovalRequired { drift } = refusal.reason else {
+        panic!("expected renewed approval")
+    };
+    assert!(drift.blocks_admission);
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -457,20 +471,18 @@ async fn start_refuses_and_names_every_unapproved_plugin() {
     builder.approve_plugin("approved").await.unwrap();
     let error = builder.start().await.err().unwrap();
 
-    let lines = error.lines().collect::<Vec<_>>();
-    assert_eq!(lines.len(), 2, "{error}");
-    assert!(
-        lines[0].contains("plugin `alpha-unapproved`")
-            && lines[0].contains("requires approval")
-            && lines[0].contains("chap grants review alpha-unapproved"),
-        "{error}"
-    );
-    assert!(
-        lines[1].contains("plugin `bravo-unapproved`")
-            && lines[1].contains("chap grants review bravo-unapproved"),
-        "{error}"
-    );
-    assert!(!error.contains("plugin `approved`"), "{error}");
+    let refusals = refused_plugins(error);
+    assert_eq!(refusals.len(), 2);
+    assert_eq!(refusals[0].instance_id, "alpha-unapproved");
+    assert!(matches!(
+        refusals[0].reason,
+        PluginRefusalReason::ApprovalRequired
+    ));
+    assert_eq!(refusals[1].instance_id, "bravo-unapproved");
+    assert!(matches!(
+        refusals[1].reason,
+        PluginRefusalReason::ApprovalRequired
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -521,10 +533,12 @@ async fn approving_then_denying_toggles_plugin_admission() {
             .is_none()
     );
     let error = builder.start().await.err().unwrap();
-    assert!(
-        error.contains("plugin `example`") && error.contains("requires approval"),
-        "{error}"
-    );
+    let refusal = only_refusal(error);
+    assert_eq!(refusal.instance_id, "example");
+    assert!(matches!(
+        refusal.reason,
+        PluginRefusalReason::ApprovalRequired
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -537,12 +551,17 @@ async fn start_refuses_a_plugin_that_gains_a_role_after_approval() {
 
     let error = builder.start().await.err().unwrap();
 
-    assert!(error.contains("plugin `example`"), "{error}");
+    let refusal = only_refusal(error);
+    assert_eq!(refusal.instance_id, "example");
+    let PluginRefusalReason::RenewedApprovalRequired { drift } = refusal.reason else {
+        panic!("expected renewed approval")
+    };
     assert!(
-        error.contains("now exports interfaces it was not approved for"),
-        "{error}"
+        drift
+            .export_changes
+            .iter()
+            .any(|change| change.kind == ExportDriftKind::Gained)
     );
-    assert!(error.contains("chap grants review example"), "{error}");
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -603,7 +622,7 @@ async fn nonblocking_drift_errors_are_reported_without_panicking() {
     let builder = load_test_builder(&config_path);
     let manifest = builder.review_plugin("example").await.unwrap().manifest;
 
-    let error = AgentBuilder::consent_error(
+    let refusal = AgentBuilder::consent_refusal(
         "example",
         &component,
         ConsentRequired::Drift {
@@ -616,11 +635,12 @@ async fn nonblocking_drift_errors_are_reported_without_panicking() {
         },
     );
 
-    assert!(
-        error.contains("reported a changed permission manifest"),
-        "{error}"
-    );
-    assert!(error.contains("chap grants review example"), "{error}");
+    assert_eq!(refusal.instance_id, "example");
+    assert_eq!(refusal.source_path, component);
+    let PluginRefusalReason::RenewedApprovalRequired { drift } = refusal.reason else {
+        panic!("expected renewed approval")
+    };
+    assert!(!drift.blocks_admission);
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -654,9 +674,14 @@ async fn rejects_missing_required_settings_during_prepare() {
         Err(error) => error,
     };
 
-    assert!(error.contains("settings"), "{error}");
-    assert!(error.contains("model"), "{error}");
-    assert!(error.contains("required"), "{error}");
+    let refusal = only_refusal(error);
+    assert_eq!(refusal.instance_id, "example.provider");
+    assert_eq!(refusal.source_path, component);
+    assert!(matches!(
+        refusal.reason,
+        PluginRefusalReason::ComponentLoad { source }
+            if matches!(*source, ConsentError::LoadPlugin { .. })
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -690,10 +715,14 @@ async fn validates_settings_before_loading_tool_definitions() {
         Err(error) => error,
     };
 
-    assert!(error.contains("settings"), "{error}");
-    assert!(error.contains("api_key"), "{error}");
-    assert!(error.contains("required"), "{error}");
-    assert!(!error.contains("tool plugin"));
+    let refusal = only_refusal(error);
+    assert_eq!(refusal.instance_id, "example.tools");
+    assert_eq!(refusal.source_path, component);
+    assert!(matches!(
+        refusal.reason,
+        PluginRefusalReason::ComponentLoad { source }
+            if matches!(*source, ConsentError::LoadPlugin { .. })
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -718,11 +747,17 @@ async fn reports_framework_schema_transport_errors() {
         provider_component_with_trapping_schema("example"),
     )
     .unwrap();
-    let transport = match load_test_builder(&config_path).start().await {
+    let error = match load_test_builder(&config_path).start().await {
         Ok(_) => panic!("a trapping schema export should be rejected"),
         Err(error) => error,
     };
-    assert!(transport.contains("settings schema"), "{transport}");
+    let refusal = only_refusal(error);
+    assert_eq!(refusal.instance_id, "example");
+    assert!(matches!(
+        refusal.reason,
+        PluginRefusalReason::ComponentLoad { source }
+            if matches!(*source, ConsentError::LoadPlugin { .. })
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -931,12 +966,12 @@ async fn rejects_tools_config_for_a_provider_only_plugin() {
 
     let error = load_test_builder(&config_path).start().await.err().unwrap();
 
-    assert!(error.contains("plugin `example.provider`"), "{error}");
-    assert!(error.contains("`tools` section"), "{error}");
-    assert!(
-        error.contains("does not export the tools interface"),
-        "{error}"
-    );
+    let refusal = only_refusal(error);
+    assert_eq!(refusal.instance_id, "example.provider");
+    assert!(matches!(
+        refusal.reason,
+        PluginRefusalReason::RoleConfigInvalid { ref role } if role == "tools"
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -966,12 +1001,12 @@ async fn rejects_context_config_for_a_provider_only_plugin() {
 
     let error = load_test_builder(&config_path).start().await.err().unwrap();
 
-    assert!(error.contains("plugin `example.provider`"), "{error}");
-    assert!(error.contains("`context` section"), "{error}");
-    assert!(
-        error.contains("does not export the context interface"),
-        "{error}"
-    );
+    let refusal = only_refusal(error);
+    assert_eq!(refusal.instance_id, "example.provider");
+    assert!(matches!(
+        refusal.reason,
+        PluginRefusalReason::RoleConfigInvalid { ref role } if role == "context"
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -1034,7 +1069,14 @@ async fn drops_partial_start_resources_on_a_blocking_thread() {
         Err(error) => error,
     };
 
-    assert!(error.contains("z-missing"), "{error}");
+    let refusal = only_refusal(error);
+    assert_eq!(refusal.instance_id, "z-missing");
+    assert_eq!(refusal.source_path, directory.join("missing.wasm"));
+    assert!(matches!(
+        refusal.reason,
+        PluginRefusalReason::ComponentLoad { source }
+            if matches!(*source, ConsentError::ReadPlugin { .. })
+    ));
     assert_ne!(observed_drop.recv().unwrap(), async_thread);
     fs::remove_dir_all(directory).unwrap();
 }
@@ -1047,7 +1089,16 @@ async fn reports_the_component_path_for_an_unsupported_plugin_role() {
         Err(error) => error,
     };
 
-    assert_eq!(error, unsupported_role_error(&component));
+    let refusal = only_refusal(error);
+    assert_eq!(refusal.instance_id, "example");
+    assert_eq!(refusal.source_path, component);
+    assert!(matches!(
+        refusal.reason,
+        PluginRefusalReason::UnsupportedRole {
+            ref exported_interfaces,
+            ..
+        } if exported_interfaces == &["lockgate:config/schema".to_owned()]
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -1137,14 +1188,6 @@ fn role_change_plugin_builder(bytes: Vec<u8>) -> (PathBuf, PathBuf, AgentBuilder
     (directory, component, builder)
 }
 
-fn unsupported_role_error(component: &Path) -> String {
-    format!(
-        "plugin `example` from `{}` does not implement a supported role; expected an export from the `{}` package, but the component exports `lockgate:config/schema`",
-        component.display(),
-        super::super::role_package(<super::super::bindings::provider::Role as Role>::INTERFACE),
-    )
-}
-
 struct DropProbe {
     dropped: mpsc::SyncSender<std::thread::ThreadId>,
 }
@@ -1206,24 +1249,4 @@ fn resolves_supported_role_display_names_in_table_order() {
         super::super::supported_roles(&interfaces),
         ["provider", "tool", "context"]
     );
-}
-
-#[test]
-fn describes_an_export_list_with_backticked_names() {
-    let interfaces = [
-        <super::super::bindings::tools::Role as Role>::INTERFACE.to_owned(),
-        "lockgate:config/schema".to_owned(),
-    ];
-    assert_eq!(
-        super::super::describe_exports(&interfaces),
-        format!(
-            "`{}`, `lockgate:config/schema`",
-            <super::super::bindings::tools::Role as Role>::INTERFACE
-        )
-    );
-}
-
-#[test]
-fn describes_an_empty_export_list_as_no_interfaces() {
-    assert_eq!(super::super::describe_exports(&[]), "no interfaces");
 }

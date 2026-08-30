@@ -1,4 +1,4 @@
-use chap_core::{AgentBuilder, CallBudget, PluginCall};
+use chap_core::{AgentBuilder, CallBudget, PluginCall, StartError};
 use lockgate::{HostBuilder, InvocationCtx, PluginConfig, PluginHandle, RuntimeLimits};
 use serde_json::json;
 use std::{
@@ -277,10 +277,16 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
         .err()
         .expect("hanging tool definitions unexpectedly loaded");
 
-    assert!(error.contains("tool plugin `sdk-multi-role`"), "{error}");
+    let StartError::Internal(message) = error else {
+        panic!("tool definition failures must remain internal start errors")
+    };
     assert!(
-        error.contains("plugin exceeded its bounded call deadline of 1s"),
-        "{error}"
+        message.contains("tool plugin `sdk-multi-role`"),
+        "{message}"
+    );
+    assert!(
+        message.contains("plugin exceeded its bounded call deadline of 1s"),
+        "{message}"
     );
 }
 

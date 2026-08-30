@@ -34,9 +34,8 @@ pub enum ConsentError {
         source: Box<lockgate::AdmissionError>,
     },
     #[error(
-        "plugin `{plugin}` from `{}` does not implement a supported role; expected an export from the `{role}` package, but the component exports {exports}",
-        path.display(),
-        exports = describe_exports(exported_interfaces)
+        "plugin `{plugin}` from `{}` does not implement a supported role from `{role}`",
+        path.display()
     )]
     UnsupportedRole {
         plugin: String,
@@ -305,17 +304,6 @@ impl ConsentStore {
         )?;
         Ok(())
     }
-}
-
-fn describe_exports(interfaces: &[String]) -> String {
-    if interfaces.is_empty() {
-        return "no interfaces".to_owned();
-    }
-    interfaces
-        .iter()
-        .map(|interface| format!("`{interface}`"))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 #[cfg(test)]

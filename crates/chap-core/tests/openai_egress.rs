@@ -1,6 +1,6 @@
 use chap_core::{
-    AgentBuilder, ConsentRecord, ConsentStore, DriftKind, SessionEvent, SessionEventKind,
-    SessionOptions,
+    AgentBuilder, ConsentRecord, ConsentStore, DriftKind, PluginRefusalReason, SessionEvent,
+    SessionEventKind, SessionOptions, StartError,
 };
 use std::{
     io::{Read, Write},
@@ -191,12 +191,15 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
     );
     let error = builder.start().await.err().unwrap();
 
-    assert!(error.contains("plugin `openai`"), "{error}");
-    assert!(
-        error.contains("expanded its permission manifest"),
-        "{error}"
-    );
-    assert!(error.contains("chap grants review openai"), "{error}");
+    let StartError::Refused(refusals) = error else {
+        panic!("expected structured plugin refusals")
+    };
+    assert_eq!(refusals.len(), 1);
+    assert_eq!(refusals[0].instance_id, "openai");
+    let PluginRefusalReason::RenewedApprovalRequired { drift } = &refusals[0].reason else {
+        panic!("expected renewed approval")
+    };
+    assert!(drift.blocks_admission);
     assert_eq!(std::fs::read(consent_path).unwrap(), stored_before);
 }
 

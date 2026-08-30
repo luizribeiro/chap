@@ -82,13 +82,13 @@ async fn run(cli: Cli) -> Result<(), String> {
     let builder = AgentBuilder::load(&cli.config)?;
     match cli.command {
         None => {
-            tui::run(builder.start().await?).await?;
+            tui::run(builder.start().await.map_err(|error| error.to_string())?).await?;
         }
         Some(Command::Plugins(Plugins {
             command: PluginsCommand::Check,
         })) => {
             let plugin_count = builder.plugins().count();
-            let agent = builder.start().await?;
+            let agent = builder.start().await.map_err(|error| error.to_string())?;
             tokio::task::spawn_blocking(move || drop(agent))
                 .await
                 .map_err(|error| format!("failed to clean up plugin host: {error}"))?;
