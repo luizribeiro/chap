@@ -224,7 +224,10 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
         );
     builder.approve_plugin("sdk-multi-role").await.unwrap();
 
-    let error = tokio::time::timeout(Duration::from_secs(5), builder.start())
+    // Generous outer bound: start() also wasmtime-compiles the component,
+    // which loaded runners stretch far past the 1s deadline under test. A
+    // true hang still trips this; only the deadline error proves the bound.
+    let error = tokio::time::timeout(Duration::from_secs(60), builder.start())
         .await
         .expect("hanging tool definitions did not respect its deadline")
         .err()
