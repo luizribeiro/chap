@@ -1,4 +1,4 @@
-use chap_core::{SessionEventKind, SteeringId, Usage};
+use chap_core::{SessionEventKind, SteeringId, ToolError, Usage};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -228,8 +228,10 @@ fn tool_mut<'a>(messages: &'a mut [ChatMessage], call_id: &str) -> Option<&'a mu
     })
 }
 
-fn shared_result(result: Result<String, String>) -> Result<Arc<str>, Arc<str>> {
-    result.map(Into::into).map_err(Into::into)
+fn shared_result(result: Result<String, ToolError>) -> Result<Arc<str>, Arc<str>> {
+    result
+        .map(Into::into)
+        .map_err(|error| error.to_string().into())
 }
 
 #[cfg(test)]
@@ -321,6 +323,30 @@ mod tests {
         assert_eq!(
             transcript.messages,
             vec![ChatMessage::error("broken".to_owned())]
+        );
+    }
+
+    #[test]
+    fn renders_typed_tool_error_messages_unchanged() {
+        let mut transcript = TranscriptModel::default();
+
+        apply_event(
+            &mut transcript,
+            SessionEventKind::ToolFinished {
+                call_id: "call-1".to_owned(),
+                name: "exec".to_owned(),
+                result: Err(ToolError::Denied("policy refused the command".to_owned())),
+            },
+        );
+
+        assert_eq!(
+            transcript.messages,
+            [ChatMessage::tool(
+                "call-1".to_owned(),
+                "exec".to_owned(),
+                String::new(),
+                ToolState::Finished(Err(Arc::from("policy refused the command"))),
+            )]
         );
     }
 

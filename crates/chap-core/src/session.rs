@@ -1,4 +1,4 @@
-use crate::{FinishReason, ProviderError};
+use crate::{FinishReason, ProviderError, ToolError};
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt,
@@ -249,7 +249,7 @@ pub enum SessionEventKind {
     ToolFinished {
         call_id: String,
         name: String,
-        result: Result<String, String>,
+        result: Result<String, ToolError>,
     },
     ToolInterrupted {
         call_id: String,

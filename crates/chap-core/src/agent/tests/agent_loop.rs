@@ -983,7 +983,9 @@ async fn returns_tool_failures_to_the_provider() {
         SessionEventKind::ToolFinished {
             call_id: "call-1".to_owned(),
             name: "missing".to_owned(),
-            result: Err("tool `missing` is not registered".to_owned()),
+            result: Err(ToolError::Failed(
+                "tool `missing` is not registered".to_owned(),
+            )),
         }
     );
     let requests = backend.requests.lock().unwrap();

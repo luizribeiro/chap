@@ -5,7 +5,7 @@ use crate::{
         ActiveRun, AssistantContent, Message, RunBoundary, RunError, RunUsage, SessionEventKind,
         SessionState, Steering, ToolCall, ToolResult, Usage,
     },
-    tool::{ExecutionMode, ToolRegistry},
+    tool::{ExecutionMode, ToolError, ToolRegistry},
 };
 use futures::{StreamExt, stream::FuturesUnordered};
 use tokio::sync::Semaphore;
@@ -144,7 +144,7 @@ async fn run_steps(
                         .messages
                         .write()
                         .await
-                        .push(Message::ToolResult(result));
+                        .push(Message::ToolResult(result.into_provider_result()));
                 }
                 None => {
                     interrupted = true;
@@ -196,7 +196,7 @@ async fn execute_tool_calls(
     calls: &[ToolCall],
     active_run: &mut ActiveRun<'_>,
     limit: usize,
-) -> Vec<Option<ToolResult>> {
+) -> Vec<Option<ExecutedTool>> {
     let semaphore = Semaphore::new(limit);
     let mut slots = (0..calls.len()).map(|_| None).collect::<Vec<_>>();
     let mut pending = calls
@@ -225,15 +225,10 @@ async fn execute_tool_calls(
             _ = active_run.interrupted() => break,
             next = pending.next() => match next {
                 Some((index, result)) => {
-                    let event_result = if result.is_error {
-                        Err(result.output.clone())
-                    } else {
-                        Ok(result.output.clone())
-                    };
                     session.emit(SessionEventKind::ToolFinished {
                         call_id: result.call_id.clone(),
                         name: result.name.clone(),
-                        result: event_result,
+                        result: result.result.clone(),
                     });
                     slots[index] = Some(result);
                 }
@@ -275,21 +270,37 @@ async fn append_steering(session: &SessionState, steering: Vec<Steering>) {
     }
 }
 
-async fn execute_tool(tools: &ToolRegistry, call: ToolCall) -> ToolResult {
-    let output = tools.execute(&call.name, call.arguments).await;
-    match output {
-        Ok(output) => ToolResult {
-            call_id: call.id,
-            name: call.name,
-            output,
-            is_error: false,
-        },
-        Err(error) => ToolResult {
-            call_id: call.id,
-            name: call.name,
-            output: error.to_string(),
-            is_error: true,
-        },
+struct ExecutedTool {
+    call_id: String,
+    name: String,
+    result: Result<String, ToolError>,
+}
+
+impl ExecutedTool {
+    fn into_provider_result(self) -> ToolResult {
+        match self.result {
+            Ok(output) => ToolResult {
+                call_id: self.call_id,
+                name: self.name,
+                output,
+                is_error: false,
+            },
+            Err(error) => ToolResult {
+                call_id: self.call_id,
+                name: self.name,
+                output: error.to_string(),
+                is_error: true,
+            },
+        }
+    }
+}
+
+async fn execute_tool(tools: &ToolRegistry, call: ToolCall) -> ExecutedTool {
+    let result = tools.execute(&call.name, call.arguments).await;
+    ExecutedTool {
+        call_id: call.id,
+        name: call.name,
+        result,
     }
 }
 

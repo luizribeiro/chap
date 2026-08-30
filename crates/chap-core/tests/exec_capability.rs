@@ -1,6 +1,6 @@
 #![cfg(feature = "exec")]
 
-use chap_core::{AgentBuilder, SessionEvent, SessionEventKind, SessionOptions};
+use chap_core::{AgentBuilder, SessionEvent, SessionEventKind, SessionOptions, ToolError};
 use serde_json::{Value, json};
 use std::{
     io::{Read, Write},
@@ -136,7 +136,10 @@ async fn disallowed_command_is_denied_by_the_capability_guard() {
     )
     .await;
 
-    let error = tool_result(&result.events, "denied").as_ref().unwrap_err();
+    let ToolError::Denied(error) = tool_result(&result.events, "denied").as_ref().unwrap_err()
+    else {
+        panic!("capability refusal must remain a denied tool error")
+    };
     assert!(error.contains("denied by the capability guard"), "{error}");
     assert!(error.contains("exec.run"), "{error}");
     assert_eq!(
@@ -167,9 +170,12 @@ async fn command_scopes_match_complete_argv_prefixes() {
         .unwrap();
     assert!(output.contains("Exit code: 0"), "{output}");
     assert!(output.contains("hello"), "{output}");
-    let error = tool_result(&result.events, "different-argument")
+    let ToolError::Denied(error) = tool_result(&result.events, "different-argument")
         .as_ref()
-        .unwrap_err();
+        .unwrap_err()
+    else {
+        panic!("capability refusal must remain a denied tool error")
+    };
     assert!(error.contains("denied by the capability guard"), "{error}");
     assert!(error.contains("exec.run"), "{error}");
 }
@@ -189,7 +195,10 @@ async fn command_timeout_kills_the_process_at_the_deadline() {
     )
     .await;
 
-    let error = tool_result(&result.events, "timeout").as_ref().unwrap_err();
+    let ToolError::Failed(error) = tool_result(&result.events, "timeout").as_ref().unwrap_err()
+    else {
+        panic!("command timeout must remain a failed tool error")
+    };
     assert!(
         error.ends_with("command timed out and was killed at the deadline"),
         "{error}"
@@ -260,7 +269,7 @@ async fn receive_until_complete(events: &mut chap_core::SessionEvents) -> Vec<Se
 fn tool_result<'a>(
     events: &'a [SessionEvent],
     expected_call_id: &str,
-) -> &'a Result<String, String> {
+) -> &'a Result<String, ToolError> {
     events
         .iter()
         .find_map(|event| match &event.kind {
