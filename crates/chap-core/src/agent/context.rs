@@ -1,7 +1,7 @@
 use super::{AgentInner, PluginCall, bindings};
 use crate::{
     config::roles::ContextChannel,
-    session::{AssembledContext, ContextFailure},
+    session::{AssembledContext, ContextError, ContextFailure},
 };
 use bindings::context as context_bindings;
 use futures::future::join_all;
@@ -19,7 +19,7 @@ type PluginResults = BTreeMap<String, PluginResult>;
 
 struct PluginResult {
     channel: ContextChannel,
-    segments: Result<Vec<ContextSegment>, String>,
+    segments: Result<Vec<ContextSegment>, ContextError>,
 }
 
 impl AgentInner {
@@ -44,10 +44,10 @@ impl AgentInner {
     async fn request_context_segments(
         &self,
         plugin: &lockgate::PluginHandle,
-    ) -> Result<Vec<ContextSegment>, String> {
+    ) -> Result<Vec<ContextSegment>, ContextError> {
         self.lockgate
             .client::<context_bindings::Role>(plugin)
-            .map_err(|error| error.to_string())?
+            .map_err(|source| ContextError::Role { source })?
             .segments(
                 self.call_budgets
                     .resolve(PluginCall::ContextSegments)
@@ -55,6 +55,7 @@ impl AgentInner {
             )
             .await
             .map_err(context_call_error)?
+            .map_err(|message| ContextError::Plugin { message })
             .map(|segments| segments.into_iter().map(Into::into).collect())
     }
 }
@@ -67,8 +68,8 @@ fn compose_context(results: PluginResults) -> Result<AssembledContext, Vec<Conte
     for (plugin, result) in results {
         let segments = match result.segments {
             Ok(segments) => segments,
-            Err(error) => {
-                failures.push(ContextFailure { plugin, error });
+            Err(source) => {
+                failures.push(ContextFailure { plugin, source });
                 continue;
             }
         };
@@ -106,12 +107,12 @@ fn render_channel(mut segments: Vec<(i32, String, usize, String)>) -> Option<Str
     })
 }
 
-fn context_call_error(error: CallError) -> String {
+fn context_call_error(error: CallError) -> ContextError {
     match error {
-        CallError::DeadlineExceeded { deadline } => {
-            format!("timed out after {deadline:?}")
+        source @ CallError::DeadlineExceeded { deadline } => {
+            ContextError::DeadlineExceeded { deadline, source }
         }
-        error => error.to_string(),
+        source => ContextError::Call { source },
     }
 }
 
@@ -143,11 +144,11 @@ mod tests {
         ]));
 
         assert_eq!(
-            assembly,
-            Ok(AssembledContext {
+            assembly.unwrap(),
+            AssembledContext {
                 system: None,
                 context: Some("early\n\nlate".to_owned()),
-            })
+            }
         );
     }
 
@@ -201,11 +202,11 @@ mod tests {
         ]));
 
         assert_eq!(
-            assembly,
-            Ok(AssembledContext {
+            assembly.unwrap(),
+            AssembledContext {
                 system: Some("system early\n\nsystem late".to_owned()),
                 context: Some("context early\n\ncontext late".to_owned()),
-            })
+            }
         );
     }
 
@@ -223,11 +224,11 @@ mod tests {
         ]));
 
         assert_eq!(
-            assembly,
-            Ok(AssembledContext {
+            assembly.unwrap(),
+            AssembledContext {
                 system: Some("operator".to_owned()),
                 context: None,
-            })
+            }
         );
     }
 
@@ -238,13 +239,9 @@ mod tests {
             failure(ContextChannel::Context, "unavailable"),
         )]));
 
-        assert_eq!(
-            assembly,
-            Err(vec![ContextFailure {
-                plugin: "broken-context".to_owned(),
-                error: "unavailable".to_owned(),
-            }])
-        );
+        let failures = assembly.unwrap_err();
+        assert_eq!(failures.len(), 1);
+        assert_plugin_failure(&failures[0], "broken-context", "unavailable");
     }
 
     #[test]
@@ -260,19 +257,10 @@ mod tests {
             ),
         ]));
 
-        assert_eq!(
-            assembly,
-            Err(vec![
-                ContextFailure {
-                    plugin: "alpha".to_owned(),
-                    error: "unavailable".to_owned(),
-                },
-                ContextFailure {
-                    plugin: "zeta".to_owned(),
-                    error: "timed out".to_owned(),
-                },
-            ])
-        );
+        let failures = assembly.unwrap_err();
+        assert_eq!(failures.len(), 2);
+        assert_plugin_failure(&failures[0], "alpha", "unavailable");
+        assert_plugin_failure(&failures[1], "zeta", "timed out");
     }
 
     #[test]
@@ -288,13 +276,9 @@ mod tests {
             ),
         ]));
 
-        assert_eq!(
-            assembly,
-            Err(vec![ContextFailure {
-                plugin: "broken".to_owned(),
-                error: "unavailable".to_owned(),
-            }])
-        );
+        let failures = assembly.unwrap_err();
+        assert_eq!(failures.len(), 1);
+        assert_plugin_failure(&failures[0], "broken", "unavailable");
     }
 
     fn success(channel: ContextChannel, segments: Vec<ContextSegment>) -> PluginResult {
@@ -307,8 +291,18 @@ mod tests {
     fn failure(channel: ContextChannel, error: &str) -> PluginResult {
         PluginResult {
             channel,
-            segments: Err(error.to_owned()),
+            segments: Err(ContextError::Plugin {
+                message: error.to_owned(),
+            }),
         }
+    }
+
+    fn assert_plugin_failure(failure: &ContextFailure, plugin: &str, message: &str) {
+        assert_eq!(failure.plugin, plugin);
+        assert!(matches!(
+            &failure.source,
+            ContextError::Plugin { message: actual } if actual == message
+        ));
     }
 
     fn segment(content: &str, priority: i32) -> ContextSegment {

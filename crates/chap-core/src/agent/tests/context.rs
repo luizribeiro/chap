@@ -1,5 +1,5 @@
 use super::super::{Agent, CallBudgets, PluginCall};
-use crate::{SessionError, SessionOptions, session::Message};
+use crate::{ContextError, SessionError, SessionOptions, session::Message};
 use serde_json::{Map, Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -95,7 +95,51 @@ async fn hanging_real_context_plugin_fails_session_creation_at_the_deadline() {
     };
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].plugin, "hanging-context");
-    assert_eq!(failures[0].error, "timed out after 10s");
+    assert_eq!(
+        failures[0].to_string(),
+        "context plugin `hanging-context` failed: timed out after 10s"
+    );
+    assert_eq!(failures[0].source.to_string(), "timed out after 10s");
+    let ContextError::DeadlineExceeded { deadline, source } = &failures[0].source else {
+        panic!("the context deadline must retain its typed call failure")
+    };
+    assert_eq!(*deadline, Duration::from_secs(10));
+    assert!(matches!(
+        source,
+        lockgate::CallError::DeadlineExceeded { deadline }
+            if *deadline == Duration::from_secs(10)
+    ));
+    let context_source = std::error::Error::source(&failures[0]).unwrap();
+    assert!(context_source.downcast_ref::<ContextError>().is_some());
+    assert!(
+        context_source
+            .source()
+            .unwrap()
+            .downcast_ref::<lockgate::CallError>()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn preserves_a_context_plugin_wire_error_at_the_host_boundary() {
+    let (agent, _directory) =
+        start_agent([context_plugin("failing-context", json!({ "error": true }))]).await;
+
+    let error = agent
+        .session(SessionOptions::new("fixture-provider"))
+        .await
+        .err()
+        .expect("the failing context plugin unexpectedly created a session");
+
+    let SessionError::Context(failures) = error else {
+        panic!("expected structured context failures")
+    };
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].plugin, "failing-context");
+    assert!(matches!(
+        &failures[0].source,
+        ContextError::Plugin { message } if message == "configured context failure"
+    ));
 }
 
 #[tokio::test]

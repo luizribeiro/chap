@@ -462,10 +462,10 @@ fn push_row(output: &mut String, row: [&str; 3], widths: [usize; 3]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chap_core::ContextFailure;
     use chap_core::{
         ConsentManifest, ConsentRecord, DriftReport, GrantReview, PluginConsentReview,
     };
+    use chap_core::{ContextError, ContextFailure};
     use clap::CommandFactory;
     use std::{ffi::OsStr, io};
 
@@ -587,11 +587,15 @@ mod tests {
         let error = SessionError::Context(vec![
             ContextFailure {
                 plugin: "alpha".to_owned(),
-                error: "unavailable".to_owned(),
+                source: ContextError::Plugin {
+                    message: "unavailable".to_owned(),
+                },
             },
             ContextFailure {
                 plugin: "bravo".to_owned(),
-                error: "timed out after 10s".to_owned(),
+                source: ContextError::Plugin {
+                    message: "timed out after 10s".to_owned(),
+                },
             },
         ]);
 

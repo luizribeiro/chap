@@ -5,6 +5,7 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use thiserror::Error;
 use tokio::sync::{Mutex as AsyncMutex, RwLock, broadcast, watch};
@@ -173,11 +174,35 @@ fn completion_without_text_message(finish_reason: &FinishReason) -> String {
     }
 }
 
-#[derive(Clone, Debug, Eq, Error, PartialEq)]
-#[error("context plugin `{plugin}` failed: {error}")]
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum ContextError {
+    #[error("{source}")]
+    Role {
+        #[source]
+        source: lockgate::RoleError,
+    },
+    #[error("timed out after {deadline:?}")]
+    DeadlineExceeded {
+        deadline: Duration,
+        #[source]
+        source: lockgate::CallError,
+    },
+    #[error("{source}")]
+    Call {
+        #[source]
+        source: lockgate::CallError,
+    },
+    #[error("{message}")]
+    Plugin { message: String },
+}
+
+#[derive(Debug, Error)]
+#[error("context plugin `{plugin}` failed: {source}")]
 pub struct ContextFailure {
     pub plugin: String,
-    pub error: String,
+    #[source]
+    pub source: ContextError,
 }
 
 #[derive(Debug, Error)]
