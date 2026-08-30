@@ -180,7 +180,7 @@ package chap:test;
 
 world fixture {{
   {clock_import}
-  include chap:agent/{world_name}@0.2.0;
+  include chap:agent/{world_name}@0.3.0;
   export lockgate:config/schema;
 }}
 "#

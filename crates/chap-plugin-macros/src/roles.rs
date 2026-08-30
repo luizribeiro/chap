@@ -90,12 +90,14 @@ fn tools_bridge(plugin: &Ident) -> TokenStream {
                 arguments: ::chap_plugin::alloc::string::String,
             ) -> ::core::result::Result<
                 ::chap_plugin::alloc::string::String,
-                ::chap_plugin::alloc::string::String,
+                exports::chap::agent::tools::ToolError,
             > {
                 let object = <#plugin as ::chap_plugin::Plugin>::new(
                     <#plugin as ::chap_plugin::__lockgate::Plugin>::settings(),
                 );
-                <#plugin as ::chap_plugin::tools::Tools>::execute(&object, name, arguments).await
+                <#plugin as ::chap_plugin::tools::Tools>::execute(&object, name, arguments)
+                    .await
+                    .map_err(exports::chap::agent::tools::ToolError::Failed)
             }
         }
     }

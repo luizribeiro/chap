@@ -79,7 +79,15 @@ impl Tool for PluginTool {
                 )
                 .await
                 .map_err(|error| tool_call_error(&self.plugin, error))?
-                .map_err(|error| format!("tool plugin `{}`: {error}", self.plugin))
+                .map_err(|error| {
+                    let message = match error {
+                        tool_bindings::ToolError::InvalidInput(message)
+                        | tool_bindings::ToolError::Denied(message)
+                        | tool_bindings::ToolError::Failed(message)
+                        | tool_bindings::ToolError::Fatal(message) => message,
+                    };
+                    format!("tool plugin `{}`: {message}", self.plugin)
+                })
         })
     }
 }

@@ -1,4 +1,4 @@
-package chap:agent@0.2.0;
+package chap:agent@0.3.0;
 
 interface exec {
   /// One process invocation, argv-style. Never a shell string: the

@@ -39,7 +39,7 @@ pub(crate) fn resolve(name: &Ident) -> syn::Result<&'static Import> {
 #[cfg(feature = "exec")]
 fn exec_with_mapping() -> TokenStream {
     quote! {
-        "chap:agent/exec@0.2.0": ::chap_plugin::exec,
+        "chap:agent/exec@0.3.0": ::chap_plugin::exec,
     }
 }
 

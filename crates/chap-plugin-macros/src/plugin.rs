@@ -95,7 +95,7 @@ pub(crate) fn expand(input: PluginInput) -> syn::Result<TokenStream> {
             world: #world,
             facade: ::chap_plugin,
             with: {
-                "chap:agent/types@0.2.0": ::chap_plugin::types,
+                "chap:agent/types@0.3.0": ::chap_plugin::types,
                 #(#with_mappings)*
             },
         });

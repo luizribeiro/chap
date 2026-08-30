@@ -1,6 +1,6 @@
 //! WIT sources and world composition for CHAP plugins.
 
-const PACKAGE: &str = "package chap:agent@0.2.0;";
+const PACKAGE: &str = "package chap:agent@0.3.0;";
 pub const WORLD: &str = "chap-plugin";
 pub const TYPES_WIT: &str = include_str!("../wit/types.wit");
 

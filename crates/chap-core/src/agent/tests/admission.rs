@@ -1159,8 +1159,8 @@ impl Tool for DropProbe {
 #[test]
 fn derives_the_package_id_from_a_role_interface() {
     assert_eq!(
-        super::super::role_package("chap:agent/provider@0.2.0"),
-        "chap:agent@0.2.0"
+        super::super::role_package("chap:agent/provider@0.3.0"),
+        "chap:agent@0.3.0"
     );
 }
 

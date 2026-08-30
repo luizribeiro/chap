@@ -1,8 +1,19 @@
-package chap:agent@0.2.0;
+package chap:agent@0.3.0;
 
 interface tools {
   use types.{tool-registration};
 
+  variant tool-error {
+    /// The arguments were malformed or invalid; the model is expected to retry.
+    invalid-input(string),
+    /// Consent or policy refused the call.
+    denied(string),
+    /// The tool ran and failed; fed back to the model.
+    failed(string),
+    /// The plugin or its environment is broken; the host aborts the turn.
+    fatal(string),
+  }
+
   definitions: func() -> result<list<tool-registration>, string>;
-  execute: async func(name: string, arguments: string) -> result<string, string>;
+  execute: async func(name: string, arguments: string) -> result<string, tool-error>;
 }
