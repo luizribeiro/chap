@@ -1,5 +1,5 @@
 use chap_plugin::exec::{Command, ExecError, ExecResult};
-use chap_plugin::tools::{ToolDefinition, Tools};
+use chap_plugin::tools::{ToolDefinition, ToolError, Tools};
 use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, capabilities};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -54,11 +54,13 @@ impl Tools for Exec {
         }])
     }
 
-    async fn execute(&self, name: String, arguments: String) -> Result<String, String> {
+    async fn execute(&self, name: String, arguments: String) -> Result<String, ToolError> {
         if name != EXEC {
-            return Err(format!("tool `{name}` is not provided by the exec plugin"));
+            return Err(ToolError::Failed(format!(
+                "tool `{name}` is not provided by the exec plugin"
+            )));
         }
-        let arguments: ExecArguments = parse_arguments(&arguments)?;
+        let arguments: ExecArguments = parse_arguments(&arguments).map_err(ToolError::Failed)?;
         let timeout_ms = arguments.timeout_ms.or(self.settings.default_timeout_ms);
         chap_plugin::exec::run(
             Command {
@@ -69,7 +71,7 @@ impl Tools for Exec {
         )
         .await
         .map(format_output)
-        .map_err(format_error)
+        .map_err(|error| ToolError::Failed(format_error(error)))
     }
 }
 

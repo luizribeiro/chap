@@ -97,7 +97,16 @@ fn tools_bridge(plugin: &Ident) -> TokenStream {
                 );
                 <#plugin as ::chap_plugin::tools::Tools>::execute(&object, name, arguments)
                     .await
-                    .map_err(exports::chap::agent::tools::ToolError::Failed)
+                    .map_err(|error| match error {
+                        ::chap_plugin::tools::ToolError::InvalidInput(message) =>
+                            exports::chap::agent::tools::ToolError::InvalidInput(message),
+                        ::chap_plugin::tools::ToolError::Denied(message) =>
+                            exports::chap::agent::tools::ToolError::Denied(message),
+                        ::chap_plugin::tools::ToolError::Failed(message) =>
+                            exports::chap::agent::tools::ToolError::Failed(message),
+                        ::chap_plugin::tools::ToolError::Fatal(message) =>
+                            exports::chap::agent::tools::ToolError::Fatal(message),
+                    })
             }
         }
     }

@@ -2,7 +2,7 @@ use chap_plugin::{
     Needs, NoSettings, Plugin,
     context::{Context, Segment},
     provider::{Completion, CompletionRequest, FinishReason, Provider, ProviderError},
-    tools::{ToolDefinition, Tools},
+    tools::{ToolDefinition, ToolError, Tools},
 };
 
 struct Dummy;
@@ -32,7 +32,7 @@ impl Tools for Dummy {
         Ok(Vec::new())
     }
 
-    async fn execute(&self, _name: String, _arguments: String) -> Result<String, String> {
+    async fn execute(&self, _name: String, _arguments: String) -> Result<String, ToolError> {
         Ok(String::new())
     }
 }
@@ -52,4 +52,19 @@ fn role_traits_are_implementable() {
     assert_provider::<Dummy>();
     assert_tools::<Dummy>();
     assert_context::<Dummy>();
+}
+
+#[test]
+fn tool_error_preserves_each_failure_category() {
+    let errors = [
+        ToolError::InvalidInput("invalid".to_owned()),
+        ToolError::Denied("denied".to_owned()),
+        ToolError::Failed("failed".to_owned()),
+        ToolError::Fatal("fatal".to_owned()),
+    ];
+
+    assert!(matches!(&errors[0], ToolError::InvalidInput(message) if message == "invalid"));
+    assert!(matches!(&errors[1], ToolError::Denied(message) if message == "denied"));
+    assert!(matches!(&errors[2], ToolError::Failed(message) if message == "failed"));
+    assert!(matches!(&errors[3], ToolError::Fatal(message) if message == "fatal"));
 }

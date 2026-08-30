@@ -191,6 +191,50 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
 }
 
 #[tokio::test]
+async fn sdk_tool_error_variants_cross_the_component_boundary() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let components = sdk_components(&workspace);
+    let mut builder = HostBuilder::new(()).unwrap();
+    let plugin = admit(
+        &mut builder,
+        "sdk-multi-role-fixture",
+        &components.multi_role,
+        "multi:",
+    )
+    .await;
+    let host = builder.finish();
+    let tools = host.client::<bindings::tools::Role>(&plugin).unwrap();
+    let cases = [
+        (
+            "sdk-invalid-input",
+            "arguments did not match the tool schema",
+        ),
+        ("sdk-denied", "capability policy denied the request"),
+        ("sdk-failed", "remote tool execution returned an error"),
+        ("sdk-fatal", "plugin runtime configuration is unavailable"),
+    ];
+
+    for (name, expected_message) in cases {
+        let result = tools
+            .execute(
+                InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
+                name,
+                "{}",
+            )
+            .await
+            .unwrap();
+        let message = match (name, result) {
+            ("sdk-invalid-input", Err(bindings::tools::ToolError::InvalidInput(message)))
+            | ("sdk-denied", Err(bindings::tools::ToolError::Denied(message)))
+            | ("sdk-failed", Err(bindings::tools::ToolError::Failed(message)))
+            | ("sdk-fatal", Err(bindings::tools::ToolError::Fatal(message))) => message,
+            _ => panic!("tool `{name}` returned the wrong wire error variant"),
+        };
+        assert_eq!(message, expected_message);
+    }
+}
+
+#[tokio::test]
 async fn times_out_a_tool_plugin_with_hanging_definitions() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let components = sdk_components(&workspace);

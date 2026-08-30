@@ -2,7 +2,7 @@ use chap_plugin::context::{Context, Segment};
 use chap_plugin::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message, Provider, ProviderError,
 };
-use chap_plugin::tools::{ToolDefinition, Tools};
+use chap_plugin::tools::{ToolDefinition, ToolError, Tools};
 use chap_plugin::{MetadataSource, Needs, NoSettings, Plugin};
 
 struct MultiRole;
@@ -47,10 +47,10 @@ impl Tools for MultiRole {
         }])
     }
 
-    async fn execute(&self, name: String, arguments: String) -> Result<String, String> {
+    async fn execute(&self, name: String, arguments: String) -> Result<String, ToolError> {
         match name.as_str() {
             "echo" => Ok(arguments),
-            _ => Err(format!("unknown tool `{name}`")),
+            _ => Err(ToolError::InvalidInput(format!("unknown tool `{name}`"))),
         }
     }
 }

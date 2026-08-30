@@ -3,7 +3,7 @@ use chap_plugin::provider::{
     AssistantContent, Completion, CompletionRequest, FinishReason, Message, Provider,
     ProviderError, ToolCall,
 };
-use chap_plugin::tools::{ToolDefinition, Tools};
+use chap_plugin::tools::{ToolDefinition, ToolError, Tools};
 use chap_plugin::{MetadataSource, Needs, Plugin};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -84,10 +84,22 @@ impl Tools for MultiRoleFixture {
         }])
     }
 
-    async fn execute(&self, name: String, arguments: String) -> Result<String, String> {
+    async fn execute(&self, name: String, arguments: String) -> Result<String, ToolError> {
         match name.as_str() {
             "sdk-echo" => Ok(format!("tool:{arguments}")),
-            _ => Err(format!("unknown tool `{name}`")),
+            "sdk-invalid-input" => Err(ToolError::InvalidInput(
+                "arguments did not match the tool schema".to_owned(),
+            )),
+            "sdk-denied" => Err(ToolError::Denied(
+                "capability policy denied the request".to_owned(),
+            )),
+            "sdk-failed" => Err(ToolError::Failed(
+                "remote tool execution returned an error".to_owned(),
+            )),
+            "sdk-fatal" => Err(ToolError::Fatal(
+                "plugin runtime configuration is unavailable".to_owned(),
+            )),
+            _ => Err(ToolError::InvalidInput(format!("unknown tool `{name}`"))),
         }
     }
 }

@@ -1,4 +1,4 @@
-use chap_plugin::tools::{ToolDefinition, Tools};
+use chap_plugin::tools::{ToolDefinition, ToolError, Tools};
 use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, capabilities};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -69,7 +69,7 @@ impl Tools for Kagi {
         ])
     }
 
-    async fn execute(&self, name: String, arguments: String) -> Result<String, String> {
+    async fn execute(&self, name: String, arguments: String) -> Result<String, ToolError> {
         enum Output {
             Search(usize),
             Extract(usize),
@@ -77,78 +77,94 @@ impl Tools for Kagi {
 
         let (path, request, output) = match name.as_str() {
             WEB_SEARCH => {
-                let arguments: SearchArguments = parse_arguments(WEB_SEARCH, &arguments)?;
-                arguments.validate()?;
+                let arguments: SearchArguments =
+                    parse_arguments(WEB_SEARCH, &arguments).map_err(ToolError::Failed)?;
+                arguments.validate().map_err(ToolError::Failed)?;
                 let request = serde_json::to_vec(&SearchRequest {
                     query: &arguments.query,
                     workflow: "search",
                     format: "json",
                     limit: arguments.limit,
                 })
-                .map_err(|error| format!("failed to encode Kagi request: {error}"))?;
+                .map_err(|error| {
+                    ToolError::Failed(format!("failed to encode Kagi request: {error}"))
+                })?;
                 ("/search", request, Output::Search(arguments.limit))
             }
             WEB_FETCH => {
-                let arguments: FetchArguments = parse_arguments(WEB_FETCH, &arguments)?;
-                arguments.validate()?;
+                let arguments: FetchArguments =
+                    parse_arguments(WEB_FETCH, &arguments).map_err(ToolError::Failed)?;
+                arguments.validate().map_err(ToolError::Failed)?;
                 let request = serde_json::to_vec(&ExtractRequest {
                     pages: arguments.urls.iter().map(|url| PageInput { url }).collect(),
                     format: "json",
                 })
-                .map_err(|error| format!("failed to encode Kagi request: {error}"))?;
+                .map_err(|error| {
+                    ToolError::Failed(format!("failed to encode Kagi request: {error}"))
+                })?;
                 (
                     "/extract",
                     request,
                     Output::Extract(arguments.max_chars_per_page),
                 )
             }
-            _ => return Err(format!("tool `{name}` is not provided by the Kagi plugin")),
+            _ => {
+                return Err(ToolError::Failed(format!(
+                    "tool `{name}` is not provided by the Kagi plugin"
+                )));
+            }
         };
         let url = format!("{API_BASE_URL}{path}");
         let api_key = std::env::var(&self.settings.api_key_env).map_err(|_| {
-            format!(
+            ToolError::Failed(format!(
                 "environment variable `{}` is not available to the Kagi plugin",
                 self.settings.api_key_env
-            )
+            ))
         })?;
         let response = chap_plugin::http::Client::with_max_response_bytes(8 * 1024 * 1024)
             .post(&url)
             .header("accept", "application/json")
-            .map_err(|error| error.to_string())?
+            .map_err(|error| ToolError::Failed(error.to_string()))?
             .header("content-type", "application/json")
-            .map_err(|error| error.to_string())?
+            .map_err(|error| ToolError::Failed(error.to_string()))?
             .bearer(Some(&api_key))
             .body(request)
             .send()
             .await
-            .map_err(|error| match error {
-                chap_plugin::http::Error::InvalidHeaderValue(_) => {
-                    "Kagi API key contains invalid header characters".to_owned()
-                }
-                chap_plugin::http::Error::Request(error) => {
-                    format!("Kagi HTTP request failed: {error}")
-                }
-                chap_plugin::http::Error::Body(error) => {
-                    format!("failed to read Kagi response: {error}")
-                }
-                chap_plugin::http::Error::ResponseTooLarge { limit } => {
-                    format!("Kagi response exceeded the {limit}-byte limit")
-                }
-                error => error.to_string(),
+            .map_err(|error| {
+                ToolError::Failed(match error {
+                    chap_plugin::http::Error::InvalidHeaderValue(_) => {
+                        "Kagi API key contains invalid header characters".to_owned()
+                    }
+                    chap_plugin::http::Error::Request(error) => {
+                        format!("Kagi HTTP request failed: {error}")
+                    }
+                    chap_plugin::http::Error::Body(error) => {
+                        format!("failed to read Kagi response: {error}")
+                    }
+                    chap_plugin::http::Error::ResponseTooLarge { limit } => {
+                        format!("Kagi response exceeded the {limit}-byte limit")
+                    }
+                    error => error.to_string(),
+                })
             })?;
         let status = response.status();
-        let body = response.text().map_err(|error| match error {
-            chap_plugin::http::Error::Utf8(error) => {
-                format!("Kagi response was not valid UTF-8: {error}")
-            }
-            error => error.to_string(),
+        let body = response.text().map_err(|error| {
+            ToolError::Failed(match error {
+                chap_plugin::http::Error::Utf8(error) => {
+                    format!("Kagi response was not valid UTF-8: {error}")
+                }
+                error => error.to_string(),
+            })
         })?;
         if !(200..300).contains(&status) {
-            return Err(api_error(status, &body));
+            return Err(ToolError::Failed(api_error(status, &body)));
         }
         match output {
-            Output::Search(limit) => search_output(&body, limit),
-            Output::Extract(max_chars) => extract_output(&body, max_chars),
+            Output::Search(limit) => search_output(&body, limit).map_err(ToolError::Failed),
+            Output::Extract(max_chars) => {
+                extract_output(&body, max_chars).map_err(ToolError::Failed)
+            }
         }
     }
 }
