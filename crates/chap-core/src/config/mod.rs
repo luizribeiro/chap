@@ -65,7 +65,7 @@ pub enum LoadError {
 /// The complete settings loaded from `chap.json`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Config {
+pub(crate) struct Config {
     name: Option<String>,
     #[serde(default)]
     plugins: BTreeMap<String, ConfiguredPlugin>,
@@ -80,7 +80,7 @@ pub struct Config {
 /// Settings for one configured plugin and its roles.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ConfiguredPlugin {
+pub(crate) struct ConfiguredPlugin {
     component: PathBuf,
     #[serde(default)]
     tools: Option<ToolsSettings>,
@@ -91,7 +91,7 @@ pub struct ConfiguredPlugin {
 }
 
 impl Config {
-    pub fn load(path: &Path) -> Result<Self, LoadError> {
+    pub(crate) fn load(path: &Path) -> Result<Self, LoadError> {
         let source = fs::read_to_string(path).map_err(|source| LoadError::ReadConfig {
             path: path.to_path_buf(),
             source,
@@ -130,11 +130,11 @@ impl Config {
         Ok(())
     }
 
-    pub fn name(&self) -> Option<&str> {
+    pub(crate) fn name(&self) -> Option<&str> {
         self.name.as_deref()
     }
 
-    pub fn plugins(&self) -> impl Iterator<Item = (&str, &ConfiguredPlugin)> {
+    pub(crate) fn plugins(&self) -> impl Iterator<Item = (&str, &ConfiguredPlugin)> {
         self.plugins
             .iter()
             .map(|(id, plugin)| (id.as_str(), plugin))
@@ -188,7 +188,7 @@ fn consent_path(
 }
 
 impl ConfiguredPlugin {
-    pub fn component(&self) -> &Path {
+    pub(crate) fn component(&self) -> &Path {
         &self.component
     }
 
