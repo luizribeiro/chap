@@ -54,11 +54,10 @@ impl MockServer {
         let responses = vec![tool_call_response(tool_requests), final_response()];
         let (sender, received) = mpsc::sync_channel(1);
         let thread = std::thread::spawn(move || {
-            let deadline = Instant::now() + SERVER_TIMEOUT;
             let result = responses
                 .into_iter()
                 .map(|response| {
-                    let stream = accept(&listener, deadline)?;
+                    let stream = accept(&listener)?;
                     serve(stream, &response)
                 })
                 .collect();
@@ -405,7 +404,10 @@ fn final_response() -> String {
     .to_string()
 }
 
-fn accept(listener: &TcpListener, deadline: Instant) -> Result<TcpStream, String> {
+// Waits unboundedly: agent startup between bind and request includes
+// admission and wasmtime compilation, which loaded runners stretch past any
+// fixed deadline. The invocation timeout bounds the no-request failure path.
+fn accept(listener: &TcpListener) -> Result<TcpStream, String> {
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
@@ -416,9 +418,6 @@ fn accept(listener: &TcpListener, deadline: Instant) -> Result<TcpStream, String
                 return Ok(stream);
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                if Instant::now() >= deadline {
-                    return Err("mock server timed out waiting for a request".to_owned());
-                }
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(error) => return Err(format!("mock server accept failed: {error}")),
