@@ -71,6 +71,11 @@ mod exec_host {
         }
     }
 
+    // TODO(luizribeiro/lockgate#4): the guard's resolve_scoped_resource and
+    // the run body each derive their own CommandTarget through this function,
+    // so the checked value and the executed value stay equal only while both
+    // remain this one derivation. Execute the guard-approved resource directly
+    // once the macro can hand it to the body.
     fn command_target(command: &exec::Command) -> CommandTarget {
         CommandTarget {
             program: command.program.clone(),
