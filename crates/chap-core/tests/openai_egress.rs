@@ -12,7 +12,7 @@ use std::{
         mpsc::{self, Receiver},
     },
     thread::JoinHandle,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 // Bounds a hang and must outlast parallel component compilation and admission; when it expires,
@@ -47,14 +47,15 @@ impl MockServer {
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let (sender, received) = mpsc::sync_channel(1);
         let thread = std::thread::spawn(move || {
-            let deadline = Instant::now() + SERVER_TIMEOUT;
+            // Agent startup between bind and request includes admission and
+            // wasmtime compilation, which loaded runners stretch past any
+            // fixed deadline; a bounded wait here drops the listener and
+            // turns that slowness into ConnectionRefused. The invocation
+            // timeout already bounds the no-request failure path.
             let result = loop {
                 match listener.accept() {
                     Ok((stream, _)) => break serve(stream),
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        if Instant::now() >= deadline {
-                            break Err("mock server timed out waiting for a request".to_owned());
-                        }
                         std::thread::sleep(Duration::from_millis(10));
                     }
                     Err(error) => break Err(format!("mock server accept failed: {error}")),
