@@ -129,9 +129,36 @@ pub enum PluginRefusalReason {
 pub enum StartError {
     #[error("{} plugin(s) were refused admission", .0.len())]
     Refused(Vec<PluginRefusal>),
-    /// Deliberate temporary catch-all for start failures not yet typed in issue #9.
     #[error("{0}")]
-    Internal(String),
+    Consent(#[source] ConsentError),
+    #[error("{source}; {cleanup}")]
+    OperationAndCleanup {
+        #[source]
+        source: Box<StartError>,
+        cleanup: Box<ConsentError>,
+    },
+    #[error("failed to clean up refused plugin `{plugin}`: {source}")]
+    RefusedPluginCleanup {
+        plugin: String,
+        #[source]
+        source: tokio::task::JoinError,
+    },
+    #[error("tool plugin `{plugin}` failed: {source}")]
+    ToolRole {
+        plugin: String,
+        #[source]
+        source: lockgate::RoleError,
+    },
+    #[error("tool plugin `{plugin}` failed: {source}")]
+    ToolDefinitionsCall {
+        plugin: String,
+        #[source]
+        source: lockgate::CallError,
+    },
+    #[error("tool plugin `{plugin}`: {message}")]
+    ToolDefinitions { plugin: String, message: String },
+    #[error("{0}")]
+    ToolRegistration(#[source] ToolRegistrationError),
 }
 
 /// Production plugin-call budgets, keyed by exported WIT function.
@@ -468,17 +495,14 @@ impl AgentBuilder {
     ///
     /// Refuses to start unless every configured plugin is admitted.
     pub async fn start(self) -> Result<Agent, StartError> {
-        let consent = self
-            .consent_store()
-            .map_err(|error| StartError::Internal(error.to_string()))?;
+        let consent = self.consent_store().map_err(StartError::Consent)?;
         let Self {
             config,
             state_dir: _,
             tools,
             call_budgets,
         } = self;
-        let builder =
-            host_builder(&config).map_err(|error| StartError::Internal(error.to_string()))?;
+        let builder = host_builder(&config).map_err(StartError::Consent)?;
         let mut resources = StartResources::new(tools, builder);
         let plugins =
             match Self::initialize_plugins(&mut resources, &config, &consent, call_budgets).await {
@@ -486,9 +510,10 @@ impl AgentBuilder {
                 Err(error) => {
                     return match resources.cleanup().await {
                         Ok(()) => Err(error),
-                        Err(cleanup_error) => {
-                            Err(StartError::Internal(format!("{error}; {cleanup_error}")))
-                        }
+                        Err(cleanup) => Err(StartError::OperationAndCleanup {
+                            source: Box::new(error),
+                            cleanup: Box::new(cleanup),
+                        }),
                     };
                 }
             };
@@ -534,15 +559,14 @@ impl AgentBuilder {
                 plugin.role_settings.tools(),
                 call_budgets,
             )
-            .await
-            .map_err(StartError::Internal)?
+            .await?
             {
                 resources
                     .tools
                     .as_mut()
                     .expect("initialized tool registry")
                     .register(tool)
-                    .map_err(|error| StartError::Internal(error.to_string()))?;
+                    .map_err(StartError::ToolRegistration)?;
             }
         }
         Ok(plugins)
@@ -593,10 +617,9 @@ impl AgentBuilder {
                 let refusal = Self::consent_refusal(id, &path, required);
                 tokio::task::spawn_blocking(move || drop(prepared))
                     .await
-                    .map_err(|error| {
-                        StartError::Internal(format!(
-                            "failed to clean up refused plugin `{id}`: {error}"
-                        ))
+                    .map_err(|source| StartError::RefusedPluginCleanup {
+                        plugin: id.to_owned(),
+                        source,
                     })?;
                 return Ok(PluginLoad::Refused(refusal));
             }
@@ -635,9 +658,7 @@ impl AgentBuilder {
             }
         };
         if let Some(record) = refreshed_record {
-            consent
-                .save(record)
-                .map_err(|error| StartError::Internal(error.to_string()))?;
+            consent.save(record).map_err(StartError::Consent)?;
         }
         Ok(PluginLoad::Admitted(AdmittedPlugin {
             handle,
@@ -712,7 +733,7 @@ impl AgentBuilder {
             ConsentError::RoleConfigInvalid { role, .. } => {
                 PluginRefusalReason::RoleConfigInvalid { role }
             }
-            error => return Err(StartError::Internal(error.to_string())),
+            error => return Err(StartError::Consent(error)),
         };
         Ok(PluginRefusal {
             instance_id: id.to_owned(),

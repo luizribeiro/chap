@@ -1,4 +1,4 @@
-use super::{CallBudgets, InnerHost, PluginCall, bindings};
+use super::{CallBudgets, InnerHost, PluginCall, StartError, bindings};
 use crate::{ExecutionMode, Tool, ToolDefinition, ToolError, config::roles::ToolsSettings};
 use lockgate::{CallError, PluginHandle};
 use std::{future::Future, pin::Pin, sync::Arc};
@@ -24,18 +24,27 @@ impl PluginTool {
         handle: PluginHandle,
         settings: &ToolsSettings,
         call_budgets: CallBudgets,
-    ) -> Result<Vec<Self>, String> {
+    ) -> Result<Vec<Self>, StartError> {
         let definitions = runtime
             .client::<tool_bindings::Role>(&handle)
-            .map_err(|error| format!("tool plugin `{plugin}` failed: {error}"))?
+            .map_err(|source| StartError::ToolRole {
+                plugin: plugin.to_owned(),
+                source,
+            })?
             .definitions(
                 call_budgets
                     .resolve(PluginCall::ToolDefinitions)
                     .invocation_context(),
             )
             .await
-            .map_err(|error| format!("tool plugin `{plugin}` failed: {error}"))?
-            .map_err(|error| format!("tool plugin `{plugin}`: {error}"))?;
+            .map_err(|source| StartError::ToolDefinitionsCall {
+                plugin: plugin.to_owned(),
+                source,
+            })?
+            .map_err(|message| StartError::ToolDefinitions {
+                plugin: plugin.to_owned(),
+                message,
+            })?;
         Ok(definitions
             .into_iter()
             .map(|registration| {

@@ -141,7 +141,6 @@ fn render_load_error(error: LoadError) -> String {
 fn render_start_error(error: StartError) -> String {
     match error {
         StartError::Refused(refusals) => render_plugin_refusals(&refusals),
-        StartError::Internal(message) => message,
         error => error.to_string(),
     }
 }
@@ -671,10 +670,6 @@ mod tests {
             render_start_error(StartError::Refused(refusals.into())),
             "plugin `alpha` from `plugins/alpha.wasm` requires approval before admission; run `chap grants review alpha` and then `chap grants approve alpha`\n\
              plugin `bravo` from `plugins/bravo.wasm` expanded its permission manifest and requires renewed approval before admission; run `chap grants review bravo` and then `chap grants approve bravo`"
-        );
-        assert_eq!(
-            render_start_error(StartError::Internal("host setup failed".to_owned())),
-            "host setup failed"
         );
     }
 

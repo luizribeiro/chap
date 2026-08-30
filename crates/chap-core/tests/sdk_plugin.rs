@@ -277,17 +277,63 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
         .err()
         .expect("hanging tool definitions unexpectedly loaded");
 
-    let StartError::Internal(message) = error else {
-        panic!("tool definition failures must remain internal start errors")
+    assert_eq!(
+        error.to_string(),
+        "tool plugin `sdk-multi-role` failed: plugin exceeded its bounded call deadline of 1s"
+    );
+    let StartError::ToolDefinitionsCall { plugin, source } = error else {
+        panic!("tool definition failures must preserve their call error")
     };
-    assert!(
-        message.contains("tool plugin `sdk-multi-role`"),
-        "{message}"
+    assert_eq!(plugin, "sdk-multi-role");
+    assert!(matches!(
+        source,
+        lockgate::CallError::DeadlineExceeded { deadline }
+            if deadline == Duration::from_secs(1)
+    ));
+}
+
+#[tokio::test]
+async fn preserves_a_tool_plugin_definitions_error_at_the_host_boundary() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let components = sdk_components(&workspace);
+    let config_directory = tempfile::tempdir().unwrap();
+    let config_path = config_directory.path().join("chap.json");
+    std::fs::write(
+        &config_path,
+        json!({
+            "plugins": {
+                "sdk-multi-role": {
+                    "component": components.multi_role.display().to_string(),
+                    "settings": {
+                        "prefix": "multi:",
+                        "fail_definitions": true,
+                    },
+                },
+            },
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let builder = AgentBuilder::load(&config_path)
+        .unwrap()
+        .state_dir(config_directory.path());
+    builder.approve_plugin("sdk-multi-role").await.unwrap();
+
+    let error = builder
+        .start()
+        .await
+        .err()
+        .expect("failing tool definitions unexpectedly loaded");
+
+    assert_eq!(
+        error.to_string(),
+        "tool plugin `sdk-multi-role`: tool catalog is unavailable"
     );
-    assert!(
-        message.contains("plugin exceeded its bounded call deadline of 1s"),
-        "{message}"
-    );
+    assert!(matches!(
+        error,
+        StartError::ToolDefinitions { plugin, message }
+            if plugin == "sdk-multi-role" && message == "tool catalog is unavailable"
+    ));
 }
 
 async fn admit(

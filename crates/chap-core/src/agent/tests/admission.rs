@@ -16,7 +16,7 @@ use super::{
 use crate::{
     CallBudget, ConsentError, ConsentRecord, ExecutionMode, ExportDriftKind, FinishReason,
     PluginCall, PluginRefusal, PluginRefusalReason, ProviderError, StartError, Tool,
-    ToolDefinition, ToolError,
+    ToolDefinition, ToolError, ToolRegistrationError,
 };
 use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role, RuntimeLimits};
 use std::{
@@ -41,6 +41,12 @@ fn only_refusal(error: StartError) -> PluginRefusal {
     refusals.pop().unwrap()
 }
 
+async fn panic_join_error() -> tokio::task::JoinError {
+    tokio::spawn(async { panic!("forced cleanup panic") })
+        .await
+        .unwrap_err()
+}
+
 #[test]
 fn plugin_admission_context_has_expected_deadline() {
     let context = plugin_admission_context();
@@ -52,6 +58,59 @@ fn plugin_admission_context_has_expected_deadline() {
             fuel: PLUGIN_FUEL_PER_CALL,
             deadline: PLUGIN_ADMISSION_DEADLINE,
         }
+    );
+}
+
+#[tokio::test]
+async fn refused_plugin_cleanup_preserves_the_join_error() {
+    let error = StartError::RefusedPluginCleanup {
+        plugin: "example".to_owned(),
+        source: panic_join_error().await,
+    };
+
+    assert!(matches!(
+        &error,
+        StartError::RefusedPluginCleanup { source, .. } if source.is_panic()
+    ));
+    assert!(
+        std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<tokio::task::JoinError>())
+            .filter(|source| source.is_panic())
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn operation_and_cleanup_preserves_the_cleanup_join_error() {
+    let error = StartError::OperationAndCleanup {
+        source: Box::new(StartError::RefusedPluginCleanup {
+            plugin: "example".to_owned(),
+            source: panic_join_error().await,
+        }),
+        cleanup: Box::new(ConsentError::HostCleanup {
+            source: panic_join_error().await,
+        }),
+    };
+    let StartError::OperationAndCleanup { cleanup, .. } = &error else {
+        unreachable!()
+    };
+
+    assert!(matches!(
+        cleanup.as_ref(),
+        ConsentError::HostCleanup { source } if source.is_panic()
+    ));
+    assert!(
+        std::error::Error::source(&error)
+            .and_then(std::error::Error::source)
+            .and_then(|source| source.downcast_ref::<tokio::task::JoinError>())
+            .filter(|source| source.is_panic())
+            .is_some()
+    );
+    assert!(
+        std::error::Error::source(cleanup.as_ref())
+            .and_then(|source| source.downcast_ref::<tokio::task::JoinError>())
+            .filter(|source| source.is_panic())
+            .is_some()
     );
 }
 
@@ -816,6 +875,49 @@ async fn loads_definitions_from_an_admitted_tool_plugin() {
 }
 
 #[tokio::test]
+async fn preserves_plugin_tool_registration_failures() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("tools.wasm"),
+        tool_component("example.tools"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.json");
+    fs::write(
+        &config_path,
+        r#"{
+            "plugins": {
+                "example.tools": {
+                    "component": "tools.wasm"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    let builder = load_test_builder(&config_path)
+        .tool(NamedTool("fixture-tool"))
+        .unwrap();
+    builder.approve_plugin("example.tools").await.unwrap();
+
+    let error = builder
+        .start()
+        .await
+        .err()
+        .expect("the duplicate plugin tool unexpectedly registered");
+
+    assert_eq!(
+        error.to_string(),
+        "tool `fixture-tool` is already registered"
+    );
+    assert!(matches!(
+        error,
+        StartError::ToolRegistration(ToolRegistrationError::DuplicateName { name })
+            if name == "fixture-tool"
+    ));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
 async fn times_out_a_hanging_tool_plugin() {
     let directory = test_directory();
     fs::write(
@@ -1194,6 +1296,26 @@ fn role_change_plugin_builder(bytes: Vec<u8>) -> (PathBuf, PathBuf, AgentBuilder
 
 struct DropProbe {
     dropped: mpsc::SyncSender<std::thread::ThreadId>,
+}
+
+struct NamedTool(&'static str);
+
+impl Tool for NamedTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: self.0.to_owned(),
+            description: "A named test tool".to_owned(),
+            parameters: r#"{"type":"object"}"#.to_owned(),
+        }
+    }
+
+    fn execute(
+        &self,
+        _arguments: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, ToolError>> + Send + '_>>
+    {
+        Box::pin(async { Ok(String::new()) })
+    }
 }
 
 impl Drop for DropProbe {

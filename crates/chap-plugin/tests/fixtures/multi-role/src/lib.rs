@@ -16,11 +16,14 @@ struct Settings {
     prefix: String,
     #[serde(default)]
     hang_definitions: bool,
+    #[serde(default)]
+    fail_definitions: bool,
 }
 
 struct MultiRoleFixture {
     prefix: String,
     hang_definitions: bool,
+    fail_definitions: bool,
 }
 
 impl Plugin for MultiRoleFixture {
@@ -36,6 +39,7 @@ impl Plugin for MultiRoleFixture {
         Self {
             prefix: settings.prefix,
             hang_definitions: settings.hang_definitions,
+            fail_definitions: settings.fail_definitions,
         }
     }
 }
@@ -74,6 +78,9 @@ impl Tools for MultiRoleFixture {
     fn definitions(&self) -> Result<Vec<ToolDefinition>, String> {
         if self.hang_definitions {
             std::thread::sleep(Duration::from_secs(60));
+        }
+        if self.fail_definitions {
+            return Err("tool catalog is unavailable".to_owned());
         }
         Ok(vec![ToolDefinition {
             name: "sdk-echo".to_owned(),
