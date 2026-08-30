@@ -1,10 +1,15 @@
 mod tui;
 
 use chap_core::{
-    AgentBuilder, DriftChange, DriftKind, ExportDrift, ExportDriftKind, PluginConsentReview,
+    AgentBuilder, ConsentError, DriftChange, DriftKind, ExportDrift, ExportDriftKind,
+    PluginConsentReview, PluginRefusal, PluginRefusalReason, StartError,
 };
 use clap::{Args, Parser, Subcommand};
-use std::{collections::BTreeSet, path::PathBuf, process::ExitCode};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 use unicode_width::UnicodeWidthStr;
 
 const NO_PLUGINS_CONFIGURED: &str = "No plugins are configured.\n";
@@ -82,13 +87,13 @@ async fn run(cli: Cli) -> Result<(), String> {
     let builder = AgentBuilder::load(&cli.config)?;
     match cli.command {
         None => {
-            tui::run(builder.start().await.map_err(|error| error.to_string())?).await?;
+            tui::run(builder.start().await.map_err(render_start_error)?).await?;
         }
         Some(Command::Plugins(Plugins {
             command: PluginsCommand::Check,
         })) => {
             let plugin_count = builder.plugins().count();
-            let agent = builder.start().await.map_err(|error| error.to_string())?;
+            let agent = builder.start().await.map_err(render_start_error)?;
             tokio::task::spawn_blocking(move || drop(agent))
                 .await
                 .map_err(|error| format!("failed to clean up plugin host: {error}"))?;
@@ -106,7 +111,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             builder
                 .approve_plugin(&instance_id)
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(render_consent_error)?;
             println!(
                 "Approved `{instance_id}` for its exact resolved manifest. Concrete scopes remain configured in chap.json."
             );
@@ -116,11 +121,107 @@ async fn run(cli: Cli) -> Result<(), String> {
         })) => {
             builder
                 .deny_plugin(&instance_id)
-                .map_err(|error| error.to_string())?;
+                .map_err(render_consent_error)?;
             println!("Denied `{instance_id}`. It will require approval before its next admission.");
         }
     }
     Ok(())
+}
+
+fn render_start_error(error: StartError) -> String {
+    match error {
+        StartError::Refused(refusals) => render_plugin_refusals(&refusals),
+        StartError::Internal(message) => message,
+        error => error.to_string(),
+    }
+}
+
+fn render_plugin_refusals(refusals: &[PluginRefusal]) -> String {
+    refusals
+        .iter()
+        .map(render_plugin_refusal)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_plugin_refusal(refusal: &PluginRefusal) -> String {
+    let id = &refusal.instance_id;
+    match &refusal.reason {
+        PluginRefusalReason::ApprovalRequired => format!(
+            "plugin `{id}` from `{}` requires approval before admission{}",
+            refusal.source_path.display(),
+            approval_remedy(id)
+        ),
+        PluginRefusalReason::RenewedApprovalRequired { drift } => format!(
+            "plugin `{id}` from `{}` {} and requires renewed approval before admission{}",
+            refusal.source_path.display(),
+            drift_description(drift),
+            approval_remedy(id)
+        ),
+        PluginRefusalReason::UnsupportedRole {
+            role,
+            exported_interfaces,
+        } => render_unsupported_role(id, &refusal.source_path, role, exported_interfaces),
+        PluginRefusalReason::RoleConfigInvalid { role } => format!(
+            "plugin `{id}` configures a `{role}` section, but its component does not export the {role} interface"
+        ),
+        PluginRefusalReason::ComponentLoad { source } => source.to_string(),
+        _ => refusal.to_string(),
+    }
+}
+
+fn approval_remedy(id: &str) -> String {
+    format!("; run `chap grants review {id}` and then `chap grants approve {id}`")
+}
+
+fn drift_description(drift: &chap_core::DriftReport) -> &'static str {
+    if drift
+        .export_changes
+        .iter()
+        .any(|change| change.kind == ExportDriftKind::Gained)
+    {
+        "now exports interfaces it was not approved for"
+    } else if drift.blocks_admission {
+        "expanded its permission manifest"
+    } else {
+        "reported a changed permission manifest"
+    }
+}
+
+fn render_consent_error(error: ConsentError) -> String {
+    match error {
+        ConsentError::UnsupportedRole {
+            plugin,
+            path,
+            role,
+            exported_interfaces,
+        } => render_unsupported_role(&plugin, &path, &role, &exported_interfaces),
+        error => error.to_string(),
+    }
+}
+
+fn render_unsupported_role(
+    plugin: &str,
+    path: &Path,
+    role: &str,
+    exported_interfaces: &[String],
+) -> String {
+    format!(
+        "plugin `{plugin}` from `{}` does not implement a supported role; expected an export from the `{role}` package, but the component exports {}",
+        path.display(),
+        render_exported_interfaces(exported_interfaces)
+    )
+}
+
+fn render_exported_interfaces(interfaces: &[String]) -> String {
+    if interfaces.is_empty() {
+        return "no interfaces".to_owned();
+    }
+    interfaces
+        .iter()
+        .map(|interface| format!("`{interface}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 async fn grants_review(
@@ -151,7 +252,7 @@ async fn grants_review(
             &builder
                 .review_plugin(id)
                 .await
-                .map_err(|error| error.to_string())?,
+                .map_err(render_consent_error)?,
         ));
     }
     Ok(output)
@@ -289,9 +390,7 @@ fn render_scopes(scopes: &[String]) -> String {
 fn plugin_list(builder: &AgentBuilder) -> Result<String, String> {
     let mut rows = Vec::new();
     for (id, component) in builder.plugins() {
-        let roles = builder
-            .plugin_roles(id)
-            .map_err(|error| error.to_string())?;
+        let roles = builder.plugin_roles(id).map_err(render_consent_error)?;
         rows.push([
             id.to_owned(),
             if roles.is_empty() {
@@ -379,6 +478,14 @@ mod tests {
         }
     }
 
+    fn refusal(id: &str, component: &str, reason: PluginRefusalReason) -> PluginRefusal {
+        PluginRefusal {
+            instance_id: id.to_owned(),
+            source_path: PathBuf::from(component),
+            reason,
+        }
+    }
+
     #[test]
     fn starts_the_tui_when_no_subcommand_is_given() {
         let cli = Cli::try_parse_from(["chap"]).unwrap();
@@ -437,6 +544,193 @@ mod tests {
                 command: GrantsCommand::Deny { instance_id }
             })) if instance_id == "openai"
         ));
+    }
+
+    #[test]
+    fn renders_admission_remedies_one_per_line() {
+        let refusals = [
+            refusal(
+                "alpha",
+                "plugins/alpha.wasm",
+                PluginRefusalReason::ApprovalRequired,
+            ),
+            refusal(
+                "bravo",
+                "plugins/bravo.wasm",
+                PluginRefusalReason::RenewedApprovalRequired {
+                    drift: DriftReport {
+                        changes: Vec::new(),
+                        export_changes: Vec::new(),
+                        blocks_admission: true,
+                    },
+                },
+            ),
+        ];
+
+        assert_eq!(
+            render_start_error(StartError::Refused(refusals.into())),
+            "plugin `alpha` from `plugins/alpha.wasm` requires approval before admission; run `chap grants review alpha` and then `chap grants approve alpha`\n\
+             plugin `bravo` from `plugins/bravo.wasm` expanded its permission manifest and requires renewed approval before admission; run `chap grants review bravo` and then `chap grants approve bravo`"
+        );
+        assert_eq!(
+            render_start_error(StartError::Internal("host setup failed".to_owned())),
+            "host setup failed"
+        );
+    }
+
+    #[test]
+    fn renders_gained_exports_as_renewed_approval() {
+        let refusal = refusal(
+            "example",
+            "plugins/example.wasm",
+            PluginRefusalReason::RenewedApprovalRequired {
+                drift: DriftReport {
+                    changes: Vec::new(),
+                    export_changes: vec![ExportDrift {
+                        name: "chap:agent/tools".to_owned(),
+                        kind: ExportDriftKind::Gained,
+                        before: Vec::new(),
+                        after: vec!["chap:agent/tools@0.3.0".to_owned()],
+                    }],
+                    blocks_admission: true,
+                },
+            },
+        );
+
+        assert_eq!(
+            render_plugin_refusal(&refusal),
+            "plugin `example` from `plugins/example.wasm` now exports interfaces it was not approved for and requires renewed approval before admission; run `chap grants review example` and then `chap grants approve example`"
+        );
+    }
+
+    #[test]
+    fn renders_nonblocking_drift_as_renewed_approval() {
+        let refusal = refusal(
+            "example",
+            "plugins/example.wasm",
+            PluginRefusalReason::RenewedApprovalRequired {
+                drift: DriftReport {
+                    changes: Vec::new(),
+                    export_changes: Vec::new(),
+                    blocks_admission: false,
+                },
+            },
+        );
+
+        assert_eq!(
+            render_plugin_refusal(&refusal),
+            "plugin `example` from `plugins/example.wasm` reported a changed permission manifest and requires renewed approval before admission; run `chap grants review example` and then `chap grants approve example`"
+        );
+    }
+
+    #[test]
+    fn renders_structured_unsupported_role_details() {
+        let refusal = refusal(
+            "example",
+            "plugins/example.wasm",
+            PluginRefusalReason::UnsupportedRole {
+                role: "chap:agent@0.3.0".to_owned(),
+                exported_interfaces: vec![
+                    "lockgate:config/schema".to_owned(),
+                    "example:plugin/unsupported@1.0.0".to_owned(),
+                ],
+            },
+        );
+
+        assert_eq!(
+            render_plugin_refusal(&refusal),
+            "plugin `example` from `plugins/example.wasm` does not implement a supported role; expected an export from the `chap:agent@0.3.0` package, but the component exports `lockgate:config/schema`, `example:plugin/unsupported@1.0.0`"
+        );
+    }
+
+    #[test]
+    fn renders_structured_role_config_and_component_failures() {
+        let role = refusal(
+            "example",
+            "plugins/example.wasm",
+            PluginRefusalReason::RoleConfigInvalid {
+                role: "tools".to_owned(),
+            },
+        );
+        let load = refusal(
+            "missing",
+            "plugins/missing.wasm",
+            PluginRefusalReason::ComponentLoad {
+                source: Box::new(ConsentError::ReadPlugin {
+                    plugin: "missing".to_owned(),
+                    path: PathBuf::from("plugins/missing.wasm"),
+                    source: std::io::Error::new(std::io::ErrorKind::NotFound, "component missing"),
+                }),
+            },
+        );
+
+        assert_eq!(
+            render_plugin_refusal(&role),
+            "plugin `example` configures a `tools` section, but its component does not export the tools interface"
+        );
+        assert_eq!(
+            render_plugin_refusal(&load),
+            "failed to read plugin `missing` from `plugins/missing.wasm`: component missing"
+        );
+    }
+
+    #[tokio::test]
+    async fn renders_load_plugin_component_failures() {
+        let directory = tempfile::tempdir().unwrap();
+        let component = directory.path().join("broken.wasm");
+        std::fs::write(&component, []).unwrap();
+        let config_path = directory.path().join("chap.json");
+        std::fs::write(
+            &config_path,
+            r#"{
+                "plugins": {
+                    "broken": {
+                        "component": "broken.wasm"
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let builder = AgentBuilder::load(&config_path)
+            .unwrap()
+            .state_dir(directory.path());
+        let error = builder.review_plugin("broken").await.unwrap_err();
+
+        assert!(matches!(
+            &error,
+            ConsentError::LoadPlugin { plugin, path, .. }
+                if plugin == "broken" && path == &component
+        ));
+        let refusal = PluginRefusal {
+            instance_id: "broken".to_owned(),
+            source_path: component.clone(),
+            reason: PluginRefusalReason::ComponentLoad {
+                source: Box::new(error),
+            },
+        };
+
+        assert_eq!(
+            render_plugin_refusal(&refusal),
+            format!(
+                "failed to load plugin `broken` from `{}`: input is not a valid WebAssembly component: unexpected end-of-file (at offset 0x0)",
+                component.display()
+            )
+        );
+    }
+
+    #[test]
+    fn renders_consent_errors_with_export_details() {
+        let error = ConsentError::UnsupportedRole {
+            plugin: "example".to_owned(),
+            path: PathBuf::from("plugins/example.wasm"),
+            role: "chap:agent@0.3.0".to_owned(),
+            exported_interfaces: Vec::new(),
+        };
+
+        assert_eq!(
+            render_consent_error(error),
+            "plugin `example` from `plugins/example.wasm` does not implement a supported role; expected an export from the `chap:agent@0.3.0` package, but the component exports no interfaces"
+        );
     }
 
     #[tokio::test]
