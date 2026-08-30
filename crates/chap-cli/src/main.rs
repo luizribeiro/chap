@@ -1,7 +1,7 @@
 mod tui;
 
 use chap_core::{
-    AgentBuilder, ConsentError, DriftChange, DriftKind, ExportDrift, ExportDriftKind,
+    AgentBuilder, ConsentError, DriftChange, DriftKind, ExportDrift, ExportDriftKind, LoadError,
     PluginConsentReview, PluginRefusal, PluginRefusalReason, StartError,
 };
 use clap::{Args, Parser, Subcommand};
@@ -84,7 +84,7 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<(), String> {
-    let builder = AgentBuilder::load(&cli.config).map_err(|error| error.to_string())?;
+    let builder = AgentBuilder::load(&cli.config).map_err(render_load_error)?;
     match cli.command {
         None => {
             tui::run(builder.start().await.map_err(render_start_error)?).await?;
@@ -126,6 +126,16 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn render_load_error(error: LoadError) -> String {
+    match error {
+        LoadError::ExecUnsupported => {
+            "agent.exec is configured, but this build lacks exec support; rebuild with the `exec` feature"
+                .to_owned()
+        }
+        error => error.to_string(),
+    }
 }
 
 fn render_start_error(error: StartError) -> String {
@@ -190,6 +200,9 @@ fn drift_description(drift: &chap_core::DriftReport) -> &'static str {
 
 fn render_consent_error(error: ConsentError) -> String {
     match error {
+        ConsentError::StateLocation(source) | ConsentError::HostConfiguration(source) => {
+            render_load_error(source)
+        }
         ConsentError::UnsupportedRole {
             plugin,
             path,
@@ -228,7 +241,7 @@ async fn grants_review(
     builder: &AgentBuilder,
     instance_id: Option<&str>,
 ) -> Result<String, String> {
-    let consent_path = builder.consent_path().map_err(|error| error.to_string())?;
+    let consent_path = builder.consent_path().map_err(render_load_error)?;
     let mut output = format!("Consent store: {}\n", consent_path.display());
     let ids = match instance_id {
         Some(id) => vec![id.to_owned()],
@@ -443,7 +456,7 @@ mod tests {
         ConsentManifest, ConsentRecord, DriftReport, GrantReview, PluginConsentReview,
     };
     use clap::CommandFactory;
-    use std::ffi::OsStr;
+    use std::{ffi::OsStr, io};
 
     fn consent_record(instance_id: &str, digest_byte: char) -> ConsentRecord {
         serde_json::from_value(serde_json::json!({
@@ -507,6 +520,55 @@ mod tests {
 
         let cli = Cli::try_parse_from(["chap", "--config", "explicit.json"]).unwrap();
         assert_eq!(cli.config, PathBuf::from("explicit.json"));
+    }
+
+    #[test]
+    fn renders_config_load_failure_lines() {
+        assert_eq!(
+            render_load_error(LoadError::ReadConfig {
+                path: PathBuf::from("missing.json"),
+                source: io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"),
+            }),
+            "failed to read `missing.json`: permission denied"
+        );
+        assert_eq!(
+            render_load_error(LoadError::ParseConfig {
+                path: PathBuf::from("broken.json"),
+                source: serde_json::from_str::<serde_json::Value>("{").unwrap_err(),
+            }),
+            "failed to parse `broken.json`: EOF while parsing an object at line 1 column 1"
+        );
+        assert_eq!(
+            render_load_error(LoadError::ResolveConfigPath {
+                path: PathBuf::from("relative/chap.json"),
+                source: io::Error::new(io::ErrorKind::NotFound, "current directory missing"),
+            }),
+            "failed to resolve config path `relative/chap.json` as an absolute path: current directory missing"
+        );
+        assert_eq!(
+            render_load_error(LoadError::InvalidName {
+                name: "team/alpha".to_owned(),
+            }),
+            "invalid instance name `team/alpha`: expected a non-empty value containing only A-Z, a-z, 0-9, '.', '_', or '-', other than '.' or '..'"
+        );
+        assert_eq!(
+            render_load_error(LoadError::StateDirectoryUnavailable),
+            "cannot locate CHAP state: neither XDG_STATE_HOME nor HOME is set to a non-empty value"
+        );
+        assert_eq!(
+            render_load_error(LoadError::InvalidExecConfig {
+                source: serde_json::from_str::<u64>(r#""soon""#).unwrap_err(),
+            }),
+            "failed to parse the `agent.exec` config section: invalid type: string \"soon\", expected u64 at line 1 column 6"
+        );
+    }
+
+    #[test]
+    fn renders_the_exec_rebuild_hint() {
+        assert_eq!(
+            render_load_error(LoadError::ExecUnsupported),
+            "agent.exec is configured, but this build lacks exec support; rebuild with the `exec` feature"
+        );
     }
 
     #[test]
