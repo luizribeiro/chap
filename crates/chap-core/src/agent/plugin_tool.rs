@@ -80,15 +80,22 @@ impl Tool for PluginTool {
                 .await
                 .map_err(|error| tool_call_error(&self.plugin, error))?
                 .map_err(|error| {
-                    let message = match error {
-                        tool_bindings::ToolError::InvalidInput(message)
-                        | tool_bindings::ToolError::Denied(message)
-                        | tool_bindings::ToolError::Failed(message)
-                        | tool_bindings::ToolError::Fatal(message) => message,
-                    };
-                    format!("tool plugin `{}`: {message}", self.plugin)
+                    format!(
+                        "tool plugin `{}`: {}",
+                        self.plugin,
+                        flatten_tool_error(error)
+                    )
                 })
         })
+    }
+}
+
+fn flatten_tool_error(error: tool_bindings::ToolError) -> String {
+    match error {
+        tool_bindings::ToolError::InvalidInput(message)
+        | tool_bindings::ToolError::Denied(message)
+        | tool_bindings::ToolError::Failed(message)
+        | tool_bindings::ToolError::Fatal(message) => message,
     }
 }
 
@@ -134,6 +141,40 @@ impl From<BindingExecutionMode> for ExecutionMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flattens_every_wire_tool_error_to_its_message() {
+        let errors = [
+            (
+                tool_bindings::ToolError::InvalidInput(
+                    "expected integer field `limit`, got a string".to_owned(),
+                ),
+                "expected integer field `limit`, got a string",
+            ),
+            (
+                tool_bindings::ToolError::Denied(
+                    "capability policy denied access to project files".to_owned(),
+                ),
+                "capability policy denied access to project files",
+            ),
+            (
+                tool_bindings::ToolError::Failed(
+                    "command exited with status 17 after writing stderr".to_owned(),
+                ),
+                "command exited with status 17 after writing stderr",
+            ),
+            (
+                tool_bindings::ToolError::Fatal(
+                    "plugin runtime could not load its configuration".to_owned(),
+                ),
+                "plugin runtime could not load its configuration",
+            ),
+        ];
+
+        for (error, message) in errors {
+            assert_eq!(flatten_tool_error(error), message);
+        }
+    }
 
     #[test]
     fn parallel_override_does_not_loosen_sequential_plugin_tools() {
