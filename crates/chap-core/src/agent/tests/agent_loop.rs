@@ -5,6 +5,7 @@ use super::super::{
 };
 use crate::{
     ExecutionMode, FinishReason, ProviderError, RunError, SessionOptions, Tool, ToolDefinition,
+    ToolError,
     config::agent::ToolExecutionSettings,
     session::{
         AssembledContext, AssistantContent, Message, Reasoning, RunUsage, SessionEventKind,
@@ -1338,7 +1339,7 @@ impl Tool for CoordinatedTool {
     fn execute(
         &self,
         _arguments: String,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, ToolError>> + Send + '_>>
     {
         Box::pin(async move {
             match &self.behavior {
@@ -1378,7 +1379,7 @@ impl Tool for EchoTool {
     fn execute(
         &self,
         arguments: String,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, ToolError>> + Send + '_>>
     {
         Box::pin(async move { Ok(arguments) })
     }

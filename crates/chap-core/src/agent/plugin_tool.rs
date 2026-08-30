@@ -1,5 +1,5 @@
 use super::{CallBudgets, InnerHost, PluginCall, bindings};
-use crate::{ExecutionMode, Tool, ToolDefinition, config::roles::ToolsSettings};
+use crate::{ExecutionMode, Tool, ToolDefinition, ToolError, config::roles::ToolsSettings};
 use lockgate::{CallError, PluginHandle};
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -65,11 +65,13 @@ impl Tool for PluginTool {
     fn execute(
         &self,
         arguments: String,
-    ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + '_>> {
+    ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + '_>> {
         Box::pin(async move {
             self.runtime
                 .client::<tool_bindings::Role>(&self.handle)
-                .map_err(|error| format!("tool plugin `{}` failed: {error}", self.plugin))?
+                .map_err(|error| {
+                    ToolError::Failed(format!("tool plugin `{}` failed: {error}", self.plugin))
+                })?
                 .execute(
                     self.call_budgets
                         .resolve(PluginCall::ToolExecute)
@@ -79,33 +81,28 @@ impl Tool for PluginTool {
                 )
                 .await
                 .map_err(|error| tool_call_error(&self.plugin, error))?
-                .map_err(|error| {
-                    format!(
-                        "tool plugin `{}`: {}",
-                        self.plugin,
-                        flatten_tool_error(error)
-                    )
-                })
+                .map_err(|error| map_tool_error(&self.plugin, error))
         })
     }
 }
 
-fn flatten_tool_error(error: tool_bindings::ToolError) -> String {
+fn map_tool_error(plugin: &str, error: tool_bindings::ToolError) -> ToolError {
+    let message = |detail| format!("tool plugin `{plugin}`: {detail}");
     match error {
-        tool_bindings::ToolError::InvalidInput(message)
-        | tool_bindings::ToolError::Denied(message)
-        | tool_bindings::ToolError::Failed(message)
-        | tool_bindings::ToolError::Fatal(message) => message,
+        tool_bindings::ToolError::InvalidInput(error) => ToolError::InvalidInput(message(error)),
+        tool_bindings::ToolError::Denied(error) => ToolError::Denied(message(error)),
+        tool_bindings::ToolError::Failed(error) => ToolError::Failed(message(error)),
+        tool_bindings::ToolError::Fatal(error) => ToolError::Fatal(message(error)),
     }
 }
 
-fn tool_call_error(plugin: &str, error: CallError) -> String {
-    match error {
+fn tool_call_error(plugin: &str, error: CallError) -> ToolError {
+    ToolError::Failed(match error {
         CallError::DeadlineExceeded { deadline } => {
             format!("tool plugin `{plugin}` timed out after {deadline:?}")
         }
         error => format!("tool plugin `{plugin}` failed: {error}"),
-    }
+    })
 }
 
 fn resolve_tool_mode(
@@ -143,36 +140,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn flattens_every_wire_tool_error_to_its_message() {
+    fn maps_every_wire_tool_error_to_the_matching_host_variant() {
         let errors = [
             (
                 tool_bindings::ToolError::InvalidInput(
                     "expected integer field `limit`, got a string".to_owned(),
                 ),
-                "expected integer field `limit`, got a string",
+                ToolError::InvalidInput(
+                    "tool plugin `example`: expected integer field `limit`, got a string"
+                        .to_owned(),
+                ),
             ),
             (
                 tool_bindings::ToolError::Denied(
                     "capability policy denied access to project files".to_owned(),
                 ),
-                "capability policy denied access to project files",
+                ToolError::Denied(
+                    "tool plugin `example`: capability policy denied access to project files"
+                        .to_owned(),
+                ),
             ),
             (
                 tool_bindings::ToolError::Failed(
                     "command exited with status 17 after writing stderr".to_owned(),
                 ),
-                "command exited with status 17 after writing stderr",
+                ToolError::Failed(
+                    "tool plugin `example`: command exited with status 17 after writing stderr"
+                        .to_owned(),
+                ),
             ),
             (
                 tool_bindings::ToolError::Fatal(
                     "plugin runtime could not load its configuration".to_owned(),
                 ),
-                "plugin runtime could not load its configuration",
+                ToolError::Fatal(
+                    "tool plugin `example`: plugin runtime could not load its configuration"
+                        .to_owned(),
+                ),
             ),
         ];
 
-        for (error, message) in errors {
-            assert_eq!(flatten_tool_error(error), message);
+        for (error, expected) in errors {
+            assert_eq!(map_tool_error("example", error), expected);
         }
     }
 

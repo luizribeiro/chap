@@ -19,4 +19,4 @@ pub use session::{
     ContextFailure, RunError, RunUsage, Session, SessionError, SessionEvent, SessionEventError,
     SessionEventKind, SessionEvents, SessionId, SessionOptions, SteerError, SteeringId, Usage,
 };
-pub use tool::{ExecutionMode, Tool, ToolDefinition, ToolRegistrationError};
+pub use tool::{ExecutionMode, Tool, ToolDefinition, ToolError, ToolRegistrationError};

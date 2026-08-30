@@ -34,6 +34,19 @@ pub enum ToolRegistrationError {
     DuplicateName { name: String },
 }
 
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+#[non_exhaustive]
+pub enum ToolError {
+    #[error("{0}")]
+    InvalidInput(String),
+    #[error("{0}")]
+    Denied(String),
+    #[error("{0}")]
+    Failed(String),
+    #[error("{0}")]
+    Fatal(String),
+}
+
 pub trait Tool: Send + Sync {
     fn definition(&self) -> ToolDefinition;
 
@@ -44,7 +57,7 @@ pub trait Tool: Send + Sync {
     fn execute(
         &self,
         arguments: String,
-    ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + '_>>;
+    ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + '_>>;
 }
 
 pub(crate) struct ToolRegistry {
@@ -83,11 +96,11 @@ impl ToolRegistry {
             .map_or(ExecutionMode::default(), |tool| tool.execution_mode())
     }
 
-    pub(crate) async fn execute(&self, name: &str, arguments: String) -> Result<String, String> {
+    pub(crate) async fn execute(&self, name: &str, arguments: String) -> Result<String, ToolError> {
         let tool = self
             .tools
             .get(name)
-            .ok_or_else(|| format!("tool `{name}` is not registered"))?;
+            .ok_or_else(|| ToolError::Failed(format!("tool `{name}` is not registered")))?;
         tool.execute(arguments).await
     }
 }
@@ -126,7 +139,7 @@ mod tests {
         fn execute(
             &self,
             arguments: String,
-        ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + '_>> {
+        ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + '_>> {
             Box::pin(async move { Ok(arguments) })
         }
     }
@@ -149,7 +162,7 @@ mod tests {
         fn execute(
             &self,
             arguments: String,
-        ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + '_>> {
+        ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + '_>> {
             Box::pin(async move { Ok(arguments) })
         }
     }
@@ -247,5 +260,32 @@ mod tests {
         let registry = ToolRegistry::new();
 
         assert_eq!(registry.execution_mode("unknown"), ExecutionMode::Parallel);
+    }
+
+    #[tokio::test]
+    async fn reports_unknown_tools_as_failed_executions() {
+        let registry = ToolRegistry::new();
+
+        assert_eq!(
+            registry.execute("unknown", "{}".to_owned()).await,
+            Err(ToolError::Failed(
+                "tool `unknown` is not registered".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn tool_errors_display_only_their_message() {
+        let errors = [
+            ToolError::InvalidInput("invalid".to_owned()),
+            ToolError::Denied("denied".to_owned()),
+            ToolError::Failed("failed".to_owned()),
+            ToolError::Fatal("fatal".to_owned()),
+        ];
+
+        assert_eq!(
+            errors.map(|error| error.to_string()),
+            ["invalid", "denied", "failed", "fatal"]
+        );
     }
 }

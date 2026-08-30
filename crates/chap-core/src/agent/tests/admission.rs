@@ -16,7 +16,7 @@ use super::{
 use crate::{
     CallBudget, ConsentError, ConsentRecord, ExecutionMode, ExportDriftKind, FinishReason,
     PluginCall, PluginRefusal, PluginRefusalReason, ProviderError, StartError, Tool,
-    ToolDefinition,
+    ToolDefinition, ToolError,
 };
 use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role, RuntimeLimits};
 use std::{
@@ -849,11 +849,14 @@ async fn times_out_a_hanging_tool_plugin() {
     .expect("hanging tool call did not respect its deadline")
     .unwrap_err();
 
+    let ToolError::Failed(message) = error else {
+        panic!("tool call deadline must be an execution failure")
+    };
     assert!(
-        error.starts_with("tool plugin `example.tools` timed out after "),
-        "{error}"
+        message.starts_with("tool plugin `example.tools` timed out after "),
+        "{message}"
     );
-    assert!(!error.contains(" failed: "), "{error}");
+    assert!(!message.contains(" failed: "), "{message}");
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -1211,7 +1214,7 @@ impl Tool for DropProbe {
     fn execute(
         &self,
         _arguments: String,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, ToolError>> + Send + '_>>
     {
         Box::pin(async { Ok(String::new()) })
     }

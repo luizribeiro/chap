@@ -287,7 +287,7 @@ async fn execute_tool(tools: &ToolRegistry, call: ToolCall) -> ToolResult {
         Err(error) => ToolResult {
             call_id: call.id,
             name: call.name,
-            output: error,
+            output: error.to_string(),
             is_error: true,
         },
     }
