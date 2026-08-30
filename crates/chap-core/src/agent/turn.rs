@@ -1,7 +1,4 @@
-use super::{
-    MAX_PROVIDER_STEPS_PER_TURN,
-    provider::{CompletionBackend, FinishReason},
-};
+use super::{MAX_PROVIDER_STEPS_PER_TURN, provider::CompletionBackend};
 use crate::{
     config::agent::ToolExecutionSettings,
     session::{
@@ -21,7 +18,7 @@ pub(super) async fn run_agent_loop(
     backend: &impl CompletionBackend,
 ) -> Result<String, RunError> {
     if input.trim().is_empty() {
-        return Err(RunError::Other("turn input cannot be empty".to_owned()));
+        return Err(RunError::EmptyInput);
     }
 
     let _run = session.turn_lock.lock().await;
@@ -50,7 +47,7 @@ pub(super) async fn run_agent_loop(
         }
         RunOutcome::Interrupted => {
             session.emit(SessionEventKind::RunInterrupted);
-            Err(RunError::Other("run interrupted".to_owned()))
+            Err(RunError::Interrupted)
         }
     }
 }
@@ -59,15 +56,6 @@ enum RunOutcome {
     Completed(String),
     Failed(RunError),
     Interrupted,
-}
-
-impl From<Result<String, String>> for RunOutcome {
-    fn from(result: Result<String, String>) -> Self {
-        match result {
-            Ok(response) => Self::Completed(response),
-            Err(error) => Self::Failed(RunError::Other(error)),
-        }
-    }
 }
 
 async fn run_steps(
@@ -125,8 +113,10 @@ async fn run_steps(
                 }
                 RunBoundary::Complete => {
                     return text
-                        .ok_or_else(|| completion_without_text_error(&completion.finish_reason))
-                        .into();
+                        .ok_or_else(|| RunError::CompletionWithoutText {
+                            finish_reason: completion.finish_reason.clone(),
+                        })
+                        .map_or_else(RunOutcome::Failed, RunOutcome::Completed);
                 }
                 RunBoundary::Interrupted => return RunOutcome::Interrupted,
             }
@@ -185,9 +175,9 @@ async fn run_steps(
         append_steering(session, steering).await;
     }
 
-    RunOutcome::Failed(RunError::Other(format!(
-        "turn exceeded the limit of {MAX_PROVIDER_STEPS_PER_TURN} provider requests"
-    )))
+    RunOutcome::Failed(RunError::ProviderStepLimitExceeded {
+        limit: MAX_PROVIDER_STEPS_PER_TURN,
+    })
 }
 
 fn update_usage(session: &SessionState, total: &mut Usage, last_step: Usage) {
@@ -315,18 +305,4 @@ fn completion_text(content: &[AssistantContent]) -> Option<String> {
         return None;
     }
     Some(text.join("\n"))
-}
-
-fn completion_without_text_error(finish_reason: &FinishReason) -> String {
-    match finish_reason {
-        FinishReason::Length => {
-            "model reached its output limit before producing a response".to_owned()
-        }
-        FinishReason::Other(reason) => {
-            format!("provider returned a completion without text (finish reason: {reason})")
-        }
-        FinishReason::Stop | FinishReason::ToolCalls => {
-            "provider returned a completion without text".to_owned()
-        }
-    }
 }

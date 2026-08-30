@@ -1,7 +1,7 @@
 use super::{
     super::{
         AgentBuilder, PLUGIN_ADMISSION_DEADLINE, PLUGIN_FUEL_PER_CALL, plugin_admission_context,
-        provider::{CompletionBackend, FinishReason, PluginBackend},
+        provider::{CompletionBackend, PluginBackend},
         runtime_limits,
     },
     fixtures::{
@@ -14,8 +14,9 @@ use super::{
     load_test_builder,
 };
 use crate::{
-    CallBudget, ConsentError, ConsentRecord, ExecutionMode, ExportDriftKind, PluginCall,
-    PluginRefusal, PluginRefusalReason, ProviderError, StartError, Tool, ToolDefinition,
+    CallBudget, ConsentError, ConsentRecord, ExecutionMode, ExportDriftKind, FinishReason,
+    PluginCall, PluginRefusal, PluginRefusalReason, ProviderError, StartError, Tool,
+    ToolDefinition,
 };
 use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role, RuntimeLimits};
 use std::{

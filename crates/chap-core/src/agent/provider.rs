@@ -1,6 +1,6 @@
 use super::{AgentInner, PluginCall, bindings};
 use crate::{
-    ProviderError, ToolDefinition,
+    FinishReason, ProviderError, ToolDefinition,
     session::{AssistantContent, Message, Reasoning, ToolCall, Usage},
 };
 use bindings::provider as provider_bindings;
@@ -116,14 +116,6 @@ pub(super) struct ProviderCompletion {
     pub(super) content: Vec<AssistantContent>,
     pub(super) finish_reason: FinishReason,
     pub(super) usage: Option<Usage>,
-}
-
-#[derive(Clone, Debug)]
-pub(super) enum FinishReason {
-    Stop,
-    ToolCalls,
-    Length,
-    Other(String),
 }
 
 impl From<Message> for provider_types::Message {

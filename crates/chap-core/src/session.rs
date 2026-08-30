@@ -1,4 +1,4 @@
-use crate::ProviderError;
+use crate::{FinishReason, ProviderError};
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt,
@@ -93,22 +93,69 @@ pub struct RunUsage {
     pub last_step: Usage,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Error)]
+#[non_exhaustive]
 pub enum RunError {
+    #[error(transparent)]
     Provider(ProviderError),
-    Other(String),
+    #[error("session run task failed: {source}")]
+    SessionTask {
+        #[source]
+        source: Arc<tokio::task::JoinError>,
+    },
+    #[error("session does not belong to this runtime")]
+    ForeignSession,
+    #[error("turn input cannot be empty")]
+    EmptyInput,
+    #[error("run interrupted")]
+    Interrupted,
+    #[error("{}", completion_without_text_message(.finish_reason))]
+    CompletionWithoutText { finish_reason: FinishReason },
+    #[error("turn exceeded the limit of {limit} provider requests")]
+    ProviderStepLimitExceeded { limit: usize },
 }
 
-impl fmt::Display for RunError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Provider(error) => error.fmt(formatter),
-            Self::Other(message) => formatter.write_str(message),
+impl PartialEq for RunError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Provider(left), Self::Provider(right)) => left == right,
+            (Self::SessionTask { source: left }, Self::SessionTask { source: right }) => {
+                Arc::ptr_eq(left, right)
+            }
+            (Self::ForeignSession, Self::ForeignSession) => true,
+            (Self::EmptyInput, Self::EmptyInput) | (Self::Interrupted, Self::Interrupted) => true,
+            (
+                Self::CompletionWithoutText {
+                    finish_reason: left,
+                },
+                Self::CompletionWithoutText {
+                    finish_reason: right,
+                },
+            ) => left == right,
+            (
+                Self::ProviderStepLimitExceeded { limit: left },
+                Self::ProviderStepLimitExceeded { limit: right },
+            ) => left == right,
+            _ => false,
         }
     }
 }
 
-impl std::error::Error for RunError {}
+impl Eq for RunError {}
+
+fn completion_without_text_message(finish_reason: &FinishReason) -> String {
+    match finish_reason {
+        FinishReason::Length => {
+            "model reached its output limit before producing a response".to_owned()
+        }
+        FinishReason::Other(reason) => {
+            format!("provider returned a completion without text (finish reason: {reason})")
+        }
+        FinishReason::Stop | FinishReason::ToolCalls => {
+            "provider returned a completion without text".to_owned()
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 #[error("context plugin `{plugin}` failed: {error}")]
@@ -296,7 +343,9 @@ impl Session {
         let input = input.into();
         tokio::spawn(async move { executor.send(&session, input).await })
             .await
-            .map_err(|error| RunError::Other(format!("session run task failed: {error}")))?
+            .map_err(|source| RunError::SessionTask {
+                source: Arc::new(source),
+            })?
     }
 
     pub fn steer(&self, input: impl Into<String>) -> Result<SteeringId, SteerError> {
@@ -563,11 +612,19 @@ mod tests {
         }
     }
 
+    struct PanicExecutor;
+
+    impl SessionExecutor for PanicExecutor {
+        fn send<'a>(&'a self, _session: &'a Session, _input: String) -> SessionFuture<'a> {
+            Box::pin(async move { panic!("executor failed") })
+        }
+    }
+
     #[test]
     fn run_error_implements_std_error() {
         fn assert_error(_: &dyn std::error::Error) {}
 
-        assert_error(&RunError::Other("run failed".to_owned()));
+        assert_error(&RunError::Interrupted);
     }
 
     #[test]
@@ -617,6 +674,22 @@ mod tests {
         let session = Session::new(state, Arc::new(EchoExecutor));
 
         assert_eq!(session.send("hello").await.unwrap(), "hello");
+    }
+
+    #[tokio::test]
+    async fn session_task_failures_preserve_the_join_error() {
+        let state = session_state(&SessionManager::new());
+        let session = Session::new(state, Arc::new(PanicExecutor));
+
+        let error = session.send("hello").await.unwrap_err();
+
+        assert!(matches!(&error, RunError::SessionTask { source } if source.is_panic()));
+        assert!(
+            std::error::Error::source(&error)
+                .and_then(|source| source.downcast_ref::<Arc<tokio::task::JoinError>>())
+                .filter(|source| source.is_panic())
+                .is_some()
+        );
     }
 
     #[test]

@@ -1,10 +1,10 @@
 use super::super::{
     MAX_PROVIDER_STEPS_PER_TURN,
-    provider::{CompletionBackend, CompletionFuture, FinishReason, ProviderCompletion},
+    provider::{CompletionBackend, CompletionFuture, ProviderCompletion},
     turn::run_agent_loop,
 };
 use crate::{
-    ExecutionMode, ProviderError, RunError, SessionOptions, Tool, ToolDefinition,
+    ExecutionMode, FinishReason, ProviderError, RunError, SessionOptions, Tool, ToolDefinition,
     config::agent::ToolExecutionSettings,
     session::{
         AssembledContext, AssistantContent, Message, Reasoning, RunUsage, SessionEventKind,
@@ -27,6 +27,26 @@ const TOOL_EXECUTION: ToolExecutionSettings = ToolExecutionSettings {
     mode: ExecutionMode::Parallel,
     max_concurrency: NonZeroUsize::new(8).expect("tool concurrency is nonzero"),
 };
+
+#[tokio::test]
+async fn rejects_empty_turn_input() {
+    let state = session_state();
+    let backend = FakeBackend::new([]);
+
+    let error = run_agent_loop(
+        &state,
+        " \n".to_owned(),
+        &ToolRegistry::new(),
+        TOOL_EXECUTION,
+        &backend,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(error, RunError::EmptyInput);
+    assert!(backend.requests.lock().unwrap().is_empty());
+    assert!(state.messages.read().await.is_empty());
+}
 
 #[tokio::test]
 async fn resumes_a_turn_after_executing_a_tool_call() {
@@ -721,10 +741,7 @@ async fn preserves_interrupted_input_for_the_next_provider_request() {
     let steering_id = state.steer("queued detail".to_owned()).unwrap();
     state.interrupt().unwrap();
 
-    assert_eq!(
-        run.await.unwrap(),
-        Err(RunError::Other("run interrupted".to_owned()))
-    );
+    assert_eq!(run.await.unwrap(), Err(RunError::Interrupted));
     assert_eq!(
         receive_event_kinds(&mut events, 4).await,
         vec![
@@ -804,10 +821,7 @@ async fn closes_unfinished_tool_calls_when_interrupted() {
         .expect("both tools should start concurrently");
     state.interrupt().unwrap();
 
-    assert_eq!(
-        run.await.unwrap(),
-        Err(RunError::Other("run interrupted".to_owned()))
-    );
+    assert_eq!(run.await.unwrap(), Err(RunError::Interrupted));
     assert_eq!(
         receive_event_kinds(&mut events, 8).await,
         vec![
@@ -906,10 +920,7 @@ async fn completes_finished_calls_when_interrupted_mid_batch() {
         .expect("the unfinished tool should start");
     state.interrupt().unwrap();
 
-    assert_eq!(
-        run.await.unwrap(),
-        Err(RunError::Other("run interrupted".to_owned()))
-    );
+    assert_eq!(run.await.unwrap(), Err(RunError::Interrupted));
     let history = state.messages.read().await;
     let results = history
         .iter()
@@ -1017,7 +1028,9 @@ async fn preserves_the_provider_error_in_the_failed_terminal_event() {
 async fn explains_when_an_empty_completion_reached_the_output_limit() {
     assert_eq!(
         empty_completion_error(FinishReason::Length).await,
-        RunError::Other("model reached its output limit before producing a response".to_owned())
+        RunError::CompletionWithoutText {
+            finish_reason: FinishReason::Length,
+        }
     );
 }
 
@@ -1025,7 +1038,19 @@ async fn explains_when_an_empty_completion_reached_the_output_limit() {
 async fn keeps_the_empty_completion_error_for_a_stop_finish_reason() {
     assert_eq!(
         empty_completion_error(FinishReason::Stop).await,
-        RunError::Other("provider returned a completion without text".to_owned())
+        RunError::CompletionWithoutText {
+            finish_reason: FinishReason::Stop,
+        }
+    );
+}
+
+#[tokio::test]
+async fn keeps_the_tool_calls_finish_reason_on_an_empty_completion() {
+    assert_eq!(
+        empty_completion_error(FinishReason::ToolCalls).await,
+        RunError::CompletionWithoutText {
+            finish_reason: FinishReason::ToolCalls,
+        }
     );
 }
 
@@ -1033,15 +1058,14 @@ async fn keeps_the_empty_completion_error_for_a_stop_finish_reason() {
 async fn includes_an_other_finish_reason_in_the_empty_completion_error() {
     assert_eq!(
         empty_completion_error(FinishReason::Other("content_filter".to_owned())).await,
-        RunError::Other(
-            "provider returned a completion without text (finish reason: content_filter)"
-                .to_owned()
-        )
+        RunError::CompletionWithoutText {
+            finish_reason: FinishReason::Other("content_filter".to_owned()),
+        }
     );
 }
 
 #[tokio::test]
-async fn reports_the_provider_step_limit_as_other() {
+async fn reports_the_provider_step_limit_structurally() {
     let state = session_state();
     let backend = FakeBackend::new(
         (0..MAX_PROVIDER_STEPS_PER_TURN)
@@ -1062,9 +1086,9 @@ async fn reports_the_provider_step_limit_as_other() {
 
     assert_eq!(
         error,
-        RunError::Other(format!(
-            "turn exceeded the limit of {MAX_PROVIDER_STEPS_PER_TURN} provider requests"
-        ))
+        RunError::ProviderStepLimitExceeded {
+            limit: MAX_PROVIDER_STEPS_PER_TURN,
+        }
     );
 }
 

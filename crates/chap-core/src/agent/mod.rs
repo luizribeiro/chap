@@ -878,9 +878,7 @@ enum PluginLoad {
 impl AgentInner {
     async fn run_turn(&self, session: &Session, input: String) -> Result<String, RunError> {
         if !self.sessions.owns(&session.state) {
-            return Err(RunError::Other(
-                "session does not belong to this runtime".to_owned(),
-            ));
+            return Err(RunError::ForeignSession);
         }
         let backend = PluginBackend::new(self, session.provider());
         run_agent_loop(

@@ -14,7 +14,7 @@ pub use lockgate::{
     ConsentManifest, ConsentRecord, DriftChange, DriftKind, DriftReport, ExportDrift,
     ExportDriftKind, GrantReview,
 };
-pub use provider::ProviderError;
+pub use provider::{FinishReason, ProviderError};
 pub use session::{
     ContextFailure, RunError, RunUsage, Session, SessionError, SessionEvent, SessionEventError,
     SessionEventKind, SessionEvents, SessionId, SessionOptions, SteerError, SteeringId, Usage,

@@ -1,6 +1,15 @@
 use std::{fmt, time::Duration};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum FinishReason {
+    Stop,
+    ToolCalls,
+    Length,
+    Other(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProviderError {
     RateLimited {
         retry_after: Option<Duration>,
