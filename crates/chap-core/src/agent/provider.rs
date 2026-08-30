@@ -6,7 +6,7 @@ use crate::{
 use bindings::provider as provider_bindings;
 use bindings::types as provider_types;
 use lockgate::CallError;
-use std::{fmt, future::Future, pin::Pin, time::Duration};
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
 pub(super) type CompletionFuture<'a> =
     Pin<Box<dyn Future<Output = Result<ProviderCompletion, ProviderError>> + Send + 'a>>;
@@ -42,12 +42,15 @@ impl AgentInner {
             .plugins
             .get(provider)
             .filter(|plugin| plugin.has_role(&chap_wit::PROVIDER))
-            .ok_or_else(|| {
-                ProviderError::Plugin(format!("provider plugin `{provider}` is not configured"))
+            .ok_or_else(|| ProviderError::NotConfigured {
+                provider: provider.to_owned(),
             })?;
         self.lockgate
             .client::<provider_bindings::Role>(&plugin.handle)
-            .map_err(|error| plugin_error(provider, error))?
+            .map_err(|source| ProviderError::Role {
+                provider: provider.to_owned(),
+                source,
+            })?
             .complete(
                 self.call_budgets
                     .resolve(PluginCall::ProviderComplete)
@@ -71,16 +74,16 @@ impl AgentInner {
 
 fn map_plugin_call_error(provider: &str, error: CallError) -> ProviderError {
     match error {
-        CallError::DeadlineExceeded { deadline } => ProviderError::TimedOut {
-            plugin: provider.to_owned(),
+        source @ CallError::DeadlineExceeded { deadline } => ProviderError::TimedOut {
+            provider: provider.to_owned(),
             deadline,
+            source: Arc::new(source),
         },
-        error => plugin_error(provider, error),
+        source => ProviderError::Call {
+            provider: provider.to_owned(),
+            source: Arc::new(source),
+        },
     }
-}
-
-fn plugin_error(provider: &str, error: impl fmt::Display) -> ProviderError {
-    ProviderError::Plugin(format!("provider plugin `{provider}` failed: {error}"))
 }
 
 fn map_provider_error(provider: &str, error: provider_types::ProviderError) -> ProviderError {
@@ -273,5 +276,63 @@ mod tests {
             assert_eq!(error.to_string(), display);
             assert_eq!(error, expected);
         }
+    }
+
+    #[test]
+    fn provider_role_failures_preserve_the_source() {
+        let error = ProviderError::Role {
+            provider: "example".to_owned(),
+            source: lockgate::RoleError::WrongHost,
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "provider plugin `example` failed: plugin handle belongs to a different Lockgate Host"
+        );
+        assert!(
+            std::error::Error::source(&error)
+                .and_then(|source| source.downcast_ref::<lockgate::RoleError>())
+                .is_some_and(|source| matches!(source, lockgate::RoleError::WrongHost))
+        );
+    }
+
+    #[test]
+    fn provider_call_failures_preserve_the_source() {
+        let error = map_plugin_call_error(
+            "example",
+            CallError::Trap {
+                detail: "guest panicked".to_owned(),
+            },
+        );
+
+        assert_eq!(
+            error.to_string(),
+            "provider plugin `example` failed: plugin trapped: guest panicked"
+        );
+        assert!(
+            std::error::Error::source(&error)
+                .and_then(|source| source.downcast_ref::<Arc<CallError>>())
+                .is_some_and(|source| matches!(source.as_ref(), CallError::Trap { detail } if detail == "guest panicked"))
+        );
+    }
+
+    #[test]
+    fn provider_deadlines_preserve_the_call_source() {
+        let error = map_plugin_call_error(
+            "example",
+            CallError::DeadlineExceeded {
+                deadline: Duration::from_secs(12),
+            },
+        );
+
+        assert_eq!(
+            error.to_string(),
+            "provider plugin `example` timed out after 12s"
+        );
+        assert!(
+            std::error::Error::source(&error)
+                .and_then(|source| source.downcast_ref::<Arc<CallError>>())
+                .is_some_and(|source| matches!(source.as_ref(), CallError::DeadlineExceeded { deadline } if *deadline == Duration::from_secs(12)))
+        );
     }
 }

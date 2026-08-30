@@ -1,4 +1,5 @@
-use std::{fmt, time::Duration};
+use std::{sync::Arc, time::Duration};
+use thiserror::Error;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -9,46 +10,108 @@ pub enum FinishReason {
     Other(String),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Error)]
+#[non_exhaustive]
 pub enum ProviderError {
+    #[error("{message}")]
     RateLimited {
         retry_after: Option<Duration>,
         message: String,
     },
+    #[error("{0}")]
     ContextTooLong(String),
+    #[error("{0}")]
     Unauthorized(String),
+    #[error("{0}")]
     Unavailable(String),
+    #[error("{0}")]
     Refused(String),
-    /// Chap's wall-clock deadline expired before the provider plugin completed.
-    TimedOut {
-        plugin: String,
-        deadline: Duration,
+    #[error("provider plugin `{provider}` is not configured")]
+    NotConfigured { provider: String },
+    #[error("provider plugin `{provider}` failed: {source}")]
+    Role {
+        provider: String,
+        #[source]
+        source: lockgate::RoleError,
     },
-    /// The plugin itself failed: it trapped, exhausted its budget, or could not be
-    /// instantiated or dispatched. Never retry this without operator involvement.
-    /// This has no WIT counterpart because a guest cannot report its own trap.
-    Plugin(String),
+    /// Chap's wall-clock deadline expired before the provider plugin completed.
+    #[error("provider plugin `{provider}` timed out after {deadline:?}")]
+    TimedOut {
+        provider: String,
+        deadline: Duration,
+        #[source]
+        source: Arc<lockgate::CallError>,
+    },
+    #[error("provider plugin `{provider}` failed: {source}")]
+    Call {
+        provider: String,
+        #[source]
+        source: Arc<lockgate::CallError>,
+    },
+    #[error("{0}")]
     Other(String),
 }
 
-impl fmt::Display for ProviderError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::TimedOut { plugin, deadline } => {
-                write!(
-                    formatter,
-                    "provider plugin `{plugin}` timed out after {deadline:?}"
-                )
+impl PartialEq for ProviderError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::RateLimited {
+                    retry_after: left_retry,
+                    message: left_message,
+                },
+                Self::RateLimited {
+                    retry_after: right_retry,
+                    message: right_message,
+                },
+            ) => left_retry == right_retry && left_message == right_message,
+            (Self::ContextTooLong(left), Self::ContextTooLong(right))
+            | (Self::Unauthorized(left), Self::Unauthorized(right))
+            | (Self::Unavailable(left), Self::Unavailable(right))
+            | (Self::Refused(left), Self::Refused(right))
+            | (Self::Other(left), Self::Other(right)) => left == right,
+            (Self::NotConfigured { provider: left }, Self::NotConfigured { provider: right }) => {
+                left == right
             }
-            Self::RateLimited { message, .. }
-            | Self::ContextTooLong(message)
-            | Self::Unauthorized(message)
-            | Self::Unavailable(message)
-            | Self::Refused(message)
-            | Self::Plugin(message)
-            | Self::Other(message) => formatter.write_str(message),
+            (
+                Self::Role {
+                    provider: left_provider,
+                    source: left_source,
+                },
+                Self::Role {
+                    provider: right_provider,
+                    source: right_source,
+                },
+            ) => left_provider == right_provider && left_source == right_source,
+            (
+                Self::TimedOut {
+                    provider: left_provider,
+                    deadline: left_deadline,
+                    source: left_source,
+                },
+                Self::TimedOut {
+                    provider: right_provider,
+                    deadline: right_deadline,
+                    source: right_source,
+                },
+            ) => {
+                left_provider == right_provider
+                    && left_deadline == right_deadline
+                    && Arc::ptr_eq(left_source, right_source)
+            }
+            (
+                Self::Call {
+                    provider: left_provider,
+                    source: left_source,
+                },
+                Self::Call {
+                    provider: right_provider,
+                    source: right_source,
+                },
+            ) => left_provider == right_provider && Arc::ptr_eq(left_source, right_source),
+            _ => false,
         }
     }
 }
 
-impl std::error::Error for ProviderError {}
+impl Eq for ProviderError {}

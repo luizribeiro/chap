@@ -399,10 +399,14 @@ async fn classifies_a_trapping_provider_as_a_plugin_failure() {
 
     let error = backend.complete(Vec::new()).await.unwrap_err();
 
-    let ProviderError::Plugin(message) = error else {
+    let ProviderError::Call { provider, source } = error else {
         panic!("a trapping provider should be a plugin failure");
     };
-    assert!(message.contains("plugin trapped:"), "{message}");
+    assert_eq!(provider, "example");
+    assert!(matches!(
+        source.as_ref(),
+        lockgate::CallError::Trap { detail } if !detail.is_empty()
+    ));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -437,13 +441,21 @@ async fn times_out_a_hanging_provider_plugin() {
         .expect("hanging provider call did not respect its deadline")
         .unwrap_err();
 
-    assert_eq!(
-        error,
-        ProviderError::TimedOut {
-            plugin: "example".to_owned(),
-            deadline: Duration::from_secs(1),
-        }
-    );
+    let ProviderError::TimedOut {
+        provider,
+        deadline,
+        source,
+    } = &error
+    else {
+        panic!("a provider deadline must remain a timed-out failure")
+    };
+    assert_eq!(provider, "example");
+    assert_eq!(*deadline, Duration::from_secs(1));
+    assert!(matches!(
+        source.as_ref(),
+        lockgate::CallError::DeadlineExceeded { deadline }
+            if *deadline == Duration::from_secs(1)
+    ));
     assert_eq!(
         error.to_string(),
         "provider plugin `example` timed out after 1s"
