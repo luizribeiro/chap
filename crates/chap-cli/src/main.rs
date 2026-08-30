@@ -84,7 +84,7 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<(), String> {
-    let builder = AgentBuilder::load(&cli.config)?;
+    let builder = AgentBuilder::load(&cli.config).map_err(|error| error.to_string())?;
     match cli.command {
         None => {
             tui::run(builder.start().await.map_err(render_start_error)?).await?;
@@ -228,7 +228,8 @@ async fn grants_review(
     builder: &AgentBuilder,
     instance_id: Option<&str>,
 ) -> Result<String, String> {
-    let mut output = format!("Consent store: {}\n", builder.consent_path()?.display());
+    let consent_path = builder.consent_path().map_err(|error| error.to_string())?;
+    let mut output = format!("Consent store: {}\n", consent_path.display());
     let ids = match instance_id {
         Some(id) => vec![id.to_owned()],
         None => builder

@@ -1,5 +1,5 @@
 use crate::config::{
-    Config, ConfiguredPlugin, agent::ToolExecutionSettings, roles::PluginRoleSettings,
+    Config, ConfiguredPlugin, LoadError, agent::ToolExecutionSettings, roles::PluginRoleSettings,
 };
 use crate::consent::{ConsentError, ConsentStore, PluginConsentReview};
 use crate::session::{
@@ -303,7 +303,7 @@ pub(crate) struct AgentInner {
 }
 
 impl AgentBuilder {
-    pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, LoadError> {
         let config = Config::load(path.as_ref())?;
         Ok(Self {
             config,
@@ -318,7 +318,7 @@ impl AgentBuilder {
         self
     }
 
-    pub fn consent_path(&self) -> Result<PathBuf, String> {
+    pub fn consent_path(&self) -> Result<PathBuf, LoadError> {
         match &self.state_dir {
             Some(state_dir) => Ok(state_dir.join("consent.json")),
             None => self.config.consent_path(),

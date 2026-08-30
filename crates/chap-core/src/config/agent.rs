@@ -1,4 +1,4 @@
-use super::Config;
+use super::{Config, LoadError};
 use crate::tool::ExecutionMode;
 use serde::Deserialize;
 use serde_json::Value;
@@ -31,12 +31,9 @@ impl Config {
         self.agent.tool_execution
     }
 
-    pub(crate) fn validate_agent_settings(&self) -> Result<(), String> {
+    pub(crate) fn validate_agent_settings(&self) -> Result<(), LoadError> {
         if self.agent.exec.is_some() && !cfg!(feature = "exec") {
-            return Err(
-                "agent.exec is configured, but this build lacks exec support; rebuild with the `exec` feature"
-                    .to_owned(),
-            );
+            return Err(LoadError::ExecUnsupported);
         }
 
         #[cfg(feature = "exec")]
@@ -46,14 +43,14 @@ impl Config {
     }
 
     #[cfg(feature = "exec")]
-    pub(crate) fn exec_config(&self) -> Result<chap_exec::host::ExecConfig, String> {
+    pub(crate) fn exec_config(&self) -> Result<chap_exec::host::ExecConfig, LoadError> {
         self.agent
             .exec
             .clone()
             .map(serde_json::from_value)
             .transpose()
             .map(Option::unwrap_or_default)
-            .map_err(|error| format!("failed to parse the `agent.exec` config section: {error}"))
+            .map_err(|source| LoadError::InvalidExecConfig { source })
     }
 }
 
@@ -73,6 +70,7 @@ fn default_max_concurrency() -> NonZeroUsize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::load_config;
 
     #[test]
     fn defaults_agent_tool_execution_when_sections_are_absent() {
@@ -106,7 +104,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_agent_tool_concurrency() {
-        let error = serde_json::from_str::<Config>(
+        let error = load_config(
             r#"{
                 "agent": {
                     "tool_execution": {
@@ -117,12 +115,15 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(error.to_string().contains("nonzero usize"));
+        let LoadError::ParseConfig { source, .. } = error else {
+            panic!("expected config parse failure");
+        };
+        assert!(source.to_string().contains("nonzero usize"));
     }
 
     #[test]
     fn rejects_unknown_agent_tool_execution_settings() {
-        let error = serde_json::from_str::<Config>(
+        let error = load_config(
             r#"{
                 "agent": {
                     "tool_execution": {
@@ -133,7 +134,10 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(error.to_string().contains("unknown field `concurrency`"));
+        let LoadError::ParseConfig { source, .. } = error else {
+            panic!("expected config parse failure");
+        };
+        assert!(source.to_string().contains("unknown field `concurrency`"));
     }
 
     #[test]
@@ -157,8 +161,7 @@ mod tests {
         .unwrap();
 
         let error = config.validate_agent_settings().unwrap_err();
-        assert!(error.contains("this build lacks exec support"));
-        assert!(error.contains("rebuild with the `exec` feature"));
+        assert!(matches!(error, LoadError::ExecUnsupported));
     }
 
     #[cfg(feature = "exec")]
@@ -213,7 +216,9 @@ mod tests {
         .unwrap();
 
         let error = config.validate_agent_settings().unwrap_err();
-        assert!(error.contains("`agent.exec` config section"));
-        assert!(error.contains("invalid type"));
+        let LoadError::InvalidExecConfig { source } = error else {
+            panic!("expected invalid exec config");
+        };
+        assert!(source.to_string().contains("invalid type"));
     }
 }

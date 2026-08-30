@@ -1,3 +1,4 @@
+use crate::config::LoadError;
 use lockgate::{ConsentManifest, ConsentRecord, DriftReport};
 use std::{
     collections::BTreeMap,
@@ -10,7 +11,7 @@ use thiserror::Error;
 #[non_exhaustive]
 pub enum ConsentError {
     #[error("{0}")]
-    StateLocation(String),
+    StateLocation(#[source] LoadError),
     #[error("plugin `{plugin}` is not configured")]
     PluginNotConfigured { plugin: String },
     #[error("failed to read plugin `{plugin}` from `{}`: {source}", path.display())]
@@ -53,7 +54,7 @@ pub enum ConsentError {
         source: io::Error,
     },
     #[error("{0}")]
-    HostConfiguration(String),
+    HostConfiguration(#[source] LoadError),
     #[error("failed to create Lockgate host: {source}")]
     HostConstruction {
         #[source]

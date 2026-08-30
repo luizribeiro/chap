@@ -16,9 +16,51 @@ use std::{
     collections::BTreeMap,
     env,
     ffi::OsStr,
-    fs,
+    fs, io,
     path::{Path, PathBuf},
 };
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum LoadError {
+    #[error("failed to read `{}`: {source}", path.display())]
+    ReadConfig {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("failed to parse `{}`: {source}", path.display())]
+    ParseConfig {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error(
+        "failed to resolve config path `{}` as an absolute path: {source}",
+        path.display()
+    )]
+    ResolveConfigPath {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error(
+        "invalid instance name `{name}`: expected a non-empty value containing only A-Z, a-z, 0-9, '.', '_', or '-', other than '.' or '..'"
+    )]
+    InvalidName { name: String },
+    #[error(
+        "cannot locate CHAP state: neither XDG_STATE_HOME nor HOME is set to a non-empty value"
+    )]
+    StateDirectoryUnavailable,
+    #[error("agent.exec is configured, but this build lacks exec support")]
+    ExecUnsupported,
+    #[error("failed to parse the `agent.exec` config section: {source}")]
+    InvalidExecConfig {
+        #[source]
+        source: serde_json::Error,
+    },
+}
 
 /// The complete settings loaded from `chap.json`.
 #[derive(Debug, Deserialize)]
@@ -49,26 +91,29 @@ pub struct ConfiguredPlugin {
 }
 
 impl Config {
-    pub fn load(path: &Path) -> Result<Self, String> {
-        let source = fs::read_to_string(path)
-            .map_err(|error| format!("failed to read `{}`: {error}", path.display()))?;
-        let mut config: Self = serde_json::from_str(&source)
-            .map_err(|error| format!("failed to parse `{}`: {error}", path.display()))?;
+    pub fn load(path: &Path) -> Result<Self, LoadError> {
+        let source = fs::read_to_string(path).map_err(|source| LoadError::ReadConfig {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let mut config: Self =
+            serde_json::from_str(&source).map_err(|source| LoadError::ParseConfig {
+                path: path.to_path_buf(),
+                source,
+            })?;
         config.directory = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         config.source_path = fs::canonicalize(path)
             .or_else(|_| std::path::absolute(path))
-            .map_err(|error| {
-                format!(
-                    "failed to resolve config path `{}` as an absolute path: {error}",
-                    path.display()
-                )
+            .map_err(|source| LoadError::ResolveConfigPath {
+                path: path.to_path_buf(),
+                source,
             })?;
         config.validate_name()?;
         config.validate_agent_settings()?;
         Ok(config)
     }
 
-    fn validate_name(&self) -> Result<(), String> {
+    fn validate_name(&self) -> Result<(), LoadError> {
         let Some(name) = self.name() else {
             return Ok(());
         };
@@ -78,9 +123,9 @@ impl Config {
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
         {
-            return Err(format!(
-                "invalid instance name `{name}`: expected a non-empty value containing only A-Z, a-z, 0-9, '.', '_', or '-', other than '.' or '..'"
-            ));
+            return Err(LoadError::InvalidName {
+                name: name.to_owned(),
+            });
         }
         Ok(())
     }
@@ -107,7 +152,7 @@ impl Config {
         &self.source_path
     }
 
-    pub(crate) fn consent_path(&self) -> Result<PathBuf, String> {
+    pub(crate) fn consent_path(&self) -> Result<PathBuf, LoadError> {
         let xdg_state_home = env::var_os("XDG_STATE_HOME");
         let home = env::var_os("HOME");
         consent_path(
@@ -124,16 +169,13 @@ fn consent_path(
     name: Option<&str>,
     xdg_state_home: Option<&OsStr>,
     home: Option<&OsStr>,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, LoadError> {
     let state_root = if let Some(path) = xdg_state_home.filter(|path| !path.is_empty()) {
         PathBuf::from(path)
     } else if let Some(path) = home.filter(|path| !path.is_empty()) {
         PathBuf::from(path).join(".local/state")
     } else {
-        return Err(
-            "cannot locate CHAP state: neither XDG_STATE_HOME nor HOME is set to a non-empty value"
-                .to_owned(),
-        );
+        return Err(LoadError::StateDirectoryUnavailable);
     };
     let instance_directory = match name {
         Some(name) => state_root.join("chap/named").join(name),
@@ -164,14 +206,31 @@ impl ConfiguredPlugin {
 }
 
 #[cfg(test)]
+pub(crate) fn load_config(source: &str) -> Result<Config, LoadError> {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("chap.json");
+    fs::write(&path, source).unwrap();
+    Config::load(&path)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    fn load_config(source: &str) -> Result<Config, String> {
+    #[test]
+    fn reports_config_read_failures() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("chap.json");
-        fs::write(&path, source).unwrap();
-        Config::load(&path)
+        let path = directory.path().join("missing.json");
+
+        let error = Config::load(&path).unwrap_err();
+
+        assert!(matches!(
+            error,
+            LoadError::ReadConfig {
+                path: error_path,
+                source,
+            } if error_path == path && source.kind() == io::ErrorKind::NotFound
+        ));
     }
 
     #[test]
@@ -252,7 +311,7 @@ mod tests {
             )
             .unwrap_err();
 
-            assert!(error.contains("neither XDG_STATE_HOME nor HOME"), "{error}");
+            assert!(matches!(error, LoadError::StateDirectoryUnavailable));
         }
     }
 
@@ -271,35 +330,50 @@ mod tests {
     fn rejects_empty_instance_name() {
         let error = load_config(r#"{ "name": "" }"#).unwrap_err();
 
-        assert!(error.contains("invalid instance name ``"));
+        assert!(matches!(
+            error,
+            LoadError::InvalidName { name } if name.is_empty()
+        ));
     }
 
     #[test]
     fn rejects_instance_name_with_invalid_characters() {
         let error = load_config(r#"{ "name": "team/alpha" }"#).unwrap_err();
 
-        assert!(error.contains("invalid instance name `team/alpha`"));
+        assert!(matches!(
+            error,
+            LoadError::InvalidName { name } if name == "team/alpha"
+        ));
     }
 
     #[test]
     fn rejects_non_ascii_instance_name() {
         let error = load_config(r#"{ "name": "café" }"#).unwrap_err();
 
-        assert!(error.contains("invalid instance name `café`"));
+        assert!(matches!(
+            error,
+            LoadError::InvalidName { name } if name == "café"
+        ));
     }
 
     #[test]
     fn rejects_dot_instance_name() {
         let error = load_config(r#"{ "name": "." }"#).unwrap_err();
 
-        assert!(error.contains("invalid instance name `.`"));
+        assert!(matches!(
+            error,
+            LoadError::InvalidName { name } if name == "."
+        ));
     }
 
     #[test]
     fn rejects_dot_dot_instance_name() {
         let error = load_config(r#"{ "name": ".." }"#).unwrap_err();
 
-        assert!(error.contains("invalid instance name `..`"));
+        assert!(matches!(
+            error,
+            LoadError::InvalidName { name } if name == ".."
+        ));
     }
 
     #[test]
@@ -332,7 +406,7 @@ mod tests {
 
     #[test]
     fn rejects_top_level_plugin_execution() {
-        let error = serde_json::from_str::<Config>(
+        let error = load_config(
             r#"{
                 "plugins": {
                     "kagi": {
@@ -344,16 +418,22 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(error.to_string().contains("unknown field `execution`"));
+        let LoadError::ParseConfig { source, .. } = error else {
+            panic!("expected config parse failure");
+        };
+        assert!(source.to_string().contains("unknown field `execution`"));
     }
 
     #[test]
     fn no_role_name_is_a_top_level_config_key() {
         for role in chap_wit::ROLES {
             let source = format!(r#"{{ "{}": {{}} }}"#, role.interface);
-            let error = serde_json::from_str::<Config>(&source).unwrap_err();
+            let error = load_config(&source).unwrap_err();
+            let LoadError::ParseConfig { source, .. } = error else {
+                panic!("expected config parse failure");
+            };
             assert!(
-                error.to_string().contains("unknown field"),
+                source.to_string().contains("unknown field"),
                 "`{}` is both a role interface and a top-level chap.json key",
                 role.interface,
             );

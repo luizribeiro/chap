@@ -8,6 +8,7 @@ mod tool;
 pub use agent::{
     Agent, AgentBuilder, CallBudget, PluginCall, PluginRefusal, PluginRefusalReason, StartError,
 };
+pub use config::LoadError;
 pub use consent::{ConsentError, ConsentStore, PluginConsentReview};
 pub use lockgate::{
     ConsentManifest, ConsentRecord, DriftChange, DriftKind, DriftReport, ExportDrift,
