@@ -10,6 +10,8 @@ use crate::{
 use futures::{StreamExt, stream::FuturesUnordered};
 use tokio::sync::Semaphore;
 
+pub(super) const FATAL_TOOL_RESULT_OUTPUT: &str = "run aborted after fatal tool failure";
+
 pub(super) async fn run_agent_loop(
     session: &SessionState,
     input: String,
@@ -137,14 +139,32 @@ async fn run_steps(
         };
         let slots = execute_tool_calls(session, tools, &tool_calls, active_run, limit).await;
         let mut interrupted = false;
+        let mut fatal_error = None;
         for (call, slot) in tool_calls.iter().zip(slots) {
             match slot {
                 Some(result) => {
-                    session
-                        .messages
-                        .write()
-                        .await
-                        .push(Message::ToolResult(result.into_provider_result()));
+                    if let Err(source @ ToolError::Fatal(_)) = &result.result {
+                        session
+                            .messages
+                            .write()
+                            .await
+                            .push(Message::ToolResult(ToolResult {
+                                call_id: result.call_id.clone(),
+                                name: result.name.clone(),
+                                output: FATAL_TOOL_RESULT_OUTPUT.to_owned(),
+                                is_error: true,
+                            }));
+                        fatal_error.get_or_insert_with(|| RunError::FatalTool {
+                            name: result.name.clone(),
+                            source: source.clone(),
+                        });
+                    } else {
+                        session
+                            .messages
+                            .write()
+                            .await
+                            .push(Message::ToolResult(result.into_provider_result()));
+                    }
                 }
                 None => {
                     interrupted = true;
@@ -164,6 +184,9 @@ async fn run_steps(
                     });
                 }
             }
+        }
+        if let Some(error) = fatal_error {
+            return RunOutcome::Failed(error);
         }
         if interrupted {
             return RunOutcome::Interrupted;

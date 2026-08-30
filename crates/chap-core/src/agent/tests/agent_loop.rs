@@ -1,7 +1,7 @@
 use super::super::{
     MAX_PROVIDER_STEPS_PER_TURN,
     provider::{CompletionBackend, CompletionFuture, ProviderCompletion},
-    turn::run_agent_loop,
+    turn::{FATAL_TOOL_RESULT_OUTPUT, run_agent_loop},
 };
 use crate::{
     ExecutionMode, FinishReason, ProviderError, RunError, SessionOptions, Tool, ToolDefinition,
@@ -997,6 +997,269 @@ async fn returns_tool_failures_to_the_provider() {
 }
 
 #[tokio::test]
+async fn returns_every_non_fatal_tool_error_to_the_provider_unchanged() {
+    let state = session_state();
+    let backend = FakeBackend::new([
+        completion(vec![
+            tool_call("call-invalid", "invalid"),
+            tool_call("call-denied", "denied"),
+            tool_call("call-failed", "failed"),
+        ]),
+        text_completion("I handled the tool failures."),
+    ]);
+    let mut tools = ToolRegistry::new();
+    tools
+        .register(ErrorTool {
+            name: "invalid",
+            error: ToolError::InvalidInput("arguments were invalid".to_owned()),
+        })
+        .unwrap();
+    tools
+        .register(ErrorTool {
+            name: "denied",
+            error: ToolError::Denied("policy denied the call".to_owned()),
+        })
+        .unwrap();
+    tools
+        .register(ErrorTool {
+            name: "failed",
+            error: ToolError::Failed("execution failed".to_owned()),
+        })
+        .unwrap();
+
+    let response = run_agent_loop(
+        &state,
+        "exercise recoverable failures".to_owned(),
+        &tools,
+        TOOL_EXECUTION,
+        &backend,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(response, "I handled the tool failures.");
+    let requests = backend.requests.lock().unwrap();
+    let results = requests[1]
+        .iter()
+        .filter_map(|message| match message {
+            Message::ToolResult(result) => Some((result.name.as_str(), result.output.as_str())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        results,
+        [
+            ("invalid", "arguments were invalid"),
+            ("denied", "policy denied the call"),
+            ("failed", "execution failed"),
+        ]
+    );
+    assert!(requests[1].iter().all(|message| match message {
+        Message::ToolResult(result) => result.is_error,
+        _ => true,
+    }));
+}
+
+#[tokio::test]
+async fn fatal_tool_errors_finish_observation_before_aborting_the_run() {
+    let state = session_state();
+    let mut events = state.subscribe();
+    let backend = FakeBackend::new([completion(vec![tool_call("call-1", "broken")])]);
+    let mut tools = ToolRegistry::new();
+    let fatal = ToolError::Fatal("runtime configuration is unavailable".to_owned());
+    tools
+        .register(ErrorTool {
+            name: "broken",
+            error: fatal.clone(),
+        })
+        .unwrap();
+
+    let error = run_agent_loop(
+        &state,
+        "use the broken tool".to_owned(),
+        &tools,
+        TOOL_EXECUTION,
+        &backend,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        RunError::FatalTool {
+            name: "broken".to_owned(),
+            source: fatal.clone(),
+        }
+    );
+    assert_eq!(
+        std::error::Error::source(&error).map(ToString::to_string),
+        Some("runtime configuration is unavailable".to_owned())
+    );
+    assert_eq!(backend.requests.lock().unwrap().len(), 1);
+    assert!(
+        backend.requests.lock().unwrap()[0]
+            .iter()
+            .all(|message| !matches!(message, Message::ToolResult(_)))
+    );
+    assert!(matches!(
+        state.messages.read().await.last(),
+        Some(Message::ToolResult(result))
+            if result.call_id == "call-1"
+                && result.name == "broken"
+                && result.output == FATAL_TOOL_RESULT_OUTPUT
+                && result.is_error
+    ));
+    assert_eq!(
+        receive_event_kinds(&mut events, 5).await,
+        [
+            SessionEventKind::RunStarted {
+                input: "use the broken tool".to_owned(),
+            },
+            SessionEventKind::ToolRequested {
+                call_id: "call-1".to_owned(),
+                name: "broken".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+            SessionEventKind::ToolStarted {
+                call_id: "call-1".to_owned(),
+                name: "broken".to_owned(),
+                arguments: "{}".to_owned(),
+            },
+            SessionEventKind::ToolFinished {
+                call_id: "call-1".to_owned(),
+                name: "broken".to_owned(),
+                result: Err(fatal),
+            },
+            SessionEventKind::RunFailed { error },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn parallel_batch_finishes_every_tool_before_fatal_failure() {
+    let state = session_state();
+    let mut events = state.subscribe();
+    let backend = FakeBackend::new([completion(vec![
+        tool_call("call-ok-1", "echo"),
+        tool_call("call-fatal", "broken"),
+        tool_call("call-ok-2", "echo"),
+    ])]);
+    let mut tools = ToolRegistry::new();
+    tools.register(EchoTool).unwrap();
+    let fatal = ToolError::Fatal("runtime configuration is unavailable".to_owned());
+    tools
+        .register(ErrorTool {
+            name: "broken",
+            error: fatal.clone(),
+        })
+        .unwrap();
+
+    let error = run_agent_loop(
+        &state,
+        "run the batch".to_owned(),
+        &tools,
+        TOOL_EXECUTION,
+        &backend,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        RunError::FatalTool {
+            name: "broken".to_owned(),
+            source: fatal.clone(),
+        }
+    );
+    assert_eq!(backend.requests.lock().unwrap().len(), 1);
+    let events = receive_event_kinds(&mut events, 11).await;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, SessionEventKind::ToolFinished { .. }))
+            .count(),
+        3
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        SessionEventKind::ToolFinished { call_id, result: Ok(output), .. }
+            if call_id == "call-ok-1" && output == "{}"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        SessionEventKind::ToolFinished { call_id, result: Err(error), .. }
+            if call_id == "call-fatal" && error == &fatal
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        SessionEventKind::ToolFinished { call_id, result: Ok(output), .. }
+            if call_id == "call-ok-2" && output == "{}"
+    )));
+    assert_eq!(events.last(), Some(&SessionEventKind::RunFailed { error }));
+}
+
+#[tokio::test]
+async fn follow_up_after_fatal_failure_replays_balanced_tool_history() {
+    let state = session_state();
+    let first_backend = FakeBackend::new([completion(vec![tool_call("call-1", "broken")])]);
+    let mut tools = ToolRegistry::new();
+    tools
+        .register(ErrorTool {
+            name: "broken",
+            error: ToolError::Fatal("runtime configuration is unavailable".to_owned()),
+        })
+        .unwrap();
+
+    run_agent_loop(
+        &state,
+        "use the broken tool".to_owned(),
+        &tools,
+        TOOL_EXECUTION,
+        &first_backend,
+    )
+    .await
+    .unwrap_err();
+
+    let follow_up_backend = FakeBackend::new([text_completion("session recovered")]);
+    let response = run_agent_loop(
+        &state,
+        "try something else".to_owned(),
+        &tools,
+        TOOL_EXECUTION,
+        &follow_up_backend,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(response, "session recovered");
+    let requests = follow_up_backend.requests.lock().unwrap();
+    let request = &requests[0];
+    let tool_call_count = request
+        .iter()
+        .map(|message| match message {
+            Message::Assistant(content) => content
+                .iter()
+                .filter(|content| matches!(content, AssistantContent::ToolCall(_)))
+                .count(),
+            _ => 0,
+        })
+        .sum::<usize>();
+    let tool_result_count = request
+        .iter()
+        .filter(|message| matches!(message, Message::ToolResult(_)))
+        .count();
+    assert_eq!(tool_call_count, tool_result_count);
+    assert_eq!(tool_call_count, 1);
+    assert!(request.iter().any(|message| matches!(
+        message,
+        Message::ToolResult(result)
+            if result.call_id == "call-1"
+                && result.output == FATAL_TOOL_RESULT_OUTPUT
+                && result.is_error
+    )));
+}
+
+#[tokio::test]
 async fn preserves_the_provider_error_in_the_failed_terminal_event() {
     let state = session_state();
     let mut events = state.subscribe();
@@ -1304,6 +1567,11 @@ impl CompletionBackend for FakeBackend {
 
 struct EchoTool;
 
+struct ErrorTool {
+    name: &'static str,
+    error: ToolError,
+}
+
 struct CoordinatedTool {
     name: &'static str,
     mode: ExecutionMode,
@@ -1323,6 +1591,25 @@ enum ToolBehavior {
         overlapped: Arc<AtomicBool>,
     },
     WaitFor(Arc<Notify>),
+}
+
+impl Tool for ErrorTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: self.name.to_owned(),
+            description: "Returns a configured error".to_owned(),
+            parameters: r#"{"type":"object"}"#.to_owned(),
+        }
+    }
+
+    fn execute(
+        &self,
+        _arguments: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, ToolError>> + Send + '_>>
+    {
+        let error = self.error.clone();
+        Box::pin(async move { Err(error) })
+    }
 }
 
 impl Tool for CoordinatedTool {

@@ -109,6 +109,12 @@ pub enum RunError {
     EmptyInput,
     #[error("run interrupted")]
     Interrupted,
+    #[error("tool `{name}` failed fatally: {source}")]
+    FatalTool {
+        name: String,
+        #[source]
+        source: ToolError,
+    },
     #[error("{}", completion_without_text_message(.finish_reason))]
     CompletionWithoutText { finish_reason: FinishReason },
     #[error("turn exceeded the limit of {limit} provider requests")]
@@ -124,6 +130,16 @@ impl PartialEq for RunError {
             }
             (Self::ForeignSession, Self::ForeignSession) => true,
             (Self::EmptyInput, Self::EmptyInput) | (Self::Interrupted, Self::Interrupted) => true,
+            (
+                Self::FatalTool {
+                    name: left_name,
+                    source: left_source,
+                },
+                Self::FatalTool {
+                    name: right_name,
+                    source: right_source,
+                },
+            ) => left_name == right_name && left_source == right_source,
             (
                 Self::CompletionWithoutText {
                     finish_reason: left,
