@@ -66,7 +66,7 @@ fn highlight_lines(
             let text = text.strip_suffix('\n').unwrap_or(text);
             let text = text.strip_suffix('\r').unwrap_or(text);
             if !text.is_empty() {
-                rendered.push(RenderedSpan::new(text, syntax_style(style)));
+                rendered.push(RenderedSpan::new(text, style.into()));
             }
         }
         lines.push(rendered);
@@ -78,21 +78,24 @@ fn highlight_lines(
     Some(lines)
 }
 
-fn syntax_style(style: Style) -> TextStyle {
-    TextStyle {
-        color: Some(Color::Rgb {
-            r: style.foreground.r,
-            g: style.foreground.g,
-            b: style.foreground.b,
-        }),
-        weight: if style.font_style.contains(FontStyle::BOLD) {
-            Weight::Bold
-        } else {
-            Weight::Normal
-        },
-        italic: style.font_style.contains(FontStyle::ITALIC),
-        underline: style.font_style.contains(FontStyle::UNDERLINE),
-        ..Default::default()
+/// Deliberately leaves `style.background` unmapped; the layout applies `CODE_BACKGROUND` separately.
+impl From<Style> for TextStyle {
+    fn from(style: Style) -> Self {
+        Self {
+            color: Some(Color::Rgb {
+                r: style.foreground.r,
+                g: style.foreground.g,
+                b: style.foreground.b,
+            }),
+            weight: if style.font_style.contains(FontStyle::BOLD) {
+                Weight::Bold
+            } else {
+                Weight::Normal
+            },
+            italic: style.font_style.contains(FontStyle::ITALIC),
+            underline: style.font_style.contains(FontStyle::UNDERLINE),
+            ..Default::default()
+        }
     }
 }
 
