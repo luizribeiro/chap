@@ -7,6 +7,8 @@ extern crate alloc;
 #[cfg(feature = "host")]
 extern crate std;
 
+const MAX_WITNESSES: usize = 16;
+
 #[cfg(feature = "host")]
 pub mod host;
 
@@ -15,6 +17,8 @@ pub mod exec {
     use alloc::{format, string::String, vec::Vec};
     use core::str::FromStr;
     use lockgate_policy::{Scope, ScopeError, ScopeRepr, ScopedPermission};
+
+    use crate::MAX_WITNESSES;
 
     /// An ordered argv prefix authorized for process spawning.
     #[derive(Clone, Debug, PartialEq, Eq)]
@@ -40,6 +44,11 @@ pub mod exec {
                     "{value:?}: first token {program:?} contains a path separator; program paths are resolved when spawning"
                 )));
             }
+            if tokens.len() > MAX_WITNESSES {
+                return Err(ScopeError::unknown(format!(
+                    "{value:?}: command prefix exceeds the {MAX_WITNESSES}-token witness cap and could never match"
+                )));
+            }
             Ok(Self { tokens })
         }
     }
@@ -62,10 +71,19 @@ pub mod exec {
 
 #[cfg(test)]
 mod tests {
+    use alloc::format;
     use core::str::FromStr;
-    use lockgate_policy::{Scope, ScopeRepr, check_scope_laws};
+    use lockgate_policy::{Scope, ScopeError, ScopeRepr, check_scope_laws};
 
+    use super::MAX_WITNESSES;
     use super::exec::CommandPrefix;
+
+    const PREFIX_AT_WITNESS_CAP: &str = "cargo test --workspace --all-targets --all-features --locked --release --no-fail-fast --package chap-core --package chap-cli --package chap-plugin --package chap-exec";
+    const PREFIX_OVER_WITNESS_CAP: &str = concat!(
+        "cargo test --workspace --all-targets --all-features --locked --release ",
+        "--no-fail-fast --package chap-core --package chap-cli --package chap-plugin ",
+        "--package chap-exec --verbose"
+    );
 
     fn prefix(value: &str) -> CommandPrefix {
         CommandPrefix::from_str(value).unwrap()
@@ -120,5 +138,33 @@ mod tests {
                 "accepted {invalid:?}"
             );
         }
+    }
+
+    #[test]
+    fn parsing_accepts_a_prefix_at_the_witness_cap() {
+        assert_eq!(
+            PREFIX_AT_WITNESS_CAP.split_whitespace().count(),
+            MAX_WITNESSES
+        );
+        assert_eq!(
+            prefix(PREFIX_AT_WITNESS_CAP).canonical(),
+            PREFIX_AT_WITNESS_CAP
+        );
+    }
+
+    #[test]
+    fn parsing_rejects_a_prefix_over_the_witness_cap() {
+        assert_eq!(
+            PREFIX_OVER_WITNESS_CAP.split_whitespace().count(),
+            MAX_WITNESSES + 1
+        );
+        let error = CommandPrefix::from_str(PREFIX_OVER_WITNESS_CAP).unwrap_err();
+
+        assert_eq!(
+            error,
+            ScopeError::unknown(format!(
+                "{PREFIX_OVER_WITNESS_CAP:?}: command prefix exceeds the {MAX_WITNESSES}-token witness cap and could never match"
+            ))
+        );
     }
 }

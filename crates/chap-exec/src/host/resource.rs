@@ -9,9 +9,7 @@ use std::vec::Vec;
 
 use lockgate::{PluginSubject, ScopedResource};
 
-use crate::exec::CommandPrefix;
-
-const MAX_WITNESSES: usize = 16;
+use crate::{MAX_WITNESSES, exec::CommandPrefix};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandTarget {
@@ -24,7 +22,7 @@ impl CommandTarget {
         let mut canonical = String::new();
         let mut witnesses = Vec::new();
 
-        // Grants beyond 16 tokens are not meaningful, and witness count must stay bounded independently of argv length.
+        // Witness count must stay bounded independently of argv length.
         for token in std::iter::once(&self.program)
             .chain(self.args.iter())
             .take(MAX_WITNESSES)
@@ -60,7 +58,7 @@ mod tests {
 
     use lockgate_policy::ScopeRepr;
 
-    use super::CommandTarget;
+    use super::{CommandTarget, MAX_WITNESSES};
 
     fn canonical_witnesses(target: &CommandTarget) -> Vec<String> {
         target
@@ -104,7 +102,7 @@ mod tests {
         };
         let witnesses = canonical_witnesses(&target);
 
-        assert_eq!(witnesses.len(), 16);
+        assert_eq!(witnesses.len(), MAX_WITNESSES);
         assert_eq!(
             witnesses.last().unwrap(),
             "tool arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15"
