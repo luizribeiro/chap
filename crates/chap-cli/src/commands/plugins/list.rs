@@ -1,9 +1,9 @@
-use super::NO_PLUGINS_CONFIGURED;
+use super::super::NO_PLUGINS_CONFIGURED;
 use crate::render::render_consent_error;
 use chap_core::AgentBuilder;
 use unicode_width::UnicodeWidthStr;
 
-pub(crate) fn plugin_list(builder: &AgentBuilder) -> Result<String, String> {
+pub(super) fn plugin_list(builder: &AgentBuilder) -> Result<String, String> {
     let mut rows = Vec::new();
     for (id, component) in builder.plugins() {
         let roles = builder.plugin_roles(id).map_err(render_consent_error)?;

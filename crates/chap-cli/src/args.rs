@@ -1,3 +1,4 @@
+use crate::commands::plugins::Plugins;
 use clap::{Args, Parser, Subcommand};
 use std::{
     ffi::OsStr,
@@ -48,20 +49,6 @@ pub(crate) enum GrantsCommand {
         /// Plugin instance to review; omit to review every configured plugin.
         instance_id: Option<String>,
     },
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct Plugins {
-    #[command(subcommand)]
-    pub(crate) command: PluginsCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub(crate) enum PluginsCommand {
-    /// Check that configured plugins can be loaded.
-    Check,
-    /// List configured plugins.
-    List,
 }
 
 pub(crate) fn resolve_config_path(
@@ -273,18 +260,6 @@ mod tests {
                 .unwrap();
 
         assert_eq!(resolved, personal);
-    }
-
-    #[test]
-    fn still_parses_plugin_commands() {
-        let cli = Cli::try_parse_from(["chap", "plugins", "list"]).unwrap();
-
-        assert!(matches!(
-            cli.command,
-            Some(Command::Plugins(Plugins {
-                command: PluginsCommand::List
-            }))
-        ));
     }
 
     #[test]

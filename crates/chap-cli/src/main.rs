@@ -3,10 +3,10 @@ mod commands;
 mod render;
 mod tui;
 
-use args::{Cli, Command, Grants, GrantsCommand, Plugins, PluginsCommand, resolve_config_path};
+use args::{Cli, Command, Grants, GrantsCommand, resolve_config_path};
 use chap_core::AgentBuilder;
 use clap::Parser;
-use commands::{grants::grants_review, plugins::plugin_list};
+use commands::grants::grants_review;
 use render::{render_consent_error, render_load_error, render_session_error, render_start_error};
 use std::{env, path::Path, process::ExitCode};
 
@@ -35,19 +35,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         None => {
             tui::run(builder.start().await.map_err(render_start_error)?).await?;
         }
-        Some(Command::Plugins(Plugins {
-            command: PluginsCommand::Check,
-        })) => {
-            let plugin_count = builder.plugins().count();
-            let agent = builder.start().await.map_err(render_start_error)?;
-            tokio::task::spawn_blocking(move || drop(agent))
-                .await
-                .map_err(|error| format!("failed to clean up plugin host: {error}"))?;
-            println!("Loaded {plugin_count} plugin(s).");
-        }
-        Some(Command::Plugins(Plugins {
-            command: PluginsCommand::List,
-        })) => print!("{}", plugin_list(&builder)?),
+        Some(Command::Plugins(plugins)) => plugins.command.run(builder).await?,
         Some(Command::Grants(Grants {
             command: GrantsCommand::Review { instance_id },
         })) => print!("{}", grants_review(&builder, instance_id.as_deref()).await?),
