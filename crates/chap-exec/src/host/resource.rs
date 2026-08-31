@@ -1,3 +1,8 @@
+//! The [`ScopedResource`] half of the exec capability: how a concrete spawn
+//! request reports the scope memberships (witnesses, in
+//! [`lockgate_policy::Scope`] vocabulary) that admission grants are checked
+//! against.
+
 use std::str::FromStr;
 use std::string::String;
 use std::vec::Vec;

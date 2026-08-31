@@ -1,8 +1,8 @@
 mod env;
 mod resolve;
+mod resource;
 mod sandbox;
 mod spawn;
-mod witness;
 
 use std::fmt;
 use std::path::PathBuf;
@@ -13,7 +13,7 @@ use std::vec::Vec;
 use serde::Deserialize;
 use tokio::process::Command;
 
-pub use witness::CommandTarget;
+pub use resource::CommandTarget;
 
 const DEFAULT_TIMEOUT_CEILING_MS: u64 = 120_000;
 
