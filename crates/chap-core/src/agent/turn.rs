@@ -163,7 +163,7 @@ async fn run_steps(
                             .messages
                             .write()
                             .await
-                            .push(Message::ToolResult(result.into_provider_result()));
+                            .push(Message::ToolResult(result.into()));
                     }
                 }
                 None => {
@@ -299,18 +299,18 @@ struct ExecutedTool {
     result: Result<String, ToolError>,
 }
 
-impl ExecutedTool {
-    fn into_provider_result(self) -> ToolResult {
-        match self.result {
+impl From<ExecutedTool> for ToolResult {
+    fn from(tool: ExecutedTool) -> Self {
+        match tool.result {
             Ok(output) => ToolResult {
-                call_id: self.call_id,
-                name: self.name,
+                call_id: tool.call_id,
+                name: tool.name,
                 output,
                 is_error: false,
             },
             Err(error) => ToolResult {
-                call_id: self.call_id,
-                name: self.name,
+                call_id: tool.call_id,
+                name: tool.name,
                 output: error.to_string(),
                 is_error: true,
             },
