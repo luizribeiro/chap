@@ -227,8 +227,6 @@ pub enum SteerError {
     RunBeingInterrupted,
     #[error("steering input `{id}` is not queued")]
     NotQueued { id: SteeringId },
-    #[error("session has no active run to interrupt")]
-    NoActiveRunToInterrupt,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -401,7 +399,7 @@ impl Session {
         self.state.discard_steering(id)
     }
 
-    pub fn interrupt(&self) -> Result<(), SteerError> {
+    pub fn interrupt(&self) -> bool {
         self.state.interrupt()
     }
 }
@@ -534,10 +532,10 @@ impl SessionState {
         }
     }
 
-    pub(crate) fn interrupt(&self) -> Result<(), SteerError> {
+    pub(crate) fn interrupt(&self) -> bool {
         let mut run = self.run.lock().expect("session run state lock poisoned");
         if !run.active {
-            return Err(SteerError::NoActiveRunToInterrupt);
+            return false;
         }
         if !run.interrupted {
             run.interrupted = true;
@@ -546,7 +544,7 @@ impl SessionState {
                 .expect("active session should have an interrupt signal")
                 .send_replace(());
         }
-        Ok(())
+        true
     }
 
     pub(crate) fn steer(&self, input: String) -> Result<SteeringId, SteerError> {
@@ -770,7 +768,7 @@ mod tests {
             session.steer("too early"),
             Err(SteerError::NoActiveRunToSteer)
         );
-        assert_eq!(session.interrupt(), Err(SteerError::NoActiveRunToInterrupt));
+        assert!(!session.interrupt());
         assert_eq!(session.steer("  \n"), Err(SteerError::EmptyInput));
 
         let run = state.start_run();
@@ -817,7 +815,7 @@ mod tests {
         let session = Session::new(Arc::clone(&state), Arc::new(EchoExecutor));
         let _run = state.start_run();
 
-        session.interrupt().unwrap();
+        assert!(session.interrupt());
 
         assert_eq!(
             session.steer("too late"),

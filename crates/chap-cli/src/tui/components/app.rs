@@ -68,7 +68,7 @@ pub fn Chap(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
                     should_exit.set(true);
                 }
                 KeyCode::Esc => {
-                    let _ = session.interrupt();
+                    session.interrupt();
                 }
                 _ => {}
             }

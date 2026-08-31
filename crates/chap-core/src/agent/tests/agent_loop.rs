@@ -740,7 +740,7 @@ async fn preserves_interrupted_input_for_the_next_provider_request() {
 
     first_request.await;
     let steering_id = state.steer("queued detail".to_owned()).unwrap();
-    state.interrupt().unwrap();
+    assert!(state.interrupt());
 
     assert_eq!(run.await.unwrap(), Err(RunError::Interrupted));
     assert_eq!(
@@ -820,7 +820,7 @@ async fn closes_unfinished_tool_calls_when_interrupted() {
     tokio::time::timeout(Duration::from_secs(1), started.wait())
         .await
         .expect("both tools should start concurrently");
-    state.interrupt().unwrap();
+    assert!(state.interrupt());
 
     assert_eq!(run.await.unwrap(), Err(RunError::Interrupted));
     assert_eq!(
@@ -919,7 +919,7 @@ async fn completes_finished_calls_when_interrupted_mid_batch() {
     tokio::time::timeout(Duration::from_secs(1), paused.wait())
         .await
         .expect("the unfinished tool should start");
-    state.interrupt().unwrap();
+    assert!(state.interrupt());
 
     assert_eq!(run.await.unwrap(), Err(RunError::Interrupted));
     let history = state.messages.read().await;
