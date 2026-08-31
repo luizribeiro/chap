@@ -239,8 +239,8 @@ fn host_builder(_config: &Config) -> Result<HostBuilder<()>, ConsentError> {
     let imports: HostImports = ();
     #[cfg(feature = "exec")]
     let imports: HostImports = {
-        let project_root =
-            std::env::current_dir().map_err(|source| ConsentError::CurrentDirectory { source })?;
+        let project_root = std::env::current_dir()
+            .map_err(|source| ConsentError::CurrentDirectoryUnavailable { source })?;
         bindings::ExecImports::new(
             _config
                 .exec_config()

@@ -47,7 +47,7 @@ impl AgentInner {
             })?;
         self.lockgate
             .client::<provider_bindings::Role>(&plugin.handle)
-            .map_err(|source| ProviderError::Role {
+            .map_err(|source| ProviderError::RoleUnavailable {
                 provider: provider.to_owned(),
                 source,
             })?
@@ -79,7 +79,7 @@ fn map_plugin_call_error(provider: &str, error: CallError) -> ProviderError {
             deadline,
             source: Arc::new(source),
         },
-        source => ProviderError::Call {
+        source => ProviderError::CallFailed {
             provider: provider.to_owned(),
             source: Arc::new(source),
         },
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn provider_role_failures_preserve_the_source() {
-        let error = ProviderError::Role {
+        let error = ProviderError::RoleUnavailable {
             provider: "example".to_owned(),
             source: lockgate::RoleError::WrongHost,
         };

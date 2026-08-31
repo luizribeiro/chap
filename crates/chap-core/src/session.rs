@@ -178,7 +178,7 @@ fn completion_without_text_message(finish_reason: &FinishReason) -> String {
 #[non_exhaustive]
 pub enum ContextError {
     #[error("{source}")]
-    Role {
+    RoleUnavailable {
         #[source]
         source: lockgate::RoleError,
     },
@@ -189,12 +189,12 @@ pub enum ContextError {
         source: lockgate::CallError,
     },
     #[error("{source}")]
-    Call {
+    SegmentsCallFailed {
         #[source]
         source: lockgate::CallError,
     },
     #[error("{message}")]
-    Plugin { message: String },
+    PluginReported { message: String },
 }
 
 #[derive(Debug, Error)]

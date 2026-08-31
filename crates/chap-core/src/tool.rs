@@ -25,7 +25,7 @@ pub enum ToolRegistrationError {
     #[error("tool name cannot be empty")]
     EmptyName,
     #[error("tool `{name}` has invalid JSON Schema: {source}")]
-    InvalidParameters {
+    InvalidParameterSchema {
         name: String,
         #[source]
         source: serde_json::Error,
@@ -110,7 +110,7 @@ fn validate(definition: &ToolDefinition) -> Result<(), ToolRegistrationError> {
         return Err(ToolRegistrationError::EmptyName);
     }
     serde_json::from_str::<serde_json::Value>(&definition.parameters).map_err(|source| {
-        ToolRegistrationError::InvalidParameters {
+        ToolRegistrationError::InvalidParameterSchema {
             name: definition.name.clone(),
             source,
         }
@@ -227,7 +227,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            ToolRegistrationError::InvalidParameters { name, .. } if name == "broken"
+            ToolRegistrationError::InvalidParameterSchema { name, .. } if name == "broken"
         ));
     }
 

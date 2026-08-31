@@ -29,7 +29,7 @@ pub enum ProviderError {
     #[error("provider plugin `{provider}` is not configured")]
     NotConfigured { provider: String },
     #[error("provider plugin `{provider}` failed: {source}")]
-    Role {
+    RoleUnavailable {
         provider: String,
         #[source]
         source: lockgate::RoleError,
@@ -43,7 +43,7 @@ pub enum ProviderError {
         source: Arc<lockgate::CallError>,
     },
     #[error("provider plugin `{provider}` failed: {source}")]
-    Call {
+    CallFailed {
         provider: String,
         #[source]
         source: Arc<lockgate::CallError>,
@@ -74,11 +74,11 @@ impl PartialEq for ProviderError {
                 left == right
             }
             (
-                Self::Role {
+                Self::RoleUnavailable {
                     provider: left_provider,
                     source: left_source,
                 },
-                Self::Role {
+                Self::RoleUnavailable {
                     provider: right_provider,
                     source: right_source,
                 },
@@ -100,11 +100,11 @@ impl PartialEq for ProviderError {
                     && Arc::ptr_eq(left_source, right_source)
             }
             (
-                Self::Call {
+                Self::CallFailed {
                     provider: left_provider,
                     source: left_source,
                 },
-                Self::Call {
+                Self::CallFailed {
                     provider: right_provider,
                     source: right_source,
                 },

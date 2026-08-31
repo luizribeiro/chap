@@ -47,7 +47,7 @@ impl AgentInner {
     ) -> Result<Vec<ContextSegment>, ContextError> {
         self.lockgate
             .client::<context_bindings::Role>(plugin)
-            .map_err(|source| ContextError::Role { source })?
+            .map_err(|source| ContextError::RoleUnavailable { source })?
             .segments(
                 self.call_budgets
                     .resolve(PluginCall::ContextSegments)
@@ -55,7 +55,7 @@ impl AgentInner {
             )
             .await
             .map_err(ContextError::from)?
-            .map_err(|message| ContextError::Plugin { message })
+            .map_err(|message| ContextError::PluginReported { message })
             .map(|segments| segments.into_iter().map(Into::into).collect())
     }
 }
@@ -113,7 +113,7 @@ impl From<CallError> for ContextError {
             source @ CallError::DeadlineExceeded { deadline } => {
                 Self::DeadlineExceeded { deadline, source }
             }
-            source => Self::Call { source },
+            source => Self::SegmentsCallFailed { source },
         }
     }
 }
@@ -293,7 +293,7 @@ mod tests {
     fn failure(channel: ContextChannel, error: &str) -> PluginResult {
         PluginResult {
             channel,
-            segments: Err(ContextError::Plugin {
+            segments: Err(ContextError::PluginReported {
                 message: error.to_owned(),
             }),
         }
@@ -303,7 +303,7 @@ mod tests {
         assert_eq!(failure.plugin, plugin);
         assert!(matches!(
             &failure.source,
-            ContextError::Plugin { message: actual } if actual == message
+            ContextError::PluginReported { message: actual } if actual == message
         ));
     }
 

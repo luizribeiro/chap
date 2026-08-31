@@ -587,13 +587,13 @@ mod tests {
         let error = SessionError::Context(vec![
             ContextFailure {
                 plugin: "alpha".to_owned(),
-                source: ContextError::Plugin {
+                source: ContextError::PluginReported {
                     message: "unavailable".to_owned(),
                 },
             },
             ContextFailure {
                 plugin: "bravo".to_owned(),
-                source: ContextError::Plugin {
+                source: ContextError::PluginReported {
                     message: "timed out after 10s".to_owned(),
                 },
             },

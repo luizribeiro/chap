@@ -138,7 +138,7 @@ async fn preserves_a_context_plugin_wire_error_at_the_host_boundary() {
     assert_eq!(failures[0].plugin, "failing-context");
     assert!(matches!(
         &failures[0].source,
-        ContextError::Plugin { message } if message == "configured context failure"
+        ContextError::PluginReported { message } if message == "configured context failure"
     ));
 }
 

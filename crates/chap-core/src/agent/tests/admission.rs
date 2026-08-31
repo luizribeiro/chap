@@ -399,7 +399,7 @@ async fn classifies_a_trapping_provider_as_a_plugin_failure() {
 
     let error = backend.complete(Vec::new()).await.unwrap_err();
 
-    let ProviderError::Call { provider, source } = error else {
+    let ProviderError::CallFailed { provider, source } = error else {
         panic!("a trapping provider should be a plugin failure");
     };
     assert_eq!(provider, "example");

@@ -49,7 +49,7 @@ pub enum ConsentError {
     )]
     RoleConfigInvalid { plugin: String, role: String },
     #[error("failed to determine current working directory: {source}")]
-    CurrentDirectory {
+    CurrentDirectoryUnavailable {
         #[source]
         source: io::Error,
     },
