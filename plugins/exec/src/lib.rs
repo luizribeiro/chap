@@ -1,4 +1,4 @@
-use chap_plugin::exec::{Command, ExecError, ExecResult};
+use chap_plugin::exec::{Command, ExecResult};
 use chap_plugin::tools::{ToolDefinition, ToolError, Tools};
 use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, capabilities};
 use schemars::JsonSchema;
@@ -71,7 +71,7 @@ impl Tools for Exec {
         )
         .await
         .map(format_output)
-        .map_err(map_exec_error)
+        .map_err(Into::into)
     }
 }
 
@@ -109,23 +109,6 @@ fn format_output(result: ExecResult) -> String {
         sections.push("[Command output was truncated.]".to_owned());
     }
     sections.join("\n\n")
-}
-
-fn map_exec_error(error: ExecError) -> ToolError {
-    match error {
-        ExecError::Denied(message) => {
-            ToolError::Denied(format!("command denied by the capability guard: {message}"))
-        }
-        ExecError::Rejected(message) => {
-            ToolError::InvalidInput(format!("command rejected: {message}"))
-        }
-        ExecError::TimedOut => {
-            ToolError::Failed("command timed out and was killed at the deadline".to_owned())
-        }
-        ExecError::Failed(message) => {
-            ToolError::Failed(format!("command execution failed: {message}"))
-        }
-    }
 }
 
 #[cfg(test)]
@@ -239,28 +222,6 @@ mod tests {
                 truncated: true,
             }),
             "Exit code: 0\n\npartial\n\n[Command output was truncated.]"
-        );
-    }
-
-    #[test]
-    fn maps_each_exec_error_variant() {
-        assert_eq!(
-            map_exec_error(ExecError::Denied("exec.run".to_owned())),
-            ToolError::Denied("command denied by the capability guard: exec.run".to_owned())
-        );
-        assert_eq!(
-            map_exec_error(ExecError::Rejected(
-                "program paths are not allowed".to_owned()
-            )),
-            ToolError::InvalidInput("command rejected: program paths are not allowed".to_owned())
-        );
-        assert_eq!(
-            map_exec_error(ExecError::TimedOut),
-            ToolError::Failed("command timed out and was killed at the deadline".to_owned())
-        );
-        assert_eq!(
-            map_exec_error(ExecError::Failed("could not spawn".to_owned())),
-            ToolError::Failed("command execution failed: could not spawn".to_owned())
         );
     }
 
