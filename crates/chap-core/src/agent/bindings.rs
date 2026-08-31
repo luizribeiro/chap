@@ -47,7 +47,7 @@ mod exec_host {
             _subject: &'a PluginSubject<'_>,
             command: &'a exec::Command,
         ) -> Result<Self::Resource, Self::Error> {
-            Ok(command_target(command))
+            Ok(command.into())
         }
     }
 
@@ -62,7 +62,7 @@ mod exec_host {
         ) -> Result<exec::ExecResult, exec::ExecError> {
             self.executor
                 .execute(
-                    &command_target(&command),
+                    &CommandTarget::from(&command),
                     timeout_ms.map(Duration::from_millis),
                 )
                 .await
@@ -72,14 +72,16 @@ mod exec_host {
     }
 
     // TODO(luizribeiro/lockgate#4): the guard's resolve_scoped_resource and
-    // the run body each derive their own CommandTarget through this function,
+    // the run body each derive their own CommandTarget through this impl,
     // so the checked value and the executed value stay equal only while both
     // remain this one derivation. Execute the guard-approved resource directly
     // once the macro can hand it to the body.
-    fn command_target(command: &exec::Command) -> CommandTarget {
-        CommandTarget {
-            program: command.program.clone(),
-            args: command.args.clone(),
+    impl From<&exec::Command> for CommandTarget {
+        fn from(command: &exec::Command) -> Self {
+            Self {
+                program: command.program.clone(),
+                args: command.args.clone(),
+            }
         }
     }
 
