@@ -54,7 +54,7 @@ impl AgentInner {
                     .invocation_context(),
             )
             .await
-            .map_err(context_call_error)?
+            .map_err(ContextError::from)?
             .map_err(|message| ContextError::Plugin { message })
             .map(|segments| segments.into_iter().map(Into::into).collect())
     }
@@ -107,12 +107,14 @@ fn render_channel(mut segments: Vec<(i32, String, usize, String)>) -> Option<Str
     })
 }
 
-fn context_call_error(error: CallError) -> ContextError {
-    match error {
-        source @ CallError::DeadlineExceeded { deadline } => {
-            ContextError::DeadlineExceeded { deadline, source }
+impl From<CallError> for ContextError {
+    fn from(error: CallError) -> Self {
+        match error {
+            source @ CallError::DeadlineExceeded { deadline } => {
+                Self::DeadlineExceeded { deadline, source }
+            }
+            source => Self::Call { source },
         }
-        source => ContextError::Call { source },
     }
 }
 
