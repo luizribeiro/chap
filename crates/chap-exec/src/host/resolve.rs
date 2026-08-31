@@ -6,7 +6,7 @@ use std::vec::Vec;
 
 use super::ExecError;
 
-pub(super) fn snapshot(configured: Option<Vec<PathBuf>>) -> Vec<PathBuf> {
+pub(super) fn pinned_search_path(configured: Option<Vec<PathBuf>>) -> Vec<PathBuf> {
     configured
         .unwrap_or_else(|| {
             std::env::var_os("PATH")
@@ -52,7 +52,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{program, snapshot};
+    use super::{pinned_search_path, program};
     use crate::host::ExecError;
 
     fn write_executable(directory: &Path, name: &str) {
@@ -125,11 +125,11 @@ mod tests {
     #[test]
     fn configured_path_replaces_the_ambient_snapshot() {
         let configured = vec!["/one".into(), "/two".into()];
-        assert_eq!(snapshot(Some(configured.clone())), configured);
+        assert_eq!(pinned_search_path(Some(configured.clone())), configured);
     }
 
     #[test]
-    fn snapshot_makes_relative_entries_absolute() {
-        assert!(snapshot(Some(vec!["relative".into()]))[0].is_absolute());
+    fn pinned_search_path_makes_relative_entries_absolute() {
+        assert!(pinned_search_path(Some(vec!["relative".into()]))[0].is_absolute());
     }
 }

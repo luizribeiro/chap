@@ -73,7 +73,7 @@ impl Executor {
     pub fn new(config: ExecConfig, project_root: impl Into<PathBuf>) -> Self {
         let project_root = project_root.into();
         Self {
-            path: resolve::snapshot(config.path),
+            path: resolve::pinned_search_path(config.path),
             env_passthrough: config.env_passthrough,
             timeout_ceiling: Duration::from_millis(config.timeout_ceiling_ms),
             project_root: std::path::absolute(&project_root).unwrap_or(project_root),
