@@ -19,13 +19,13 @@ const DEFAULT_TIMEOUT_CEILING_MS: u64 = 120_000;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct ExecConfig {
+pub struct ExecSettings {
     pub path: Option<Vec<PathBuf>>,
     pub env_passthrough: Vec<String>,
     pub timeout_ceiling_ms: u64,
 }
 
-impl Default for ExecConfig {
+impl Default for ExecSettings {
     fn default() -> Self {
         Self {
             path: None,
@@ -70,12 +70,12 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub fn new(config: ExecConfig, project_root: impl Into<PathBuf>) -> Self {
+    pub fn new(settings: ExecSettings, project_root: impl Into<PathBuf>) -> Self {
         let project_root = project_root.into();
         Self {
-            path: resolve::pinned_search_path(config.path),
-            env_passthrough: config.env_passthrough,
-            timeout_ceiling: Duration::from_millis(config.timeout_ceiling_ms),
+            path: resolve::pinned_search_path(settings.path),
+            env_passthrough: settings.env_passthrough,
+            timeout_ceiling: Duration::from_millis(settings.timeout_ceiling_ms),
             project_root: std::path::absolute(&project_root).unwrap_or(project_root),
             sandbox: sandbox::Sandbox::None,
         }
@@ -107,7 +107,7 @@ mod host_tests {
 
     use tempfile::TempDir;
 
-    use super::{CommandTarget, ExecConfig, ExecError, Executor};
+    use super::{CommandTarget, ExecError, ExecSettings, Executor};
 
     fn target(program: &str, args: &[&str]) -> CommandTarget {
         CommandTarget {
@@ -119,7 +119,7 @@ mod host_tests {
     #[tokio::test]
     async fn executor_runs_a_real_command_end_to_end() {
         let project = TempDir::new().unwrap();
-        let executor = Executor::new(ExecConfig::default(), project.path());
+        let executor = Executor::new(ExecSettings::default(), project.path());
 
         let outcome = executor
             .execute(&target("echo", &["executor-ok"]), None)
@@ -136,9 +136,9 @@ mod host_tests {
     async fn executor_clamps_requested_timeouts_to_its_ceiling() {
         let project = TempDir::new().unwrap();
         let executor = Executor::new(
-            ExecConfig {
+            ExecSettings {
                 timeout_ceiling_ms: 100,
-                ..ExecConfig::default()
+                ..ExecSettings::default()
             },
             project.path(),
         );

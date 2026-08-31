@@ -20,7 +20,7 @@ mod exec_host {
     use super::exec;
     use chap_exec::{
         exec::CommandPrefix,
-        host::{CommandTarget, ExecConfig, ExecError, ExecOutcome, Executor},
+        host::{CommandTarget, ExecError, ExecOutcome, ExecSettings, Executor},
     };
     use lockgate::{HostCtx, PermissionDenied, PluginSubject, ResolveScopedResource};
     use std::{convert::Infallible, path::Path, sync::Arc, time::Duration};
@@ -31,9 +31,9 @@ mod exec_host {
     }
 
     impl ExecImports {
-        pub(crate) fn new(config: ExecConfig, project_root: &Path) -> Self {
+        pub(crate) fn new(settings: ExecSettings, project_root: &Path) -> Self {
             Self {
-                executor: Arc::new(Executor::new(config, project_root)),
+                executor: Arc::new(Executor::new(settings, project_root)),
             }
         }
     }

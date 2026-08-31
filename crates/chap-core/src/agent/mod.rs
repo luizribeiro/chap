@@ -243,7 +243,7 @@ fn host_builder(_config: &Config) -> Result<HostBuilder<()>, ConsentError> {
             .map_err(|source| ConsentError::CurrentDirectoryUnavailable { source })?;
         bindings::ExecImports::new(
             _config
-                .exec_config()
+                .exec_settings()
                 .map_err(ConsentError::HostConfiguration)?,
             &project_root,
         )

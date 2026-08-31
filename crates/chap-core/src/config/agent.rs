@@ -37,13 +37,13 @@ impl Config {
         }
 
         #[cfg(feature = "exec")]
-        self.exec_config()?;
+        self.exec_settings()?;
 
         Ok(())
     }
 
     #[cfg(feature = "exec")]
-    pub(crate) fn exec_config(&self) -> Result<chap_exec::host::ExecConfig, LoadError> {
+    pub(crate) fn exec_settings(&self) -> Result<chap_exec::host::ExecSettings, LoadError> {
         self.agent
             .exec
             .clone()
@@ -186,7 +186,7 @@ mod tests {
         )
         .unwrap();
 
-        let exec = config.exec_config().unwrap();
+        let exec = config.exec_settings().unwrap();
         assert_eq!(
             exec.path.unwrap(),
             [
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn defaults_exec_settings_when_the_section_is_absent() {
         let config: Config = serde_json::from_str("{}").unwrap();
-        let exec = config.exec_config().unwrap();
+        let exec = config.exec_settings().unwrap();
 
         assert!(exec.path.is_none());
         assert!(exec.env_passthrough.is_empty());
