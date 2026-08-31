@@ -143,22 +143,32 @@ pub enum StartError {
         #[source]
         source: tokio::task::JoinError,
     },
-    #[error("tool plugin `{plugin}` failed: {source}")]
-    ToolRole {
+    #[error("{} plugin `{plugin}` failed: {source}", role_label(role))]
+    RoleClientUnavailable {
+        role: &'static str,
         plugin: String,
         #[source]
         source: lockgate::RoleError,
     },
-    #[error("tool plugin `{plugin}` failed: {source}")]
-    ToolDefinitionsCall {
+    #[error("{} plugin `{plugin}` failed: {source}", role_label(role))]
+    RoleCallFailed {
+        role: &'static str,
         plugin: String,
         #[source]
         source: lockgate::CallError,
     },
-    #[error("tool plugin `{plugin}`: {message}")]
-    ToolDefinitions { plugin: String, message: String },
+    #[error("{} plugin `{plugin}`: {message}", role_label(role))]
+    RoleReportedError {
+        role: &'static str,
+        plugin: String,
+        message: String,
+    },
     #[error("{0}")]
     ToolRegistration(#[source] ToolRegistrationError),
+}
+
+fn role_label(role: &'static str) -> &'static str {
+    role.strip_suffix('s').unwrap_or(role)
 }
 
 /// Production plugin-call budgets, keyed by exported WIT function.

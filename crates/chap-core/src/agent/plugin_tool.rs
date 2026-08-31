@@ -27,7 +27,8 @@ impl PluginTool {
     ) -> Result<Vec<Self>, StartError> {
         let definitions = runtime
             .client::<tool_bindings::Role>(&handle)
-            .map_err(|source| StartError::ToolRole {
+            .map_err(|source| StartError::RoleClientUnavailable {
+                role: "tools",
                 plugin: plugin.to_owned(),
                 source,
             })?
@@ -37,11 +38,13 @@ impl PluginTool {
                     .invocation_context(),
             )
             .await
-            .map_err(|source| StartError::ToolDefinitionsCall {
+            .map_err(|source| StartError::RoleCallFailed {
+                role: "tools",
                 plugin: plugin.to_owned(),
                 source,
             })?
-            .map_err(|message| StartError::ToolDefinitions {
+            .map_err(|message| StartError::RoleReportedError {
+                role: "tools",
                 plugin: plugin.to_owned(),
                 message,
             })?;

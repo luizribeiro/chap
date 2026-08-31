@@ -281,7 +281,12 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
         error.to_string(),
         "tool plugin `sdk-multi-role` failed: plugin exceeded its bounded call deadline of 1s"
     );
-    let StartError::ToolDefinitionsCall { plugin, source } = error else {
+    let StartError::RoleCallFailed {
+        role: "tools",
+        plugin,
+        source,
+    } = error
+    else {
         panic!("tool definition failures must preserve their call error")
     };
     assert_eq!(plugin, "sdk-multi-role");
@@ -331,7 +336,11 @@ async fn preserves_a_tool_plugin_definitions_error_at_the_host_boundary() {
     );
     assert!(matches!(
         error,
-        StartError::ToolDefinitions { plugin, message }
+        StartError::RoleReportedError {
+            role: "tools",
+            plugin,
+            message,
+        }
             if plugin == "sdk-multi-role" && message == "tool catalog is unavailable"
     ));
 }
