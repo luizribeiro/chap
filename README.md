@@ -31,9 +31,17 @@ plugins with:
 cargo run -- plugins list
 ```
 
-Use `--config /path/to/chap.json` to read a different file, or set
-`CHAP_CONFIG`. An explicit flag takes precedence over the environment variable;
-without either, CHAP reads `chap.json`.
+CHAP resolves its configuration in this order:
+
+1. The path passed to `--config`.
+2. The path in `CHAP_CONFIG`.
+3. `./chap.json`, when that file exists.
+4. `$XDG_CONFIG_HOME/chap/chap.json`, or `~/.config/chap/chap.json` when
+   `XDG_CONFIG_HOME` is unset or empty.
+
+An existing local `./chap.json` is authoritative. If it cannot be read or
+parsed, CHAP reports that error instead of falling through to the personal
+configuration.
 
 The repository includes an OpenAI-compatible Chat Completions provider, Kagi
 web tools, and a persona context contributor. The exec plugin exposes an
@@ -97,7 +105,7 @@ errors within the provider call's separate, outer wall-clock deadline.
 
 ### Configuration layers
 
-`chap.json` has three configuration layers:
+Within the selected `chap.json`, settings have three configuration layers:
 
 | Layer | Key | Reader and scope |
 | --- | --- | --- |

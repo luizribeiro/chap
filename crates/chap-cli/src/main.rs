@@ -19,7 +19,9 @@ const NO_PLUGINS_CONFIGURED: &str = "No plugins are configured.\n";
 #[derive(Debug, Parser)]
 #[command(version, about = "A plugin-powered coding agent")]
 struct Cli {
-    /// Configuration file to read.
+    /// Configuration file to read. Resolution order: --config, CHAP_CONFIG,
+    /// ./chap.json if present, then $XDG_CONFIG_HOME/chap/chap.json (or
+    /// ~/.config/chap/chap.json).
     #[arg(long, env = "CHAP_CONFIG", global = true)]
     config: Option<PathBuf>,
 
