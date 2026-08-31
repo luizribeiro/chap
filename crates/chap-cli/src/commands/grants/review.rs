@@ -1,11 +1,11 @@
-use super::NO_PLUGINS_CONFIGURED;
+use super::super::NO_PLUGINS_CONFIGURED;
 use crate::render::{render_consent_error, render_load_error};
 use chap_core::{
     AgentBuilder, DriftChange, DriftKind, ExportDrift, ExportDriftKind, PluginConsentReview,
 };
 use std::collections::BTreeSet;
 
-pub(crate) async fn grants_review(
+pub(super) async fn grants_review(
     builder: &AgentBuilder,
     instance_id: Option<&str>,
 ) -> Result<String, String> {

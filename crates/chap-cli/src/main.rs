@@ -3,11 +3,10 @@ mod commands;
 mod render;
 mod tui;
 
-use args::{Cli, Command, Grants, GrantsCommand, resolve_config_path};
+use args::{Cli, Command, resolve_config_path};
 use chap_core::AgentBuilder;
 use clap::Parser;
-use commands::grants::grants_review;
-use render::{render_consent_error, render_load_error, render_session_error, render_start_error};
+use render::{render_load_error, render_session_error, render_start_error};
 use std::{env, path::Path, process::ExitCode};
 
 #[tokio::main]
@@ -36,28 +35,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             tui::run(builder.start().await.map_err(render_start_error)?).await?;
         }
         Some(Command::Plugins(plugins)) => plugins.command.run(builder).await?,
-        Some(Command::Grants(Grants {
-            command: GrantsCommand::Review { instance_id },
-        })) => print!("{}", grants_review(&builder, instance_id.as_deref()).await?),
-        Some(Command::Grants(Grants {
-            command: GrantsCommand::Approve { instance_id },
-        })) => {
-            builder
-                .approve_plugin(&instance_id)
-                .await
-                .map_err(render_consent_error)?;
-            println!(
-                "Approved `{instance_id}` for its exact resolved manifest. Concrete scopes remain configured in chap.json."
-            );
-        }
-        Some(Command::Grants(Grants {
-            command: GrantsCommand::Deny { instance_id },
-        })) => {
-            builder
-                .deny_plugin(&instance_id)
-                .map_err(render_consent_error)?;
-            println!("Denied `{instance_id}`. It will require approval before its next admission.");
-        }
+        Some(Command::Grants(grants)) => grants.command.run(&builder).await?,
     }
     Ok(())
 }
