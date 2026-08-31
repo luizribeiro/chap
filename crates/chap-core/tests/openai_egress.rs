@@ -191,7 +191,7 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
     );
     let error = builder.start().await.err().unwrap();
 
-    let StartError::Refused(refusals) = error else {
+    let StartError::AdmissionRefused(refusals) = error else {
         panic!("expected structured plugin refusals")
     };
     assert_eq!(refusals.len(), 1);

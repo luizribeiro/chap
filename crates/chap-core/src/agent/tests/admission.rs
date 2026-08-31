@@ -29,7 +29,7 @@ use std::{
 use wit_parser::{Resolve, WorldItem, WorldKey};
 
 fn refused_plugins(error: StartError) -> Vec<PluginRefusal> {
-    let StartError::Refused(refusals) = error else {
+    let StartError::AdmissionRefused(refusals) = error else {
         panic!("expected structured plugin refusals")
     };
     refusals

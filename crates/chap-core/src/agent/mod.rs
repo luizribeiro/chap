@@ -128,7 +128,7 @@ pub enum PluginRefusalReason {
 #[non_exhaustive]
 pub enum StartError {
     #[error("{} plugin(s) were refused admission", .0.len())]
-    Refused(Vec<PluginRefusal>),
+    AdmissionRefused(Vec<PluginRefusal>),
     #[error("{0}")]
     Consent(#[source] ConsentError),
     #[error("{source}; {cleanup}")]
@@ -596,7 +596,7 @@ impl AgentBuilder {
         if refusals.is_empty() {
             Ok(plugins)
         } else {
-            Err(StartError::Refused(refusals))
+            Err(StartError::AdmissionRefused(refusals))
         }
     }
 

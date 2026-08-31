@@ -139,7 +139,7 @@ fn render_load_error(error: LoadError) -> String {
 
 fn render_start_error(error: StartError) -> String {
     match error {
-        StartError::Refused(refusals) => render_plugin_refusals(&refusals),
+        StartError::AdmissionRefused(refusals) => render_plugin_refusals(&refusals),
         error => error.to_string(),
     }
 }
@@ -671,7 +671,7 @@ mod tests {
         ];
 
         assert_eq!(
-            render_start_error(StartError::Refused(refusals.into())),
+            render_start_error(StartError::AdmissionRefused(refusals.into())),
             "plugin `alpha` from `plugins/alpha.wasm` requires approval before admission; run `chap grants review alpha` and then `chap grants approve alpha`\n\
              plugin `bravo` from `plugins/bravo.wasm` expanded its permission manifest and requires renewed approval before admission; run `chap grants review bravo` and then `chap grants approve bravo`"
         );
