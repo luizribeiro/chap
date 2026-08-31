@@ -33,7 +33,7 @@ impl Config {
 
     pub(crate) fn validate_agent_settings(&self) -> Result<(), LoadError> {
         if self.agent.exec.is_some() && !cfg!(feature = "exec") {
-            return Err(LoadError::ExecUnsupported);
+            return Err(LoadError::CapabilityUnsupported { capability: "exec" });
         }
 
         #[cfg(feature = "exec")]
@@ -50,7 +50,10 @@ impl Config {
             .map(serde_json::from_value)
             .transpose()
             .map(Option::unwrap_or_default)
-            .map_err(|source| LoadError::InvalidExecConfig { source })
+            .map_err(|source| LoadError::InvalidAgentConfigSection {
+                section: "agent.exec",
+                source,
+            })
     }
 }
 
@@ -161,7 +164,10 @@ mod tests {
         .unwrap();
 
         let error = config.validate_agent_settings().unwrap_err();
-        assert!(matches!(error, LoadError::ExecUnsupported));
+        assert!(matches!(
+            error,
+            LoadError::CapabilityUnsupported { capability: "exec" }
+        ));
     }
 
     #[cfg(feature = "exec")]
@@ -216,7 +222,11 @@ mod tests {
         .unwrap();
 
         let error = config.validate_agent_settings().unwrap_err();
-        let LoadError::InvalidExecConfig { source } = error else {
+        let LoadError::InvalidAgentConfigSection {
+            section: "agent.exec",
+            source,
+        } = error
+        else {
             panic!("expected invalid exec config");
         };
         assert!(source.to_string().contains("invalid type"));

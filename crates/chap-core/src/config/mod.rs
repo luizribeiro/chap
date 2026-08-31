@@ -53,11 +53,11 @@ pub enum LoadError {
         "cannot locate CHAP state: neither XDG_STATE_HOME nor HOME is set to a non-empty value"
     )]
     StateDirectoryUnavailable,
-    #[error("agent.exec is configured, but this build lacks exec support")]
-    ExecUnsupported,
-    #[error("failed to parse the `agent.exec` config section: {source}")]
-    InvalidExecConfig {
-        #[source]
+    #[error("`agent.{capability}` is configured, but this build lacks {capability} support")]
+    CapabilityUnsupported { capability: &'static str },
+    #[error("failed to parse the `{section}` section: {source}")]
+    InvalidAgentConfigSection {
+        section: &'static str,
         source: serde_json::Error,
     },
 }

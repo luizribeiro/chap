@@ -130,10 +130,9 @@ async fn run(cli: Cli) -> Result<(), String> {
 
 fn render_load_error(error: LoadError) -> String {
     match error {
-        LoadError::ExecUnsupported => {
-            "agent.exec is configured, but this build lacks exec support; rebuild with the `exec` feature"
-                .to_owned()
-        }
+        LoadError::CapabilityUnsupported { capability } => format!(
+            "agent.{capability} is configured, but this build lacks {capability} support; rebuild with the `{capability}` feature"
+        ),
         error => error.to_string(),
     }
 }
@@ -567,17 +566,18 @@ mod tests {
             "cannot locate CHAP state: neither XDG_STATE_HOME nor HOME is set to a non-empty value"
         );
         assert_eq!(
-            render_load_error(LoadError::InvalidExecConfig {
+            render_load_error(LoadError::InvalidAgentConfigSection {
+                section: "agent.exec",
                 source: serde_json::from_str::<u64>(r#""soon""#).unwrap_err(),
             }),
-            "failed to parse the `agent.exec` config section: invalid type: string \"soon\", expected u64 at line 1 column 6"
+            "failed to parse the `agent.exec` section: invalid type: string \"soon\", expected u64 at line 1 column 6"
         );
     }
 
     #[test]
     fn renders_the_exec_rebuild_hint() {
         assert_eq!(
-            render_load_error(LoadError::ExecUnsupported),
+            render_load_error(LoadError::CapabilityUnsupported { capability: "exec" }),
             "agent.exec is configured, but this build lacks exec support; rebuild with the `exec` feature"
         );
     }
