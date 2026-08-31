@@ -1,5 +1,9 @@
 package chap:agent@0.3.0;
 
+/// Type-identity anchors used only for guest binding generation. `wit-bindgen`
+/// generates bindings per world, so each shared interface needs a wrapper
+/// world; plugins use `with:` mappings to remap these interfaces onto the one
+/// generated module. These worlds are never instantiated at runtime.
 world sdk-types {
   import types;
 }
