@@ -3,7 +3,7 @@ mod commands;
 mod render;
 mod tui;
 
-use args::{Cli, Command, resolve_config_path};
+use args::{Cli, resolve_config_path};
 use chap_core::AgentBuilder;
 use clap::Parser;
 use render::{render_load_error, render_session_error, render_start_error};
@@ -34,8 +34,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         None => {
             tui::run(builder.start().await.map_err(render_start_error)?).await?;
         }
-        Some(Command::Plugins(plugins)) => plugins.command.run(builder).await?,
-        Some(Command::Grants(grants)) => grants.command.run(&builder).await?,
+        Some(command) => command.run(builder).await?,
     }
     Ok(())
 }

@@ -1,5 +1,5 @@
-use crate::commands::{grants::Grants, plugins::Plugins};
-use clap::{Parser, Subcommand};
+use crate::commands::Command;
+use clap::Parser;
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
@@ -16,14 +16,6 @@ pub(crate) struct Cli {
 
     #[command(subcommand)]
     pub(crate) command: Option<Command>,
-}
-
-#[derive(Debug, Subcommand)]
-pub(crate) enum Command {
-    /// Review and manage plugin permission grants.
-    Grants(Grants),
-    /// Inspect configured plugins.
-    Plugins(Plugins),
 }
 
 pub(crate) fn resolve_config_path(

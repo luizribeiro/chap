@@ -33,7 +33,7 @@ impl PluginsCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::args::{Cli, Command};
+    use crate::{args::Cli, commands::Command};
     use clap::Parser;
 
     #[test]
