@@ -118,19 +118,21 @@ fn draw_span(canvas: &mut iocraft::CanvasSubviewMut<'_>, span: &RenderedSpan, x:
     } else {
         span.text.clone()
     };
-    canvas.set_text(x, y, &content, canvas_style(&span.style));
+    canvas.set_text(x, y, &content, (&span.style).into());
     if span.style.hyperlink.is_some() {
         canvas.set_hyperlink(x, y, width, 1, span.style.hyperlink.clone());
     }
 }
 
-fn canvas_style(style: &TextStyle) -> CanvasTextStyle {
-    let mut canvas_style = CanvasTextStyle::default();
-    canvas_style.color = style.color;
-    canvas_style.weight = style.weight;
-    canvas_style.underline = style.underline;
-    canvas_style.italic = style.italic;
-    canvas_style
+impl From<&TextStyle> for CanvasTextStyle {
+    fn from(style: &TextStyle) -> Self {
+        let mut canvas_style = Self::default();
+        canvas_style.color = style.color;
+        canvas_style.weight = style.weight;
+        canvas_style.underline = style.underline;
+        canvas_style.italic = style.italic;
+        canvas_style
+    }
 }
 
 fn strikethrough(text: &str) -> String {
