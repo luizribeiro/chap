@@ -100,7 +100,7 @@ async fn hanging_real_context_plugin_fails_session_creation_at_the_deadline() {
         "context plugin `hanging-context` failed: timed out after 10s"
     );
     assert_eq!(failures[0].source.to_string(), "timed out after 10s");
-    let ContextError::DeadlineExceeded { deadline, source } = &failures[0].source else {
+    let ContextError::TimedOut { deadline, source } = &failures[0].source else {
         panic!("the context deadline must retain its typed call failure")
     };
     assert_eq!(*deadline, Duration::from_secs(10));

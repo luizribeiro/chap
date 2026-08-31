@@ -183,7 +183,7 @@ pub enum ContextError {
         source: lockgate::RoleError,
     },
     #[error("timed out after {deadline:?}")]
-    DeadlineExceeded {
+    TimedOut {
         deadline: Duration,
         #[source]
         source: lockgate::CallError,

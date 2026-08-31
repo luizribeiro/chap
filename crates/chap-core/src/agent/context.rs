@@ -111,7 +111,7 @@ impl From<CallError> for ContextError {
     fn from(error: CallError) -> Self {
         match error {
             source @ CallError::DeadlineExceeded { deadline } => {
-                Self::DeadlineExceeded { deadline, source }
+                Self::TimedOut { deadline, source }
             }
             source => Self::SegmentsCallFailed { source },
         }
