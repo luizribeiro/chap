@@ -53,29 +53,21 @@ mod exec_host {
 
     #[lockgate::guarded]
     impl exec::Host for ExecImports {
-        #[lockgate::requires(permission = chap_exec::exec::RUN, target = command)]
+        #[lockgate::requires(permission = chap_exec::exec::RUN, target = command, wire_type = exec::Command)]
         async fn run(
             &mut self,
             _cx: HostCtx<'_, ()>,
-            command: exec::Command,
+            command: CommandTarget,
             timeout_ms: Option<u64>,
         ) -> Result<exec::ExecResult, exec::ExecError> {
             self.executor
-                .execute(
-                    &CommandTarget::from(&command),
-                    timeout_ms.map(Duration::from_millis),
-                )
+                .execute(&command, timeout_ms.map(Duration::from_millis))
                 .await
                 .map(Into::into)
                 .map_err(Into::into)
         }
     }
 
-    // TODO(luizribeiro/lockgate#4): the guard's resolve_scoped_resource and
-    // the run body each derive their own CommandTarget through this impl,
-    // so the checked value and the executed value stay equal only while both
-    // remain this one derivation. Execute the guard-approved resource directly
-    // once the macro can hand it to the body.
     impl From<&exec::Command> for CommandTarget {
         fn from(command: &exec::Command) -> Self {
             Self {
