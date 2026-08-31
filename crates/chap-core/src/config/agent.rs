@@ -178,7 +178,6 @@ mod tests {
                 "agent": {
                     "exec": {
                         "path": ["/bin", "/usr/bin"],
-                        "env_passthrough": ["TERM"],
                         "timeout_ceiling_ms": 1000
                     }
                 }
@@ -194,7 +193,6 @@ mod tests {
                 std::path::PathBuf::from("/usr/bin")
             ]
         );
-        assert_eq!(exec.env_passthrough, ["TERM"]);
         assert_eq!(exec.timeout_ceiling_ms, 1000);
     }
 
@@ -205,7 +203,6 @@ mod tests {
         let exec = config.exec_settings().unwrap();
 
         assert!(exec.path.is_none());
-        assert!(exec.env_passthrough.is_empty());
         assert_eq!(exec.timeout_ceiling_ms, 120_000);
     }
 

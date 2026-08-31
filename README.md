@@ -126,15 +126,14 @@ section.
 
 ### Exec capability
 
-The optional, host-owned `agent.exec` section configures command resolution,
-environment passthrough, and the hard timeout ceiling:
+The optional, host-owned `agent.exec` section configures command resolution and
+the hard timeout ceiling:
 
 ```json
 {
   "agent": {
     "exec": {
       "path": ["/usr/local/bin", "/usr/bin", "/bin"],
-      "env_passthrough": ["CARGO_HOME", "RUSTUP_HOME"],
       "timeout_ceiling_ms": 120000
     }
   }
@@ -142,16 +141,25 @@ environment passthrough, and the hard timeout ceiling:
 ```
 
 `path` is a list of directories used to resolve bare program names; when it is
-omitted, CHAP snapshots its startup `PATH`. `env_passthrough` names additional
-host variables to copy, and `timeout_ceiling_ms` caps every plugin-requested
-deadline and defaults to 120 seconds.
+omitted, CHAP snapshots its startup `PATH`. `timeout_ceiling_ms` caps every
+plugin-requested deadline and defaults to 120 seconds.
 
 Spawned processes receive a constructed environment, never CHAP's inherited
-environment. CHAP supplies the pinned `PATH`, copies `HOME`, `TERM`, `LANG`, and
-`TMPDIR` when present, and adds only variables named in `env_passthrough`.
-Provider API keys are therefore not visible to spawned processes unless an
-operator explicitly names them for passthrough. Commands run from the directory
-where CHAP was invoked.
+environment: CHAP supplies the pinned `PATH` and copies `HOME`, `TERM`, `LANG`,
+and `TMPDIR` when present, and nothing else. Provider API keys are therefore not
+visible to spawned processes. Commands run from the directory where CHAP was
+invoked.
+
+There is deliberately no way to forward host variables or let a plugin set its
+own. Environment variables are a program-independent execution channel: many
+tools read them as configuration that redirects what actually runs — `LD_PRELOAD`
+ahead of a process's `main`, git's `GIT_SSH_COMMAND` and `GIT_CONFIG_*`,
+`NODE_OPTIONS`, and more. Because commands run directly on the host, honoring a
+plugin-supplied environment would turn even a narrowly scoped grant such as
+`git status` into arbitrary code execution, sidestepping the argv-prefix scope
+that consent is built on. A fixed environment is the safe default until command
+execution moves inside a microVM, where the sandbox boundary — not a filter over
+variable names — is what makes a plugin-controlled environment safe.
 
 The entire stack is behind the Cargo `exec` feature, which is off by default:
 

@@ -21,7 +21,6 @@ const DEFAULT_TIMEOUT_CEILING_MS: u64 = 120_000;
 #[serde(default, deny_unknown_fields)]
 pub struct ExecSettings {
     pub path: Option<Vec<PathBuf>>,
-    pub env_passthrough: Vec<String>,
     pub timeout_ceiling_ms: u64,
 }
 
@@ -29,7 +28,6 @@ impl Default for ExecSettings {
     fn default() -> Self {
         Self {
             path: None,
-            env_passthrough: Vec::new(),
             timeout_ceiling_ms: DEFAULT_TIMEOUT_CEILING_MS,
         }
     }
@@ -63,7 +61,6 @@ impl std::error::Error for ExecError {}
 
 pub struct Executor {
     path: Vec<PathBuf>,
-    env_passthrough: Vec<String>,
     timeout_ceiling: Duration,
     project_root: PathBuf,
     sandbox: sandbox::Sandbox,
@@ -74,7 +71,6 @@ impl Executor {
         let project_root = project_root.into();
         Self {
             path: resolve::pinned_search_path(settings.path),
-            env_passthrough: settings.env_passthrough,
             timeout_ceiling: Duration::from_millis(settings.timeout_ceiling_ms),
             project_root: std::path::absolute(&project_root).unwrap_or(project_root),
             sandbox: sandbox::Sandbox::None,
@@ -87,7 +83,7 @@ impl Executor {
         timeout: Option<Duration>,
     ) -> Result<ExecOutcome, ExecError> {
         let program = resolve::program(&target.program, &self.path)?;
-        let environment = env::constructed(&self.path, &self.env_passthrough)?;
+        let environment = env::constructed(&self.path)?;
 
         let mut command = Command::new(program);
         command.args(&target.args).env_clear().envs(environment);
