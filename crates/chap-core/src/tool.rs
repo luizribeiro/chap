@@ -37,12 +37,16 @@ pub enum ToolRegistrationError {
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 #[non_exhaustive]
 pub enum ToolError {
+    /// The arguments were malformed or invalid; the model is expected to retry.
     #[error("{0}")]
     InvalidInput(String),
+    /// Consent or policy refused the call.
     #[error("{0}")]
     Denied(String),
+    /// The tool ran and failed; fed back to the model.
     #[error("{0}")]
     Failed(String),
+    /// The plugin or its environment is broken; the host aborts the turn.
     #[error("{0}")]
     Fatal(String),
 }
