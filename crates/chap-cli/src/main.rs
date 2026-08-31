@@ -7,6 +7,8 @@ use chap_core::{
 use clap::{Args, Parser, Subcommand};
 use std::{
     collections::BTreeSet,
+    env,
+    ffi::OsStr,
     path::{Path, PathBuf},
     process::ExitCode,
 };
@@ -18,8 +20,8 @@ const NO_PLUGINS_CONFIGURED: &str = "No plugins are configured.\n";
 #[command(version, about = "A plugin-powered coding agent")]
 struct Cli {
     /// Configuration file to read.
-    #[arg(long, env = "CHAP_CONFIG", default_value = "chap.json", global = true)]
-    config: PathBuf,
+    #[arg(long, env = "CHAP_CONFIG", global = true)]
+    config: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -84,7 +86,15 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<(), String> {
-    let builder = AgentBuilder::load(&cli.config).map_err(render_load_error)?;
+    let xdg_config_home = env::var_os("XDG_CONFIG_HOME");
+    let home = env::var_os("HOME");
+    let config_path = resolve_config_path(
+        cli.config,
+        Path::new("./chap.json"),
+        xdg_config_home.as_deref(),
+        home.as_deref(),
+    )?;
+    let builder = AgentBuilder::load(&config_path).map_err(render_load_error)?;
     match cli.command {
         None => {
             tui::run(builder.start().await.map_err(render_start_error)?).await?;
@@ -126,6 +136,46 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn resolve_config_path(
+    configured: Option<PathBuf>,
+    local: &Path,
+    xdg_config_home: Option<&OsStr>,
+    home: Option<&OsStr>,
+) -> Result<PathBuf, String> {
+    if let Some(path) = configured {
+        return Ok(path);
+    }
+    if config_exists(local)? {
+        return Ok(local.to_path_buf());
+    }
+
+    let config_root = if let Some(path) = xdg_config_home.filter(|path| !path.is_empty()) {
+        PathBuf::from(path)
+    } else if let Some(path) = home.filter(|path| !path.is_empty()) {
+        PathBuf::from(path).join(".config")
+    } else {
+        return Err(format!(
+            "no config found: tried {}; cannot determine the personal config path because neither XDG_CONFIG_HOME nor HOME is set to a non-empty value (set --config or CHAP_CONFIG)",
+            local.display()
+        ));
+    };
+    let personal = config_root.join("chap/chap.json");
+    if config_exists(&personal)? {
+        return Ok(personal);
+    }
+
+    Err(format!(
+        "no config found: tried {} and {} (set --config or CHAP_CONFIG)",
+        local.display(),
+        personal.display()
+    ))
+}
+
+fn config_exists(path: &Path) -> Result<bool, String> {
+    path.try_exists()
+        .map_err(|source| format!("failed to check config path `{}`: {source}", path.display()))
 }
 
 fn render_load_error(error: LoadError) -> String {
@@ -518,7 +568,7 @@ mod tests {
     }
 
     #[test]
-    fn config_flag_has_an_environment_default_before_the_file_default() {
+    fn config_flag_is_paired_with_the_environment_without_a_static_default() {
         let command = Cli::command();
         let argument = command
             .get_arguments()
@@ -526,10 +576,153 @@ mod tests {
             .unwrap();
 
         assert_eq!(argument.get_env(), Some(OsStr::new("CHAP_CONFIG")));
-        assert_eq!(argument.get_default_values(), [OsStr::new("chap.json")]);
+        assert!(argument.get_default_values().is_empty());
 
         let cli = Cli::try_parse_from(["chap", "--config", "explicit.json"]).unwrap();
-        assert_eq!(cli.config, PathBuf::from("explicit.json"));
+        assert_eq!(cli.config, Some(PathBuf::from("explicit.json")));
+    }
+
+    #[test]
+    fn config_flag_wins_over_default_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = directory.path().join("chap.json");
+        std::fs::write(&local, "{}").unwrap();
+        let explicit = directory.path().join("explicit.json");
+
+        let resolved = resolve_config_path(
+            Some(explicit.clone()),
+            &local,
+            Some(OsStr::new("/unused/config")),
+            Some(OsStr::new("/unused/home")),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, explicit);
+    }
+
+    #[test]
+    fn config_from_the_environment_wins_over_default_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = directory.path().join("chap.json");
+        std::fs::write(&local, "{}").unwrap();
+        let configured = directory.path().join("from-environment.json");
+
+        let resolved = resolve_config_path(
+            Some(configured.clone()),
+            &local,
+            Some(OsStr::new("/unused/config")),
+            Some(OsStr::new("/unused/home")),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, configured);
+    }
+
+    #[test]
+    fn local_config_is_the_first_file_default() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = directory.path().join("chap.json");
+        std::fs::write(&local, "{}").unwrap();
+
+        let resolved = resolve_config_path(
+            None,
+            &local,
+            Some(OsStr::new("/unused/config")),
+            Some(OsStr::new("/unused/home")),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, local);
+    }
+
+    #[test]
+    fn personal_config_is_used_when_the_local_config_is_absent() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = directory.path().join("project/chap.json");
+        let config_home = directory.path().join("config");
+        let personal = config_home.join("chap/chap.json");
+        std::fs::create_dir_all(personal.parent().unwrap()).unwrap();
+        std::fs::write(&personal, "{}").unwrap();
+
+        let resolved =
+            resolve_config_path(None, &local, Some(config_home.as_os_str()), None).unwrap();
+
+        assert_eq!(resolved, personal);
+    }
+
+    #[test]
+    fn invalid_local_config_fails_without_falling_through_to_personal_config() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = directory.path().join("chap.json");
+        std::fs::write(&local, "{").unwrap();
+        let config_home = directory.path().join("config");
+        let personal = config_home.join("chap/chap.json");
+        std::fs::create_dir_all(personal.parent().unwrap()).unwrap();
+        std::fs::write(&personal, "{}").unwrap();
+
+        let resolved =
+            resolve_config_path(None, &local, Some(config_home.as_os_str()), None).unwrap();
+        let Err(error) = AgentBuilder::load(&resolved) else {
+            panic!("invalid local config unexpectedly loaded");
+        };
+
+        assert_eq!(resolved, local);
+        assert!(matches!(error, LoadError::ParseConfig { path, .. } if path == local));
+    }
+
+    #[test]
+    fn missing_config_error_names_every_probed_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = directory.path().join("project/chap.json");
+        let home = directory.path().join("home");
+        let personal = home.join(".config/chap/chap.json");
+
+        let error = resolve_config_path(None, &local, None, Some(home.as_os_str())).unwrap_err();
+
+        assert_eq!(
+            error,
+            format!(
+                "no config found: tried {} and {} (set --config or CHAP_CONFIG)",
+                local.display(),
+                personal.display()
+            )
+        );
+    }
+
+    #[test]
+    fn xdg_config_home_is_respected() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = directory.path().join("project/chap.json");
+        let config_home = directory.path().join("xdg");
+        let personal = config_home.join("chap/chap.json");
+        std::fs::create_dir_all(personal.parent().unwrap()).unwrap();
+        std::fs::write(&personal, "{}").unwrap();
+
+        let resolved = resolve_config_path(
+            None,
+            &local,
+            Some(config_home.as_os_str()),
+            Some(OsStr::new("/unused/home")),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, personal);
+    }
+
+    #[test]
+    fn empty_xdg_config_home_falls_back_to_home() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = directory.path().join("project/chap.json");
+        let home = directory.path().join("home");
+        let personal = home.join(".config/chap/chap.json");
+        std::fs::create_dir_all(personal.parent().unwrap()).unwrap();
+        std::fs::write(&personal, "{}").unwrap();
+
+        let resolved =
+            resolve_config_path(None, &local, Some(OsStr::new("")), Some(home.as_os_str()))
+                .unwrap();
+
+        assert_eq!(resolved, personal);
     }
 
     #[test]
