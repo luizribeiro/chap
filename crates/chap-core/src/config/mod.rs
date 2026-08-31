@@ -62,7 +62,7 @@ pub enum LoadError {
     },
 }
 
-/// The complete settings loaded from `chap.json`.
+/// The complete configuration loaded from `chap.json`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
@@ -77,7 +77,7 @@ pub(crate) struct Config {
     source_path: PathBuf,
 }
 
-/// Settings for one configured plugin and its roles.
+/// One plugin's entry in `chap.json`: its component plus per-layer settings.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConfiguredPlugin {
