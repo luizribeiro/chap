@@ -66,14 +66,15 @@
         };
         cargoArtifacts = craneLib.buildDepsOnly packageArgs;
         chap = pkgs.lib.makeOverridable (
-          { withExec ? false }:
+          { withExec ? false, withState ? false }:
           craneLib.buildPackage (
             packageArgs
             // {
               inherit cargoArtifacts;
               cargoExtraArgs =
                 packageArgs.cargoExtraArgs
-                + pkgs.lib.optionalString withExec " --features chap-cli/exec";
+                + pkgs.lib.optionalString withExec " --features chap-cli/exec"
+                + pkgs.lib.optionalString withState " --features chap-cli/state";
             }
           )
         ) { };
@@ -143,7 +144,7 @@
           version = "0.1.0";
           src = packageSrc;
           inherit cargoVendorDir;
-          cargoExtraArgs = "--locked -p chap-openai-compatible -p chap-kagi -p chap-exec-plugin -p chap-persona --target wasm32-wasip2";
+          cargoExtraArgs = "--locked -p chap-openai-compatible -p chap-kagi -p chap-exec-plugin -p chap-state-plugin -p chap-persona --target wasm32-wasip2";
           doCheck = false;
         };
         pluginOpenaiCompatible = buildChapPlugin {
@@ -161,6 +162,12 @@
         };
         pluginExec = buildChapPlugin {
           pname = "chap-exec-plugin";
+          src = packageSrc;
+          inherit cargoVendorDir;
+          cargoArtifacts = pluginCargoArtifacts;
+        };
+        pluginState = buildChapPlugin {
+          pname = "chap-state-plugin";
           src = packageSrc;
           inherit cargoVendorDir;
           cargoArtifacts = pluginCargoArtifacts;
@@ -343,6 +350,14 @@
             settings.allowed_commands = [ "echo" ];
           };
         };
+        mkChapStateExample = mkChap {
+          name = "example-state";
+          package = chap.override { withState = true; };
+          settings.agent.state = { };
+          plugins.memory = {
+            plugin = pluginState;
+          };
+        };
         mkChapFormsExample =
           (mkChap {
             name = "example-forms";
@@ -433,7 +448,7 @@
             plugin-clippy = {
               enable = true;
               name = "cargo clippy (WASI plugins)";
-              entry = "${rust}/bin/cargo clippy -p chap-openai-compatible -p chap-exec-plugin -p chap-kagi --target wasm32-wasip2 --all-targets --locked -- -D warnings";
+              entry = "${rust}/bin/cargo clippy -p chap-openai-compatible -p chap-exec-plugin -p chap-state-plugin -p chap-kagi --target wasm32-wasip2 --all-targets --locked -- -D warnings";
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
             };
@@ -444,10 +459,24 @@
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
             };
+            state-clippy = {
+              enable = true;
+              name = "cargo clippy (state feature)";
+              entry = "${rust}/bin/cargo clippy -p chap-core --features state --all-targets --locked -- -D warnings";
+              files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
+              pass_filenames = false;
+            };
+            all-capabilities-clippy = {
+              enable = true;
+              name = "cargo clippy (all capabilities)";
+              entry = "${rust}/bin/cargo clippy -p chap-core --features exec,state --all-targets --locked -- -D warnings";
+              files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
+              pass_filenames = false;
+            };
             cargo-test = {
               enable = true;
               name = "cargo test";
-              entry = "${rust}/bin/cargo test --workspace --all-targets --locked --exclude chap-openai-compatible --exclude chap-exec-plugin --exclude chap-kagi";
+              entry = "${rust}/bin/cargo test --workspace --all-targets --locked --exclude chap-openai-compatible --exclude chap-exec-plugin --exclude chap-state-plugin --exclude chap-kagi";
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
               stages = [ "pre-push" ];
@@ -473,10 +502,12 @@
         packages = {
           inherit chap;
           chap-exec = chap.override { withExec = true; };
+          chap-state = chap.override { withState = true; };
           default = chap;
           plugin-openai-compatible = pluginOpenaiCompatible;
           plugin-kagi = pluginKagi;
           plugin-exec = pluginExec;
+          plugin-state = pluginState;
           plugin-persona = pluginPersona;
         };
 
@@ -486,10 +517,12 @@
           plugin-openai-compatible = pluginOpenaiCompatible;
           plugin-kagi = pluginKagi;
           plugin-exec = pluginExec;
+          plugin-state = pluginState;
           plugin-persona = pluginPersona;
           plugin-default-vendor = pluginDefaultVendor;
           mkchap-example = mkChapExample;
           mkchap-exec-example = mkChapExecExample;
+          mkchap-state-example = mkChapStateExample;
           mkchap-forms-example = mkChapFormsExample;
           mkchap-eval-guards = mkChapEvalGuards;
         };
