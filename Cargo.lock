@@ -461,6 +461,8 @@ name = "chap-vm"
 version = "0.1.0"
 dependencies = [
  "lockgate-policy",
+ "serde",
+ "sha2",
 ]
 
 [[package]]
