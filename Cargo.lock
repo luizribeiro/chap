@@ -442,6 +442,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "chap-state-plugin"
+version = "0.1.0"
+dependencies = [
+ "chap-plugin",
+ "futures",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "chap-test-all"
 version = "0.1.0"
 

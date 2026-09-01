@@ -15,6 +15,7 @@ members = [
     "plugins/kagi",
     "plugins/openai-compatible",
     "plugins/persona",
+    "plugins/state",
 ]
 default-members = ["crates/chap-cli"]
 resolver = "3"
