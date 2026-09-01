@@ -1,0 +1,12 @@
+[package]
+name = "chap-state"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+host = ["dep:serde"]
+
+[dependencies]
+lockgate-policy.workspace = true
+serde = { workspace = true, optional = true }

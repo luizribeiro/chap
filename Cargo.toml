@@ -5,6 +5,7 @@ members = [
     "crates/chap-exec",
     "crates/chap-plugin",
     "crates/chap-plugin-macros",
+    "crates/chap-state",
     "crates/chap-test-all",
     "crates/chap-wit",
     "crates/chap-plugin/tests/fixtures/multi-role",

@@ -432,6 +432,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "chap-state"
+version = "0.1.0"
+dependencies = [
+ "lockgate-policy",
+ "serde",
+]
+
+[[package]]
 name = "chap-test-all"
 version = "0.1.0"
 
