@@ -6,6 +6,7 @@ publish.workspace = true
 
 [features]
 exec = []
+state = []
 
 [dev-dependencies]
 wit-parser.workspace = true

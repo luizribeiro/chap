@@ -1,0 +1,15 @@
+package chap:agent@0.3.0;
+
+/// Host-owned, per-instance key-value scratch. Values are opaque bytes; the
+/// plugin chooses its own encoding.
+interface state {
+  variant state-error {
+    quota-exceeded(u64),
+    invalid-key,
+    denied(string),
+  }
+
+  get: async func(key: string) -> result<option<list<u8>>, state-error>;
+  set: async func(key: string, value: list<u8>) -> result<_, state-error>;
+  delete: async func(key: string) -> result<_, state-error>;
+}

@@ -160,7 +160,7 @@ fn default_call_budgets_preserve_existing_bounds() {
 fn plugin_call_keys_match_the_composed_wit_exports() {
     let mut resolve = Resolve::new();
     let package = resolve
-        .push_str("chap-plugin.wit", &chap_wit::world(chap_wit::ROLES))
+        .push_str("chap-plugin.wit", &chap_wit::world(chap_wit::ROLES, &[]))
         .unwrap();
     let world = resolve.packages[package].worlds[chap_wit::WORLD];
     let mut exported_functions = BTreeSet::new();

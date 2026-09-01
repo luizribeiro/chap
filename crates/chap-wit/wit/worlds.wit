@@ -12,6 +12,10 @@ world sdk-exec {
   import exec;
 }
 
+world sdk-state {
+  import state;
+}
+
 world host {
   export types;
   export provider;
@@ -25,4 +29,21 @@ world host-exec {
   export tools;
   export context;
   import exec;
+}
+
+world host-state {
+  export types;
+  export provider;
+  export tools;
+  export context;
+  import state;
+}
+
+world host-exec-state {
+  export types;
+  export provider;
+  export tools;
+  export context;
+  import exec;
+  import state;
 }

@@ -33,7 +33,6 @@ pub struct Role {
     pub wit: &'static str,
 }
 
-#[cfg(feature = "exec")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Import {
     pub rust_name: &'static str,
@@ -66,14 +65,24 @@ pub static EXEC: Import = Import {
     wit: include_str!("../wit/exec.wit"),
 };
 
-#[cfg(feature = "exec")]
-pub static IMPORTS: &[&Import] = &[&EXEC];
+#[cfg(feature = "state")]
+pub static STATE: Import = Import {
+    rust_name: "State",
+    interface: "state",
+    wit: include_str!("../wit/state.wit"),
+};
+
+pub static IMPORTS: &[&Import] = &[
+    #[cfg(feature = "exec")]
+    &EXEC,
+    #[cfg(feature = "state")]
+    &STATE,
+];
 
 pub fn resolve(name: &str) -> Option<&'static Role> {
     ROLES.iter().copied().find(|role| role.rust_name == name)
 }
 
-#[cfg(feature = "exec")]
 pub fn resolve_import(name: &str) -> Option<&'static Import> {
     IMPORTS
         .iter()
@@ -81,12 +90,7 @@ pub fn resolve_import(name: &str) -> Option<&'static Import> {
         .find(|import| import.rust_name == name)
 }
 
-pub fn world(roles: &[&Role]) -> String {
-    compose_world(roles, &[])
-}
-
-#[cfg(feature = "exec")]
-pub fn world_with_imports(roles: &[&Role], imports: &[&Import]) -> String {
+pub fn world(roles: &[&Role], imports: &[&Import]) -> String {
     let imports = imports
         .iter()
         .map(|import| (import.interface, import.wit))
@@ -130,11 +134,41 @@ mod tests {
     use std::{collections::BTreeSet, path::Path};
     use wit_parser::{Resolve, WorldItem, WorldKey};
 
+    const ALPHA: Role = Role {
+        rust_name: "Alpha",
+        interface: "alpha",
+        display_name: "alpha",
+        wit: "package chap:agent@0.3.0;\n\ninterface alpha {\n  run: func();\n}\n",
+    };
+    const GAMMA: Role = Role {
+        rust_name: "Gamma",
+        interface: "gamma",
+        display_name: "gamma",
+        wit: "package chap:agent@0.3.0;\n\ninterface gamma {\n  read: func() -> string;\n}\n",
+    };
+    const BETA: Import = Import {
+        rust_name: "Beta",
+        interface: "beta",
+        wit: "package chap:agent@0.3.0;\n\ninterface beta {\n  write: func(value: string);\n}\n",
+    };
+    const DELTA: Import = Import {
+        rust_name: "Delta",
+        interface: "delta",
+        wit: "package chap:agent@0.3.0;\n\ninterface delta {\n  reset: func();\n}\n",
+    };
+
     #[test]
     fn role_table_is_self_consistent() {
         for role in ROLES {
             let resolved = resolve(role.rust_name).expect("every role must resolve by rust_name");
             assert!(std::ptr::eq(*role, resolved));
+            assert_wit_entry(role.interface, role.wit);
+        }
+        for import in IMPORTS {
+            let resolved =
+                resolve_import(import.rust_name).expect("every import must resolve by rust_name");
+            assert!(std::ptr::eq(*import, resolved));
+            assert_wit_entry(import.interface, import.wit);
         }
     }
 
@@ -164,150 +198,134 @@ mod tests {
     }
 
     #[test]
-    fn host_world_exports_exactly_the_role_interfaces() {
+    fn host_worlds_match_the_role_and_enabled_import_tables() {
         let mut resolve = Resolve::new();
         let (package, _) = resolve
             .push_path(Path::new(env!("CARGO_MANIFEST_DIR")).join("wit"))
             .unwrap();
-        let host = resolve.packages[package].worlds["host"];
-        let exports = resolve.worlds[host]
-            .exports
-            .iter()
-            .map(|(key, item)| {
-                let WorldItem::Interface { id, .. } = item else {
-                    panic!("host world export `{key:?}` is not an interface");
-                };
-                match key {
-                    WorldKey::Name(name) => name.clone(),
-                    WorldKey::Interface(_) => resolve.interfaces[*id]
-                        .name
-                        .clone()
-                        .expect("host world exports must be named"),
-                }
-            })
-            .collect::<BTreeSet<_>>();
-        let expected = std::iter::once("types")
-            .chain(ROLES.iter().map(|role| role.interface))
-            .map(str::to_owned)
-            .collect::<BTreeSet<_>>();
-        let missing = expected.difference(&exports).cloned().collect::<Vec<_>>();
-        let unexpected = exports.difference(&expected).cloned().collect::<Vec<_>>();
-
-        assert!(
-            missing.is_empty() && unexpected.is_empty(),
-            "host world exports disagree with chap_wit::ROLES; missing: [{}]; unexpected: [{}]",
-            missing.join(", "),
-            unexpected.join(", "),
-        );
-    }
-
-    #[cfg(feature = "exec")]
-    #[test]
-    fn host_exec_world_imports_exec_and_exports_exactly_the_role_interfaces() {
-        let mut resolve = Resolve::new();
-        let (package, _) = resolve
-            .push_path(Path::new(env!("CARGO_MANIFEST_DIR")).join("wit"))
-            .unwrap();
-        let host = resolve.packages[package].worlds["host-exec"];
-        let imports = resolve.worlds[host]
-            .imports
-            .iter()
-            .map(|(key, item)| {
-                let WorldItem::Interface { id, .. } = item else {
-                    panic!("host-exec world import `{key:?}` is not an interface");
-                };
-                match key {
-                    WorldKey::Name(name) => name.clone(),
-                    WorldKey::Interface(_) => resolve.interfaces[*id]
-                        .name
-                        .clone()
-                        .expect("host-exec world imports must be named"),
-                }
-            })
-            .collect::<BTreeSet<_>>();
-        let exports = resolve.worlds[host]
-            .exports
-            .iter()
-            .map(|(key, item)| {
-                let WorldItem::Interface { id, .. } = item else {
-                    panic!("host-exec world export `{key:?}` is not an interface");
-                };
-                match key {
-                    WorldKey::Name(name) => name.clone(),
-                    WorldKey::Interface(_) => resolve.interfaces[*id]
-                        .name
-                        .clone()
-                        .expect("host-exec world exports must be named"),
-                }
-            })
-            .collect::<BTreeSet<_>>();
         let expected_exports = std::iter::once("types")
             .chain(ROLES.iter().map(|role| role.interface))
             .map(str::to_owned)
             .collect::<BTreeSet<_>>();
+        let enabled_imports = IMPORTS
+            .iter()
+            .map(|import| import.interface)
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        let mut checked = 0;
 
-        assert_eq!(imports, BTreeSet::from([EXEC.interface.to_owned()]));
-        assert_eq!(exports, expected_exports);
+        for (name, host) in resolve.packages[package]
+            .worlds
+            .iter()
+            .filter(|(name, _)| name.starts_with("host"))
+        {
+            let imports = world_interfaces(&resolve, name, &resolve.worlds[*host].imports);
+            let exports = world_interfaces(&resolve, name, &resolve.worlds[*host].exports);
+            assert_eq!(
+                exports, expected_exports,
+                "world `{name}` has wrong exports"
+            );
+
+            if imports.is_subset(&enabled_imports) {
+                assert!(
+                    imports
+                        .iter()
+                        .all(|interface| enabled_imports.contains(interface)),
+                    "world `{name}` imports an interface absent from chap_wit::IMPORTS"
+                );
+                checked += 1;
+            }
+        }
+
+        assert!(
+            checked > 0,
+            "no host worlds matched the enabled import table"
+        );
     }
 
     #[test]
-    fn composes_a_single_role_world() {
+    fn composes_one_fixture_role_without_imports() {
         let expected = [
             PACKAGE,
-            source_body(TYPES_WIT),
-            source_body(PROVIDER.wit),
-            "\nworld chap-plugin {\n  import types;\n  export provider;\n}\n",
+            wit_body(TYPES_WIT),
+            wit_body(ALPHA.wit),
+            "\nworld chap-plugin {\n  import types;\n  export alpha;\n}\n",
         ]
         .concat();
 
-        assert_eq!(world(&[&PROVIDER]), expected);
-    }
-
-    #[cfg(feature = "exec")]
-    #[test]
-    fn composes_a_single_role_world_with_an_exec_import() {
-        let expected = [
-            PACKAGE,
-            source_body(TYPES_WIT),
-            source_body(EXEC.wit),
-            source_body(PROVIDER.wit),
-            "\nworld chap-plugin {\n  import types;\n  import exec;\n  export provider;\n}\n",
-        ]
-        .concat();
-
-        assert_eq!(world_with_imports(&[&PROVIDER], &[&EXEC]), expected);
+        assert_eq!(world(&[&ALPHA], &[]), expected);
     }
 
     #[test]
-    fn composes_a_two_role_world() {
+    fn composes_one_fixture_role_with_one_import() {
         let expected = [
             PACKAGE,
-            source_body(TYPES_WIT),
-            source_body(PROVIDER.wit),
-            source_body(TOOLS.wit),
-            "\nworld chap-plugin {\n  import types;\n  export provider;\n  export tools;\n}\n",
+            wit_body(TYPES_WIT),
+            wit_body(BETA.wit),
+            wit_body(ALPHA.wit),
+            "\nworld chap-plugin {\n  import types;\n  import beta;\n  export alpha;\n}\n",
         ]
         .concat();
 
-        assert_eq!(world(&[&PROVIDER, &TOOLS]), expected);
+        assert_eq!(world(&[&ALPHA], &[&BETA]), expected);
     }
 
     #[test]
-    fn composes_a_three_role_world() {
+    fn composes_several_fixture_roles_and_imports() {
         let expected = [
             PACKAGE,
-            source_body(TYPES_WIT),
-            source_body(PROVIDER.wit),
-            source_body(TOOLS.wit),
-            source_body(CONTEXT.wit),
-            "\nworld chap-plugin {\n  import types;\n  export provider;\n  export tools;\n  export context;\n}\n",
+            wit_body(TYPES_WIT),
+            wit_body(BETA.wit),
+            wit_body(DELTA.wit),
+            wit_body(ALPHA.wit),
+            wit_body(GAMMA.wit),
+            "\nworld chap-plugin {\n  import types;\n  import beta;\n  import delta;\n  export alpha;\n  export gamma;\n}\n",
         ]
         .concat();
 
-        assert_eq!(world(&[&PROVIDER, &TOOLS, &CONTEXT]), expected);
+        assert_eq!(world(&[&ALPHA, &GAMMA], &[&BETA, &DELTA]), expected);
     }
 
-    fn source_body(source: &str) -> &str {
-        source.split_once(';').unwrap().1
+    fn assert_wit_entry(interface: &str, source: &str) {
+        let declaration = source
+            .lines()
+            .find(|line| line.starts_with("package "))
+            .unwrap_or_else(|| panic!("interface `{interface}` declares no package"));
+        assert_eq!(
+            declaration, PACKAGE,
+            "interface `{interface}` disagrees with the composed package version"
+        );
+
+        let source = [PACKAGE, wit_body(TYPES_WIT), wit_body(source)].concat();
+        let mut resolve = Resolve::new();
+        let package = resolve
+            .push_str(format!("{interface}.wit"), &source)
+            .unwrap_or_else(|error| panic!("failed to parse interface `{interface}`: {error}"));
+        assert!(
+            resolve.packages[package].interfaces.contains_key(interface),
+            "WIT for `{interface}` does not define that interface"
+        );
+    }
+
+    fn world_interfaces<'a>(
+        resolve: &Resolve,
+        world: &str,
+        items: impl IntoIterator<Item = (&'a WorldKey, &'a WorldItem)>,
+    ) -> BTreeSet<String> {
+        items
+            .into_iter()
+            .map(|(key, item)| {
+                let WorldItem::Interface { id, .. } = item else {
+                    panic!("world `{world}` item `{key:?}` is not an interface");
+                };
+                match key {
+                    WorldKey::Name(name) => name.clone(),
+                    WorldKey::Interface(_) => resolve.interfaces[*id]
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| panic!("world `{world}` interfaces must be named")),
+                }
+            })
+            .collect()
     }
 }

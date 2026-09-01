@@ -75,13 +75,8 @@ pub(crate) fn expand(input: PluginInput) -> syn::Result<TokenStream> {
         .collect::<syn::Result<Vec<_>>>()?;
     let plugin = input.plugin;
     let wit_roles = roles.iter().map(|role| role.wit).collect::<Vec<_>>();
-    #[cfg(feature = "exec")]
-    let inline_wit = {
-        let wit_imports = imports.iter().map(|import| import.wit).collect::<Vec<_>>();
-        chap_wit::world_with_imports(&wit_roles, &wit_imports)
-    };
-    #[cfg(not(feature = "exec"))]
-    let inline_wit = chap_wit::world(&wit_roles);
+    let wit_imports = imports.iter().map(|import| import.wit).collect::<Vec<_>>();
+    let inline_wit = chap_wit::world(&wit_roles, &wit_imports);
     let inline = LitStr::new(&inline_wit, proc_macro2::Span::call_site());
     let world = LitStr::new(chap_wit::WORLD, proc_macro2::Span::call_site());
     let bridges = roles.iter().map(|role| (role.bridge)(&plugin));

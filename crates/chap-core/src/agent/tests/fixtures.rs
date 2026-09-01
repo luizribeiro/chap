@@ -126,7 +126,7 @@ fn plugin_component_with_needs(
 ) -> Vec<u8> {
     let mut resolve = Resolve::new();
     resolve
-        .push_str("chap-plugin.wit", &chap_wit::world(roles))
+        .push_str("chap-plugin.wit", &chap_wit::world(roles, &[]))
         .unwrap();
     let clock_import = if role_call == RoleCall::Hang {
         resolve
