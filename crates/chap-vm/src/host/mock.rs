@@ -1,0 +1,389 @@
+use std::{
+    collections::{HashMap, HashSet},
+    format,
+    string::String,
+    sync::{Mutex, MutexGuard, PoisonError},
+    vec::Vec,
+};
+
+use super::{ExecOutcome, Subject, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmRef};
+
+#[derive(Default)]
+pub struct MockVmBackend {
+    vms: Mutex<HashMap<String, MockVm>>,
+}
+
+struct MockVm {
+    owner: Subject,
+    config_hash: String,
+    installation_id: String,
+    _session_epoch: u64,
+    files: HashMap<String, Vec<u8>>,
+}
+
+impl MockVmBackend {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn lock(&self) -> MutexGuard<'_, HashMap<String, MockVm>> {
+        self.vms.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl MockVm {
+    fn new(id: &VmIdentity, cfg: &VmConfig) -> Self {
+        Self {
+            owner: Subject(id.principal.clone()),
+            config_hash: cfg.config_hash.clone(),
+            installation_id: id.installation_id.clone(),
+            _session_epoch: id.session_epoch,
+            files: HashMap::new(),
+        }
+    }
+}
+
+impl VmBackend for MockVmBackend {
+    async fn create(&self, id: &VmIdentity, cfg: &VmConfig) -> Result<VmRef, VmError> {
+        let physical_label = id.physical_label();
+        let mut vms = self.lock();
+        if vms.contains_key(&physical_label) {
+            return Err(VmError::AlreadyExists);
+        }
+        vms.insert(physical_label.clone(), MockVm::new(id, cfg));
+        Ok(VmRef { physical_label })
+    }
+
+    async fn get(&self, id: &VmIdentity) -> Result<Option<VmRef>, VmError> {
+        let physical_label = id.physical_label();
+        Ok(self
+            .lock()
+            .contains_key(&physical_label)
+            .then_some(VmRef { physical_label }))
+    }
+
+    async fn get_or_create(&self, id: &VmIdentity, cfg: &VmConfig) -> Result<VmRef, VmError> {
+        let physical_label = id.physical_label();
+        let mut vms = self.lock();
+        if let Some(existing) = vms.get(&physical_label) {
+            if existing.config_hash != cfg.config_hash {
+                return Err(VmError::ConfigMismatch);
+            }
+            return Ok(VmRef { physical_label });
+        }
+        vms.insert(physical_label.clone(), MockVm::new(id, cfg));
+        Ok(VmRef { physical_label })
+    }
+
+    async fn exec(&self, vm: &VmRef, command: VmCommand) -> Result<ExecOutcome, VmError> {
+        if !self.lock().contains_key(vm.physical_label()) {
+            return Err(VmError::NoSuchVm);
+        }
+        if command.timeout_ms == Some(0) {
+            return Err(VmError::TimedOut);
+        }
+        Ok(ExecOutcome {
+            exit_code: 0,
+            stdout: command.args.join(" ").into_bytes(),
+            stderr: Vec::new(),
+            truncated: false,
+        })
+    }
+
+    async fn read_file(&self, vm: &VmRef, path: &str, max_bytes: u64) -> Result<Vec<u8>, VmError> {
+        let vms = self.lock();
+        let vm = vms.get(vm.physical_label()).ok_or(VmError::NoSuchVm)?;
+        let bytes = vm
+            .files
+            .get(path)
+            .ok_or_else(|| VmError::Failed(String::from("no such file")))?;
+        if u64::try_from(bytes.len()).map_or(true, |len| len > max_bytes) {
+            return Err(VmError::Failed(format!(
+                "file exceeds the {max_bytes}-byte read limit"
+            )));
+        }
+        Ok(bytes.clone())
+    }
+
+    async fn write_file(&self, vm: &VmRef, path: &str, bytes: &[u8]) -> Result<(), VmError> {
+        let mut vms = self.lock();
+        let vm = vms.get_mut(vm.physical_label()).ok_or(VmError::NoSuchVm)?;
+        vm.files.insert(path.into(), bytes.into());
+        Ok(())
+    }
+
+    async fn destroy(&self, vm: &VmRef) -> Result<(), VmError> {
+        if self.lock().remove(vm.physical_label()).is_some() {
+            Ok(())
+        } else {
+            Err(VmError::NoSuchVm)
+        }
+    }
+
+    async fn owner_of(&self, vm: &VmRef) -> Result<Option<Subject>, VmError> {
+        Ok(self
+            .lock()
+            .get(vm.physical_label())
+            .map(|vm| vm.owner.clone()))
+    }
+
+    async fn reap(&self, installation_id: &str, keep: &[&VmIdentity]) -> Result<(), VmError> {
+        let keep = keep
+            .iter()
+            .map(|identity| identity.physical_label())
+            .collect::<HashSet<_>>();
+        self.lock().retain(|physical_label, vm| {
+            vm.installation_id != installation_id || keep.contains(physical_label)
+        });
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        boxed::Box,
+        future::Future,
+        string::String,
+        task::{Context, Poll, Waker},
+        thread, vec,
+    };
+
+    use super::MockVmBackend;
+    use crate::host::{
+        ResolvedImage, Subject, VmBackend, VmCommand, VmConfig, VmError, VmIdentity,
+    };
+
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let mut context = Context::from_waker(Waker::noop());
+        let mut future = Box::pin(future);
+        loop {
+            match future.as_mut().poll(&mut context) {
+                Poll::Ready(output) => return output,
+                Poll::Pending => thread::yield_now(),
+            }
+        }
+    }
+
+    fn identity(installation_id: &str, epoch: u64, principal: &str, name: &str) -> VmIdentity {
+        VmIdentity {
+            installation_id: installation_id.into(),
+            session_epoch: epoch,
+            principal: principal.into(),
+            logical_name: name.into(),
+        }
+    }
+
+    fn config(hash: &str) -> VmConfig {
+        VmConfig {
+            image: ResolvedImage {
+                registry: "ghcr.io".into(),
+                repository: "acme/build".into(),
+                tag: Some("1.2".into()),
+                digest: None,
+            },
+            mounts: vec![],
+            egress: vec![],
+            env: vec![],
+            cpus: 1,
+            memory_mb: 512,
+            max_duration_ms: 3_600_000,
+            idle_timeout_ms: 300_000,
+            config_hash: hash.into(),
+        }
+    }
+
+    fn command(args: &[&str], timeout_ms: Option<u64>) -> VmCommand {
+        VmCommand {
+            args: args.iter().map(|arg| String::from(*arg)).collect(),
+            cwd: Some("/work".into()),
+            stdin: None,
+            timeout_ms,
+        }
+    }
+
+    #[test]
+    fn create_then_get_returns_the_same_vm() {
+        block_on(async {
+            let backend = MockVmBackend::new();
+            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let created = backend.create(&id, &config("hash-a")).await.unwrap();
+
+            assert_eq!(created.physical_label(), id.physical_label());
+            assert_eq!(backend.get(&id).await.unwrap(), Some(created));
+        });
+    }
+
+    #[test]
+    fn create_rejects_an_existing_identity() {
+        block_on(async {
+            let backend = MockVmBackend::new();
+            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            backend.create(&id, &config("hash-a")).await.unwrap();
+
+            assert_eq!(
+                backend.create(&id, &config("hash-a")).await,
+                Err(VmError::AlreadyExists)
+            );
+        });
+    }
+
+    #[test]
+    fn get_or_create_reuses_only_a_matching_config() {
+        block_on(async {
+            let backend = MockVmBackend::new();
+            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let created = backend.get_or_create(&id, &config("hash-a")).await.unwrap();
+
+            assert_eq!(
+                backend.get_or_create(&id, &config("hash-a")).await.unwrap(),
+                created
+            );
+            assert_eq!(
+                backend.get_or_create(&id, &config("hash-b")).await,
+                Err(VmError::ConfigMismatch)
+            );
+        });
+    }
+
+    #[test]
+    fn guest_files_round_trip_and_missing_files_are_distinct() {
+        block_on(async {
+            let backend = MockVmBackend::new();
+            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let vm = backend.create(&id, &config("hash-a")).await.unwrap();
+
+            backend
+                .write_file(&vm, "/work/result.wasm", b"wasm-bytes")
+                .await
+                .unwrap();
+            assert_eq!(
+                backend
+                    .read_file(&vm, "/work/result.wasm", 1024)
+                    .await
+                    .unwrap(),
+                b"wasm-bytes"
+            );
+            assert_eq!(
+                backend.read_file(&vm, "/work/missing", 1024).await,
+                Err(VmError::Failed(String::from("no such file")))
+            );
+        });
+    }
+
+    #[test]
+    fn guest_file_reads_enforce_the_byte_limit() {
+        block_on(async {
+            let backend = MockVmBackend::new();
+            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let vm = backend.create(&id, &config("hash-a")).await.unwrap();
+            backend
+                .write_file(&vm, "/work/result.wasm", b"wasm-bytes")
+                .await
+                .unwrap();
+
+            assert!(matches!(
+                backend.read_file(&vm, "/work/result.wasm", 4).await,
+                Err(VmError::Failed(_))
+            ));
+            assert_eq!(
+                backend
+                    .read_file(&vm, "/work/result.wasm", 10)
+                    .await
+                    .unwrap(),
+                b"wasm-bytes"
+            );
+        });
+    }
+
+    #[test]
+    fn exec_returns_deterministic_output_and_honors_zero_timeout() {
+        block_on(async {
+            let backend = MockVmBackend::new();
+            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let vm = backend.create(&id, &config("hash-a")).await.unwrap();
+
+            let outcome = backend
+                .exec(&vm, command(&["nix", "build", ".#plugin"], Some(30_000)))
+                .await
+                .unwrap();
+            assert_eq!(outcome.exit_code, 0);
+            assert_eq!(outcome.stdout, b"nix build .#plugin");
+            assert!(outcome.stderr.is_empty());
+            assert!(!outcome.truncated);
+            assert_eq!(
+                backend.exec(&vm, command(&["nix", "build"], Some(0))).await,
+                Err(VmError::TimedOut)
+            );
+        });
+    }
+
+    #[test]
+    fn destroy_removes_the_vm() {
+        block_on(async {
+            let backend = MockVmBackend::new();
+            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let vm = backend.create(&id, &config("hash-a")).await.unwrap();
+
+            backend.destroy(&vm).await.unwrap();
+            assert_eq!(backend.get(&id).await.unwrap(), None);
+            assert_eq!(backend.destroy(&vm).await, Err(VmError::NoSuchVm));
+        });
+    }
+
+    #[test]
+    fn owner_is_the_creating_principal() {
+        block_on(async {
+            let backend = MockVmBackend::new();
+            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let vm = backend.create(&id, &config("hash-a")).await.unwrap();
+
+            assert_eq!(
+                backend.owner_of(&vm).await.unwrap(),
+                Some(Subject(String::from("builder@grant-a")))
+            );
+        });
+    }
+
+    #[test]
+    fn equal_logical_names_under_different_principals_are_isolated() {
+        block_on(async {
+            let backend = MockVmBackend::new();
+            let first = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let second = identity("installation-a", 7, "builder@grant-b", "build-env");
+            let first_vm = backend.create(&first, &config("hash-a")).await.unwrap();
+            let second_vm = backend.create(&second, &config("hash-a")).await.unwrap();
+
+            assert_ne!(first_vm, second_vm);
+            backend
+                .write_file(&first_vm, "/work/owner", b"grant-a")
+                .await
+                .unwrap();
+            assert_eq!(
+                backend.read_file(&second_vm, "/work/owner", 1024).await,
+                Err(VmError::Failed(String::from("no such file")))
+            );
+        });
+    }
+
+    #[test]
+    fn reap_is_scoped_to_installation_and_preserves_the_keep_set() {
+        block_on(async {
+            let backend = MockVmBackend::new();
+            let keep = identity("installation-a", 8, "builder@grant-a", "keep");
+            let orphan = identity("installation-a", 8, "builder@grant-a", "orphan");
+            let prior_epoch = identity("installation-a", 7, "builder@grant-a", "stale");
+            let other_installation = identity("installation-b", 7, "builder@grant-a", "other");
+            for id in [&keep, &orphan, &prior_epoch, &other_installation] {
+                backend.create(id, &config("hash-a")).await.unwrap();
+            }
+
+            backend.reap("installation-a", &[&keep]).await.unwrap();
+
+            assert!(backend.get(&keep).await.unwrap().is_some());
+            assert_eq!(backend.get(&orphan).await.unwrap(), None);
+            assert_eq!(backend.get(&prior_epoch).await.unwrap(), None);
+            assert!(backend.get(&other_installation).await.unwrap().is_some());
+        });
+    }
+}

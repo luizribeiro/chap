@@ -11,6 +11,11 @@ use lockgate_policy::ScopeRepr;
 
 use crate::vm::{Egress, normalize_absolute_path};
 
+#[cfg(feature = "mock")]
+mod mock;
+#[cfg(feature = "mock")]
+pub type Backend = mock::MockVmBackend;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VmIdentity {
     pub installation_id: String,
