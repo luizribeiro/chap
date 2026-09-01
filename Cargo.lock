@@ -389,6 +389,7 @@ dependencies = [
  "chap-exec",
  "chap-plugin-macros",
  "chap-state",
+ "chap-vm",
  "lockgate-http",
  "lockgate-plugin",
  "schemars",

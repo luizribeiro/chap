@@ -20,6 +20,12 @@ const IMPORTS: &[Import] = &[
         wit: &chap_wit::STATE,
         with_mapping: state_with_mapping,
     },
+    #[cfg(feature = "vm")]
+    Import {
+        rust_name: "Vm",
+        wit: &chap_wit::VM,
+        with_mapping: vm_with_mapping,
+    },
 ];
 
 pub(crate) fn resolve(name: &Ident) -> syn::Result<&'static Import> {
@@ -50,6 +56,13 @@ fn exec_with_mapping() -> TokenStream {
 fn state_with_mapping() -> TokenStream {
     quote::quote! {
         "chap:agent/state@0.3.0": ::chap_plugin::state,
+    }
+}
+
+#[cfg(feature = "vm")]
+fn vm_with_mapping() -> TokenStream {
+    quote::quote! {
+        "chap:agent/vm@0.3.0": ::chap_plugin::vm,
     }
 }
 

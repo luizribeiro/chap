@@ -12,6 +12,8 @@ mod roles;
 pub mod state;
 #[doc(hidden)]
 pub mod types;
+#[cfg(feature = "vm")]
+pub mod vm;
 
 pub use chap_plugin_macros::plugin;
 #[cfg(feature = "http")]
@@ -29,6 +31,8 @@ pub mod capabilities {
     pub use chap_exec::exec;
     #[cfg(feature = "state")]
     pub use chap_state::state;
+    #[cfg(feature = "vm")]
+    pub use chap_vm::vm;
     pub use lockgate_plugin::{env, net};
 }
 
