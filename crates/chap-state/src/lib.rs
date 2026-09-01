@@ -7,6 +7,9 @@ extern crate alloc;
 #[cfg(feature = "host")]
 extern crate std;
 
+#[cfg(feature = "host")]
+pub mod host;
+
 #[lockgate_policy::capability("state")]
 pub mod state {
     use lockgate_policy::Permission;
