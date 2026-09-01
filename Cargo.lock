@@ -468,6 +468,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "chap-vm-plugin"
+version = "0.1.0"
+dependencies = [
+ "chap-plugin",
+ "futures",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "chap-wit"
 version = "0.1.0"
 dependencies = [
