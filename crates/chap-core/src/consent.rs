@@ -60,8 +60,7 @@ pub enum ConsentError {
         #[source]
         source: lockgate::HostConstructionError,
     },
-    #[cfg(feature = "exec")]
-    #[error("failed to register exec capability: {source}")]
+    #[error("failed to register a host capability: {source}")]
     CapabilityRegistration {
         #[source]
         source: lockgate::CapabilityRegistrationError,
