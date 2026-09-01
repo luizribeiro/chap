@@ -13,6 +13,7 @@ pub(crate) struct AgentSettings {
     tool_execution: ToolExecutionSettings,
     exec: Option<Value>,
     state: Option<Value>,
+    vm: Option<Value>,
 }
 
 /// Settings that control tool-call scheduling.
@@ -49,6 +50,13 @@ impl Config {
         #[cfg(feature = "state")]
         self.state_settings()?;
 
+        if self.agent.vm.is_some() && !cfg!(feature = "vm") {
+            return Err(LoadError::CapabilityUnsupported { capability: "vm" });
+        }
+
+        #[cfg(feature = "vm")]
+        self.vm_settings()?;
+
         Ok(())
     }
 
@@ -76,6 +84,20 @@ impl Config {
             .map(Option::unwrap_or_default)
             .map_err(|source| LoadError::InvalidAgentConfigSection {
                 section: "agent.state",
+                source,
+            })
+    }
+
+    #[cfg(feature = "vm")]
+    pub(crate) fn vm_settings(&self) -> Result<chap_vm::host::VmSettings, LoadError> {
+        self.agent
+            .vm
+            .clone()
+            .map(serde_json::from_value)
+            .transpose()
+            .map(Option::unwrap_or_default)
+            .map_err(|source| LoadError::InvalidAgentConfigSection {
+                section: "agent.vm",
                 source,
             })
     }
@@ -316,6 +338,73 @@ mod tests {
         } = error
         else {
             panic!("expected invalid state config");
+        };
+        assert!(source.to_string().contains("invalid type"));
+    }
+
+    #[cfg(not(feature = "vm"))]
+    #[test]
+    fn rejects_vm_settings_when_the_capability_is_unavailable() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "vm": { "max_vms_per_plugin": 3 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let error = config.validate_agent_settings().unwrap_err();
+        assert!(matches!(
+            error,
+            LoadError::CapabilityUnsupported { capability: "vm" }
+        ));
+    }
+
+    #[cfg(feature = "vm")]
+    #[test]
+    fn parses_vm_settings() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "vm": { "max_vms_per_plugin": 3 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.vm_settings().unwrap().max_vms_per_plugin, 3);
+    }
+
+    #[cfg(feature = "vm")]
+    #[test]
+    fn defaults_vm_settings_when_the_section_is_absent() {
+        let config: Config = serde_json::from_str("{}").unwrap();
+        let vm = config.vm_settings().unwrap();
+
+        assert_eq!(vm.max_vms_per_plugin, 8);
+        assert_eq!(vm.default_memory_mb, 512);
+    }
+
+    #[cfg(feature = "vm")]
+    #[test]
+    fn names_the_agent_vm_section_when_settings_are_invalid() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "vm": { "max_vms_per_plugin": "many" }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let error = config.validate_agent_settings().unwrap_err();
+        let LoadError::InvalidAgentConfigSection {
+            section: "agent.vm",
+            source,
+        } = error
+        else {
+            panic!("expected invalid vm config");
         };
         assert!(source.to_string().contains("invalid type"));
     }

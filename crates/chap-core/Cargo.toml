@@ -7,10 +7,12 @@ publish.workspace = true
 [features]
 exec = ["dep:chap-exec", "chap-wit/exec"]
 state = ["dep:chap-state", "chap-wit/state"]
+vm = ["dep:chap-vm", "chap-vm/mock", "chap-wit/vm"]
 
 [dependencies]
 chap-exec = { path = "../chap-exec", features = ["host"], optional = true }
 chap-state = { workspace = true, optional = true, features = ["host"] }
+chap-vm = { workspace = true, optional = true, features = ["host"] }
 chap-wit.workspace = true
 futures.workspace = true
 lockgate.workspace = true

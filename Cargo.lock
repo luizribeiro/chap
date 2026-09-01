@@ -309,6 +309,7 @@ version = "0.1.0"
 dependencies = [
  "chap-exec",
  "chap-state",
+ "chap-vm",
  "chap-wit",
  "futures",
  "lockgate",
