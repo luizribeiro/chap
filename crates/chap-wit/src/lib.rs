@@ -72,11 +72,20 @@ pub static STATE: Import = Import {
     wit: include_str!("../wit/state.wit"),
 };
 
+#[cfg(feature = "vm")]
+pub static VM: Import = Import {
+    rust_name: "Vm",
+    interface: "vm",
+    wit: include_str!("../wit/vm.wit"),
+};
+
 pub static IMPORTS: &[&Import] = &[
     #[cfg(feature = "exec")]
     &EXEC,
     #[cfg(feature = "state")]
     &STATE,
+    #[cfg(feature = "vm")]
+    &VM,
 ];
 
 pub fn resolve(name: &str) -> Option<&'static Role> {

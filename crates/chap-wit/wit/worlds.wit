@@ -16,6 +16,10 @@ world sdk-state {
   import state;
 }
 
+world sdk-vm {
+  import vm;
+}
+
 world host {
   export types;
   export provider;

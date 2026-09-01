@@ -1,0 +1,42 @@
+package chap:agent@0.3.0;
+
+/// Run commands inside a host-owned microVM sandbox. VMs are long-lived across
+/// calls and a plugin may only touch VMs it created.
+interface vm {
+  record mount {
+    host: string,
+    guest: string,
+    readonly: bool,
+  }
+
+  record vm-config {
+    image: string,
+    mounts: list<mount>,
+    egress: list<string>,
+    env: list<tuple<string, string>>,
+  }
+
+  record exec-result {
+    exit-code: s32,
+    stdout: list<u8>,
+    stderr: list<u8>,
+    truncated: bool,
+  }
+
+  variant vm-error {
+    denied(string),
+    already-exists,
+    no-such-vm,
+    config-mismatch,
+    timed-out,
+    failed(string),
+  }
+
+  create: async func(name: string, config: vm-config) -> result<string, vm-error>;
+  get: async func(name: string) -> result<option<string>, vm-error>;
+  get-or-create: async func(name: string, config: vm-config) -> result<string, vm-error>;
+  exec: async func(vm: string, command: list<string>, cwd: option<string>, stdin: option<list<u8>>, timeout-ms: option<u64>) -> result<exec-result, vm-error>;
+  write-file: async func(vm: string, path: string, contents: list<u8>) -> result<_, vm-error>;
+  read-file: async func(vm: string, path: string) -> result<list<u8>, vm-error>;
+  destroy: async func(vm: string) -> result<_, vm-error>;
+}
