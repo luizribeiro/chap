@@ -308,6 +308,7 @@ name = "chap-core"
 version = "0.1.0"
 dependencies = [
  "chap-exec",
+ "chap-state",
  "chap-wit",
  "futures",
  "lockgate",

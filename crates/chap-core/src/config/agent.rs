@@ -12,6 +12,7 @@ pub(crate) struct AgentSettings {
     #[serde(default)]
     tool_execution: ToolExecutionSettings,
     exec: Option<Value>,
+    state: Option<Value>,
 }
 
 /// Settings that control tool-call scheduling.
@@ -39,6 +40,15 @@ impl Config {
         #[cfg(feature = "exec")]
         self.exec_settings()?;
 
+        if self.agent.state.is_some() && !cfg!(feature = "state") {
+            return Err(LoadError::CapabilityUnsupported {
+                capability: "state",
+            });
+        }
+
+        #[cfg(feature = "state")]
+        self.state_settings()?;
+
         Ok(())
     }
 
@@ -52,6 +62,20 @@ impl Config {
             .map(Option::unwrap_or_default)
             .map_err(|source| LoadError::InvalidAgentConfigSection {
                 section: "agent.exec",
+                source,
+            })
+    }
+
+    #[cfg(feature = "state")]
+    pub(crate) fn state_settings(&self) -> Result<chap_state::host::StateSettings, LoadError> {
+        self.agent
+            .state
+            .clone()
+            .map(serde_json::from_value)
+            .transpose()
+            .map(Option::unwrap_or_default)
+            .map_err(|source| LoadError::InvalidAgentConfigSection {
+                section: "agent.state",
                 source,
             })
     }
@@ -225,6 +249,73 @@ mod tests {
         } = error
         else {
             panic!("expected invalid exec config");
+        };
+        assert!(source.to_string().contains("invalid type"));
+    }
+
+    #[cfg(not(feature = "state"))]
+    #[test]
+    fn rejects_state_settings_when_state_support_is_absent() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "state": { "max_bytes": 4096 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let error = config.validate_agent_settings().unwrap_err();
+        assert!(matches!(
+            error,
+            LoadError::CapabilityUnsupported {
+                capability: "state"
+            }
+        ));
+    }
+
+    #[cfg(feature = "state")]
+    #[test]
+    fn parses_state_settings() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "state": { "max_bytes": 4096 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.state_settings().unwrap().max_bytes, 4096);
+    }
+
+    #[cfg(feature = "state")]
+    #[test]
+    fn defaults_state_settings_when_the_section_is_absent() {
+        let config: Config = serde_json::from_str("{}").unwrap();
+
+        assert_eq!(config.state_settings().unwrap().max_bytes, 1_048_576);
+    }
+
+    #[cfg(feature = "state")]
+    #[test]
+    fn names_the_agent_state_section_when_settings_are_invalid() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "state": { "max_bytes": "big" }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let error = config.validate_agent_settings().unwrap_err();
+        let LoadError::InvalidAgentConfigSection {
+            section: "agent.state",
+            source,
+        } = error
+        else {
+            panic!("expected invalid state config");
         };
         assert!(source.to_string().contains("invalid type"));
     }
