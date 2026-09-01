@@ -28,6 +28,9 @@ mod context;
 mod plugin_tool;
 mod provider;
 mod turn;
+#[cfg(feature = "vm")]
+#[path = "vm.rs"]
+mod vm_host;
 
 const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
 const PLUGIN_ADMISSION_DEADLINE: Duration = Duration::from_secs(30);
@@ -237,6 +240,8 @@ fn host_builder(_config: &Config) -> Result<HostBuilder<()>, ConsentError> {
         executor: bindings::exec_host::new(_config)?,
         #[cfg(feature = "state")]
         store: bindings::state_host::new(_config)?,
+        #[cfg(feature = "vm")]
+        vm: bindings::vm_host::new(_config)?,
     };
     let builder =
         HostBuilder::new(imports).map_err(|source| ConsentError::HostConstruction { source })?;
@@ -247,6 +252,10 @@ fn host_builder(_config: &Config) -> Result<HostBuilder<()>, ConsentError> {
     #[cfg(feature = "state")]
     let builder = builder
         .register::<chap_state::state::Contract>()
+        .map_err(|source| ConsentError::CapabilityRegistration { source })?;
+    #[cfg(feature = "vm")]
+    let builder = builder
+        .register::<chap_vm::vm::Contract>()
         .map_err(|source| ConsentError::CapabilityRegistration { source })?;
     Ok(builder)
 }
