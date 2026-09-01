@@ -8,9 +8,11 @@ publish.workspace = true
 default = ["http"]
 exec = ["chap-plugin-macros/exec", "dep:chap-exec"]
 http = ["dep:lockgate-http"]
+state = ["chap-plugin-macros/state", "dep:chap-state"]
 
 [dependencies]
 chap-exec = { path = "../chap-exec", default-features = false, optional = true }
+chap-state = { workspace = true, optional = true }
 lockgate-http = { workspace = true, optional = true }
 lockgate-plugin = { workspace = true }
 chap-plugin-macros = { workspace = true }

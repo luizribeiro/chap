@@ -9,6 +9,7 @@ proc-macro = true
 
 [features]
 exec = ["chap-wit/exec"]
+state = ["chap-wit/state"]
 
 [dependencies]
 chap-wit.workspace = true

@@ -134,36 +134,54 @@ pub(crate) fn expand(input: PluginInput) -> syn::Result<TokenStream> {
     })
 }
 
-#[cfg(all(test, feature = "exec"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn parses_an_import_axis() {
-        let input = syn::parse_str::<PluginInput>("ExecTool: Tools, imports: Exec").unwrap();
+        for import in chap_wit::IMPORTS {
+            let input = syn::parse_str::<PluginInput>(&format!(
+                "ImportTool: Tools, imports: {}",
+                import.rust_name
+            ))
+            .unwrap();
 
-        assert_eq!(input.roles.len(), 1);
-        assert_eq!(input.roles[0], "Tools");
-        assert_eq!(input.imports.len(), 1);
-        assert_eq!(input.imports[0], "Exec");
+            assert_eq!(input.roles.len(), 1);
+            assert_eq!(input.roles[0], "Tools");
+            assert_eq!(input.imports.len(), 1);
+            assert_eq!(input.imports[0], import.rust_name);
+        }
     }
 
     #[test]
     fn rejects_duplicate_imports() {
-        let input = syn::parse_str::<PluginInput>("ExecTool: Tools, imports: Exec + Exec").unwrap();
-        let error = expand(input).unwrap_err();
+        for import in chap_wit::IMPORTS {
+            let input = syn::parse_str::<PluginInput>(&format!(
+                "ImportTool: Tools, imports: {0} + {0}",
+                import.rust_name
+            ))
+            .unwrap();
+            let error = expand(input).unwrap_err();
 
-        assert_eq!(error.to_string(), "duplicate CHAP plugin import `Exec`");
+            assert_eq!(
+                error.to_string(),
+                format!("duplicate CHAP plugin import `{}`", import.rust_name)
+            );
+        }
     }
 
     #[test]
     fn unknown_import_names_the_known_imports() {
         let input = syn::parse_str::<PluginInput>("ExecTool: Tools, imports: Other").unwrap();
         let error = expand(input).unwrap_err();
+        let known = chap_wit::IMPORTS
+            .iter()
+            .map(|import| import.rust_name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let expected = format!("unknown CHAP plugin import `Other`; known imports: {known}");
 
-        assert_eq!(
-            error.to_string(),
-            "unknown CHAP plugin import `Other`; known imports: Exec"
-        );
+        assert_eq!(error.to_string(), expected);
     }
 }

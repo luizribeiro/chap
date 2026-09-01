@@ -8,6 +8,8 @@
 pub mod exec;
 mod plugin;
 mod roles;
+#[cfg(feature = "state")]
+pub mod state;
 #[doc(hidden)]
 pub mod types;
 
@@ -25,6 +27,8 @@ pub use lockgate_plugin::{
 pub mod capabilities {
     #[cfg(feature = "exec")]
     pub use chap_exec::exec;
+    #[cfg(feature = "state")]
+    pub use chap_state::state;
     pub use lockgate_plugin::{env, net};
 }
 

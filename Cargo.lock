@@ -387,6 +387,7 @@ version = "0.1.0"
 dependencies = [
  "chap-exec",
  "chap-plugin-macros",
+ "chap-state",
  "lockgate-http",
  "lockgate-plugin",
  "schemars",

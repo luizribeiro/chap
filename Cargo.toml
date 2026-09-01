@@ -35,6 +35,7 @@ lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", rev = "
 lockgate-policy = { git = "https://github.com/luizribeiro/lockgate.git", rev = "f3df7859017f194cb334e8805f62a727ed886eb2" }
 chap-plugin = { path = "crates/chap-plugin", default-features = false }
 chap-plugin-macros = { path = "crates/chap-plugin-macros" }
+chap-state = { path = "crates/chap-state", default-features = false }
 chap-wit = { path = "crates/chap-wit" }
 pulldown-cmark = "0.13.4"
 proc-macro2 = "1.0.107"

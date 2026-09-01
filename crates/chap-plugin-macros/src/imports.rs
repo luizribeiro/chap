@@ -1,11 +1,8 @@
 use proc_macro2::TokenStream;
-#[cfg(feature = "exec")]
-use quote::quote;
 use syn::Ident;
 
 pub(crate) struct Import {
     pub(crate) rust_name: &'static str,
-    #[cfg(feature = "exec")]
     pub(crate) wit: &'static chap_wit::Import,
     pub(crate) with_mapping: fn() -> TokenStream,
 }
@@ -16,6 +13,12 @@ const IMPORTS: &[Import] = &[
         rust_name: "Exec",
         wit: &chap_wit::EXEC,
         with_mapping: exec_with_mapping,
+    },
+    #[cfg(feature = "state")]
+    Import {
+        rust_name: "State",
+        wit: &chap_wit::STATE,
+        with_mapping: state_with_mapping,
     },
 ];
 
@@ -38,12 +41,19 @@ pub(crate) fn resolve(name: &Ident) -> syn::Result<&'static Import> {
 
 #[cfg(feature = "exec")]
 fn exec_with_mapping() -> TokenStream {
-    quote! {
+    quote::quote! {
         "chap:agent/exec@0.3.0": ::chap_plugin::exec,
     }
 }
 
-#[cfg(all(test, feature = "exec"))]
+#[cfg(feature = "state")]
+fn state_with_mapping() -> TokenStream {
+    quote::quote! {
+        "chap:agent/state@0.3.0": ::chap_plugin::state,
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
