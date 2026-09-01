@@ -457,6 +457,13 @@ name = "chap-test-all"
 version = "0.1.0"
 
 [[package]]
+name = "chap-vm"
+version = "0.1.0"
+dependencies = [
+ "lockgate-policy",
+]
+
+[[package]]
 name = "chap-wit"
 version = "0.1.0"
 dependencies = [

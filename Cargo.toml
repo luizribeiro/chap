@@ -3,6 +3,7 @@ members = [
     "crates/chap-cli",
     "crates/chap-core",
     "crates/chap-exec",
+    "crates/chap-vm",
     "crates/chap-plugin",
     "crates/chap-plugin-macros",
     "crates/chap-state",
