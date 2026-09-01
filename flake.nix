@@ -66,7 +66,7 @@
         };
         cargoArtifacts = craneLib.buildDepsOnly packageArgs;
         chap = pkgs.lib.makeOverridable (
-          { withExec ? false, withState ? false }:
+          { withExec ? false, withState ? false, withVm ? false }:
           craneLib.buildPackage (
             packageArgs
             // {
@@ -74,7 +74,8 @@
               cargoExtraArgs =
                 packageArgs.cargoExtraArgs
                 + pkgs.lib.optionalString withExec " --features chap-cli/exec"
-                + pkgs.lib.optionalString withState " --features chap-cli/state";
+                + pkgs.lib.optionalString withState " --features chap-cli/state"
+                + pkgs.lib.optionalString withVm " --features chap-cli/vm";
             }
           )
         ) { };
@@ -144,7 +145,7 @@
           version = "0.1.0";
           src = packageSrc;
           inherit cargoVendorDir;
-          cargoExtraArgs = "--locked -p chap-openai-compatible -p chap-kagi -p chap-exec-plugin -p chap-state-plugin -p chap-persona --target wasm32-wasip2";
+          cargoExtraArgs = "--locked -p chap-openai-compatible -p chap-kagi -p chap-exec-plugin -p chap-state-plugin -p chap-vm-plugin -p chap-persona --target wasm32-wasip2";
           doCheck = false;
         };
         pluginOpenaiCompatible = buildChapPlugin {
@@ -168,6 +169,12 @@
         };
         pluginState = buildChapPlugin {
           pname = "chap-state-plugin";
+          src = packageSrc;
+          inherit cargoVendorDir;
+          cargoArtifacts = pluginCargoArtifacts;
+        };
+        pluginVm = buildChapPlugin {
+          pname = "chap-vm-plugin";
           src = packageSrc;
           inherit cargoVendorDir;
           cargoArtifacts = pluginCargoArtifacts;
@@ -358,6 +365,19 @@
             plugin = pluginState;
           };
         };
+        mkChapVmExample = mkChap {
+          name = "example-vm";
+          package = chap.override { withVm = true; };
+          settings.agent.vm.registries = [ "ghcr.io" ];
+          plugins.sandbox = {
+            plugin = pluginVm;
+            settings = {
+              image = "ghcr.io/acme/alpine:latest";
+              allowed_mounts = [ "/project" ];
+              allowed_egress = [ "127.0.0.1:1" ];
+            };
+          };
+        };
         mkChapFormsExample =
           (mkChap {
             name = "example-forms";
@@ -448,7 +468,7 @@
             plugin-clippy = {
               enable = true;
               name = "cargo clippy (WASI plugins)";
-              entry = "${rust}/bin/cargo clippy -p chap-openai-compatible -p chap-exec-plugin -p chap-state-plugin -p chap-kagi --target wasm32-wasip2 --all-targets --locked -- -D warnings";
+              entry = "${rust}/bin/cargo clippy -p chap-openai-compatible -p chap-exec-plugin -p chap-state-plugin -p chap-vm-plugin -p chap-kagi --target wasm32-wasip2 --all-targets --locked -- -D warnings";
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
             };
@@ -466,17 +486,24 @@
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
             };
+            vm-clippy = {
+              enable = true;
+              name = "cargo clippy (vm feature)";
+              entry = "${rust}/bin/cargo clippy -p chap-core --features vm --all-targets --locked -- -D warnings";
+              files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
+              pass_filenames = false;
+            };
             all-capabilities-clippy = {
               enable = true;
               name = "cargo clippy (all capabilities)";
-              entry = "${rust}/bin/cargo clippy -p chap-core --features exec,state --all-targets --locked -- -D warnings";
+              entry = "${rust}/bin/cargo clippy -p chap-core --features exec,state,vm --all-targets --locked -- -D warnings";
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
             };
             cargo-test = {
               enable = true;
               name = "cargo test";
-              entry = "${rust}/bin/cargo test --workspace --all-targets --locked --exclude chap-openai-compatible --exclude chap-exec-plugin --exclude chap-state-plugin --exclude chap-kagi";
+              entry = "${rust}/bin/cargo test --workspace --all-targets --locked --exclude chap-openai-compatible --exclude chap-exec-plugin --exclude chap-state-plugin --exclude chap-vm-plugin --exclude chap-kagi";
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
               stages = [ "pre-push" ];
@@ -503,11 +530,13 @@
           inherit chap;
           chap-exec = chap.override { withExec = true; };
           chap-state = chap.override { withState = true; };
+          chap-vm = chap.override { withVm = true; };
           default = chap;
           plugin-openai-compatible = pluginOpenaiCompatible;
           plugin-kagi = pluginKagi;
           plugin-exec = pluginExec;
           plugin-state = pluginState;
+          plugin-vm = pluginVm;
           plugin-persona = pluginPersona;
         };
 
@@ -518,11 +547,13 @@
           plugin-kagi = pluginKagi;
           plugin-exec = pluginExec;
           plugin-state = pluginState;
+          plugin-vm = pluginVm;
           plugin-persona = pluginPersona;
           plugin-default-vendor = pluginDefaultVendor;
           mkchap-example = mkChapExample;
           mkchap-exec-example = mkChapExecExample;
           mkchap-state-example = mkChapStateExample;
+          mkchap-vm-example = mkChapVmExample;
           mkchap-forms-example = mkChapFormsExample;
           mkchap-eval-guards = mkChapEvalGuards;
         };

@@ -11,6 +11,7 @@ path = "src/main.rs"
 [features]
 exec = ["chap-core/exec"]
 state = ["chap-core/state"]
+vm = ["chap-core/vm"]
 
 [dependencies]
 clap.workspace = true
