@@ -5,12 +5,12 @@ edition.workspace = true
 publish.workspace = true
 
 [features]
-host = ["dep:libc", "dep:lockgate", "dep:serde", "dep:tokio"]
+host = ["dep:lockgate", "dep:rustix", "dep:serde", "dep:tokio"]
 
 [dependencies]
-libc = { workspace = true, optional = true }
 lockgate = { workspace = true, optional = true }
 lockgate-policy.workspace = true
+rustix = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 

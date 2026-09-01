@@ -7,6 +7,7 @@ use std::string::String;
 use std::time::Duration;
 use std::vec::Vec;
 
+use rustix::process::{Pid, Signal, kill_process_group};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
@@ -14,6 +15,14 @@ use super::{ExecError, ExecOutcome};
 
 const OUTPUT_LIMIT: usize = 64 * 1024;
 const TRUNCATION_MARKER: &[u8] = b"\n[chap-exec output truncated at 64 KiB]\n";
+
+struct ProcessGroup(Pid);
+
+impl Drop for ProcessGroup {
+    fn drop(&mut self) {
+        let _ = kill_process_group(self.0, Signal::KILL);
+    }
+}
 
 pub(super) async fn run(
     mut command: Command,
@@ -35,11 +44,16 @@ pub(super) async fn run(
     let mut child = command.spawn().map_err(|error| {
         ExecError::Failed(format!("could not spawn program {program:?}: {error}"))
     })?;
-    let pid = child.id().ok_or_else(|| {
-        ExecError::Failed(format!(
-            "could not supervise program {program:?}: its process ID was unavailable"
-        ))
-    })?;
+    let process_group = ProcessGroup(
+        child
+            .id()
+            .and_then(|pid| Pid::from_raw(pid as i32))
+            .ok_or_else(|| {
+                ExecError::Failed(format!(
+                    "could not supervise program {program:?}: its process ID was unavailable"
+                ))
+            })?,
+    );
     let stdout = child.stdout.take().ok_or_else(|| {
         ExecError::Failed(format!("could not capture stdout from program {program:?}"))
     })?;
@@ -49,7 +63,10 @@ pub(super) async fn run(
     let stdout_task = tokio::spawn(read_capped(stdout));
     let stderr_task = tokio::spawn(read_capped(stderr));
 
-    let status = match tokio::time::timeout(timeout, child.wait()).await {
+    let waited = tokio::time::timeout(timeout, child.wait()).await;
+    drop(process_group);
+
+    let status = match waited {
         Ok(Ok(status)) => status,
         Ok(Err(error)) => {
             stdout_task.abort();
@@ -59,9 +76,6 @@ pub(super) async fn run(
             )));
         }
         Err(_) => {
-            unsafe {
-                libc::kill(-(pid as i32), libc::SIGKILL);
-            }
             let _ = child.wait().await;
             let _ = stdout_task.await;
             let _ = stderr_task.await;
@@ -136,11 +150,14 @@ fn exit_code(status: ExitStatus) -> i32 {
 #[cfg(test)]
 mod tests {
     use std::env;
+    use std::fs;
     use std::path::{Path, PathBuf};
     use std::string::String;
     use std::time::{Duration, Instant};
     use std::vec::Vec;
 
+    use rustix::io::Errno;
+    use rustix::process::{Pid, test_kill_process_group};
     use tempfile::TempDir;
     use tokio::process::Command;
 
@@ -171,6 +188,22 @@ mod tests {
         timeout: Duration,
     ) -> Result<crate::host::ExecOutcome, ExecError> {
         run(command(name, args), project, timeout).await
+    }
+
+    async fn wait_for_group_exit(pgid: Pid) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match test_kill_process_group(pgid) {
+                Err(Errno::SRCH) => break,
+                Ok(()) => {}
+                Err(error) => panic!("could not inspect process group {pgid}: {error}"),
+            }
+            assert!(
+                Instant::now() < deadline,
+                "process group {pgid} survived the exec call"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     #[tokio::test]
@@ -251,6 +284,71 @@ mod tests {
         .unwrap_err();
         assert_eq!(error, ExecError::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn cancellation_kills_the_process_group() {
+        let project = TempDir::new().unwrap();
+        let pidfile = project.path().join("pid");
+        let mut shell = command("sh", &["-c", "echo $$ > \"$PIDFILE\"; sleep 30"]);
+        shell.env("PIDFILE", &pidfile);
+
+        let pid = {
+            let invocation = tokio::time::timeout(
+                Duration::from_millis(750),
+                run(shell, project.path(), Duration::from_secs(60)),
+            );
+            tokio::pin!(invocation);
+
+            let pid = loop {
+                tokio::select! {
+                    result = &mut invocation => {
+                        panic!("exec invocation completed before writing its pid: {result:?}");
+                    }
+                    () = tokio::time::sleep(Duration::from_millis(10)) => {
+                        if let Ok(contents) = fs::read_to_string(&pidfile)
+                            && let Ok(pid) = contents.trim().parse::<i32>()
+                        {
+                            break pid;
+                        }
+                    }
+                }
+            };
+
+            assert!(invocation.await.is_err());
+            pid
+        };
+
+        wait_for_group_exit(Pid::from_raw(pid).unwrap()).await;
+    }
+
+    #[tokio::test]
+    async fn background_children_do_not_outlive_the_call() {
+        let project = TempDir::new().unwrap();
+        let pidfile = project.path().join("pid");
+        let mut shell = command(
+            "sh",
+            &["-c", "sleep 60 & echo $$ > \"$PIDFILE\"; echo done"],
+        );
+        shell.env("PIDFILE", &pidfile);
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            run(shell, project.path(), Duration::from_secs(60)),
+        )
+        .await
+        .expect("exec call did not complete within 5 seconds")
+        .unwrap();
+        assert_eq!(outcome.exit_code, 0, "stderr: {:?}", outcome.stderr);
+        assert_eq!(outcome.stdout, "done\n");
+        assert!(!outcome.truncated);
+
+        let pgid = fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .parse::<i32>()
+            .unwrap();
+        wait_for_group_exit(Pid::from_raw(pgid).unwrap()).await;
     }
 
     #[tokio::test]

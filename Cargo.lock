@@ -329,9 +329,9 @@ dependencies = [
 name = "chap-exec"
 version = "0.1.0"
 dependencies = [
- "libc",
  "lockgate",
  "lockgate-policy",
+ "rustix",
  "serde",
  "tempfile",
  "tokio",
