@@ -110,6 +110,7 @@
           inherit cargoVendorDir;
           cargoExtraArgs = "--locked -p chap-cli";
           doCheck = false;
+          buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.libcap_ng ];
         } // microsandboxBuildArgs;
         cargoArtifacts = craneLib.buildDepsOnly packageArgs;
         chap = pkgs.lib.makeOverridable (
