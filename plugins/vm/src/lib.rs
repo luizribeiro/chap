@@ -103,11 +103,16 @@ fn parse_arguments(arguments: &str) -> Result<RunArguments, ToolError> {
 #[serde(deny_unknown_fields)]
 struct Settings {
     /// OCI image reference used for the sandbox VM.
+    #[serde(default = "default_image")]
     image: String,
     /// Host paths the plugin may mount into a VM.
     allowed_mounts: Vec<String>,
     /// Network destinations the plugin may expose to a VM.
     allowed_egress: Vec<String>,
+}
+
+fn default_image() -> String {
+    "docker.io/library/alpine:3.20".to_owned()
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -124,7 +129,7 @@ mod tests {
 
     fn plugin() -> Sandbox {
         <Sandbox as Plugin>::new(Settings {
-            image: "ghcr.io/acme/alpine:latest".to_owned(),
+            image: default_image(),
             allowed_mounts: vec!["/project".to_owned()],
             allowed_egress: vec![],
         })
@@ -139,8 +144,23 @@ mod tests {
         assert_eq!(schema["unevaluatedProperties"], false);
         assert_eq!(
             schema["required"],
-            serde_json::json!(["image", "allowed_mounts", "allowed_egress"])
+            serde_json::json!(["allowed_mounts", "allowed_egress"])
         );
+        assert_eq!(
+            schema["properties"]["image"]["default"],
+            "docker.io/library/alpine:3.20"
+        );
+    }
+
+    #[test]
+    fn defaults_the_image_to_alpine() {
+        let settings: Settings = serde_json::from_value(serde_json::json!({
+            "allowed_mounts": [],
+            "allowed_egress": [],
+        }))
+        .unwrap();
+
+        assert_eq!(settings.image, "docker.io/library/alpine:3.20");
     }
 
     #[test]

@@ -368,11 +368,10 @@
         mkChapVmExample = mkChap {
           name = "example-vm";
           package = chap.override { withVm = true; };
-          settings.agent.vm.registries = [ "ghcr.io" ];
+          settings.agent.vm.registries = [ "docker.io" ];
           plugins.sandbox = {
             plugin = pluginVm;
             settings = {
-              image = "ghcr.io/acme/alpine:latest";
               allowed_mounts = [ "/project" ];
               allowed_egress = [ "127.0.0.1:1" ];
             };

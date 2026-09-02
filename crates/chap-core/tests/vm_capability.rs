@@ -101,7 +101,7 @@ fn write_config(path: &Path, components: &Components, origin: &str) {
                 "sandbox": {
                     "component": components.sandbox.display().to_string(),
                     "settings": {
-                        "image": "ghcr.io/acme/alpine:latest",
+                        "image": "docker.io/library/alpine:3.20",
                         "allowed_mounts": ["/project"],
                         "allowed_egress": ["127.0.0.1:1"],
                     },
@@ -119,7 +119,7 @@ fn write_config(path: &Path, components: &Components, origin: &str) {
             },
             "agent": {
                 "vm": {
-                    "registries": ["ghcr.io"],
+                    "registries": ["docker.io"],
                 },
             },
         }))
