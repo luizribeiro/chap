@@ -235,6 +235,9 @@ effective port are part of the origin. Kagi declares the literal origin
 `https://kagi.com` and therefore needs no configurable origin. Persona exports
 only the context role and requests no capabilities; it contributes its
 configured text at session creation without storing it in session history.
+For the sandbox plugin, a whole-family port-53 egress scope (`0.0.0.0/0:53` or
+`[::]/0:53`) explicitly enables gateway DNS; without one, name resolution
+stays blocked.
 
 Context plugins use the `context` channel by default, contributing one leading
 user message. Set a plugin's `context.channel` to `system` when that plugin

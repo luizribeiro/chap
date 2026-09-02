@@ -14,8 +14,8 @@ use microsandbox::{
 };
 
 use super::{
-    ExecOutcome, MountSpec, ResolvedImage, Subject, VmBackend, VmCommand, VmConfig, VmError,
-    VmIdentity, VmRef, VmSettings,
+    Egress, ExecOutcome, MountSpec, ResolvedImage, Subject, VmBackend, VmCommand, VmConfig,
+    VmError, VmIdentity, VmRef, VmSettings,
 };
 
 const NAME_PREFIX: &str = "chap-";
@@ -265,8 +265,18 @@ fn sandbox_builder(id: &VmIdentity, cfg: &VmConfig) -> Result<SandboxBuilder, Vm
         return Ok(builder.disable_network());
     }
 
+    let policy = network_policy(&cfg.egress)?;
+    Ok(builder.network(|network| network.policy(policy)))
+}
+
+fn network_policy(egress: &[Egress]) -> Result<NetworkPolicy, VmError> {
     let mut policy = NetworkPolicy::builder().default_deny();
-    for destination in &cfg.egress {
+    if egress.iter().any(enables_gateway_dns) {
+        // A whole-family port-53 grant covers the gateway resolver, whose DNS query has no
+        // destination IP for the CIDR rule to match.
+        policy = policy.egress(|rule| rule.udp().tcp().port(53).allow_host());
+    }
+    for destination in egress {
         let addr = destination.addr();
         let prefix_len = destination.prefix_len();
         let port = destination.port();
@@ -284,7 +294,13 @@ fn sandbox_builder(id: &VmIdentity, cfg: &VmConfig) -> Result<SandboxBuilder, Vm
     let policy = policy
         .build()
         .map_err(|error| VmError::Failed(error.to_string()))?;
-    Ok(builder.network(|network| network.policy(policy)))
+    Ok(policy)
+}
+
+fn enables_gateway_dns(destination: &Egress) -> bool {
+    destination.port() == Some(53)
+        && destination.prefix_len() == 0
+        && destination.addr().is_unspecified()
 }
 
 async fn destroy_handle(handle: SandboxHandle) -> Result<(), VmError> {
@@ -405,6 +421,7 @@ fn map_sdk_error(error: MicrosandboxError) -> VmError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::{Value, json};
 
     fn image(tag: Option<&str>, digest: Option<&str>) -> ResolvedImage {
         ResolvedImage {
@@ -497,5 +514,60 @@ mod tests {
     #[test]
     fn max_output_bytes_defaults_to_sixty_four_kibibytes() {
         assert_eq!(VmSettings::default().max_output_bytes, 64 * 1024);
+    }
+
+    fn policy(scopes: &[&str]) -> Value {
+        let egress = scopes
+            .iter()
+            .map(|scope| scope.parse().unwrap())
+            .collect::<Vec<_>>();
+        serde_json::to_value(network_policy(&egress).unwrap()).unwrap()
+    }
+
+    fn dns_rules(policy: &Value) -> Vec<&Value> {
+        policy["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|rule| rule["destination"] == json!({ "group": "host" }))
+            .collect()
+    }
+
+    #[test]
+    fn whole_ipv4_port_53_grant_adds_gateway_dns_and_cidr_rules() {
+        let policy = policy(&["0.0.0.0/0:53"]);
+        let rules = policy["rules"].as_array().unwrap();
+
+        assert_eq!(rules.len(), 2);
+        assert_eq!(dns_rules(&policy).len(), 1);
+        assert_eq!(rules[0]["protocols"], json!(["udp", "tcp"]));
+        assert_eq!(rules[0]["ports"], json!([{ "start": 53, "end": 53 }]));
+        assert_eq!(rules[1]["destination"], json!({ "cidr": "0.0.0.0/0" }));
+    }
+
+    #[test]
+    fn whole_family_non_dns_grant_does_not_add_gateway_dns() {
+        let policy = policy(&["0.0.0.0/0:443"]);
+
+        assert!(dns_rules(&policy).is_empty());
+        assert_eq!(policy["rules"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn narrow_port_53_grant_does_not_add_gateway_dns() {
+        let policy = policy(&["10.0.0.0/8:53"]);
+
+        assert!(dns_rules(&policy).is_empty());
+        assert_eq!(policy["rules"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn whole_ipv6_port_53_grant_adds_gateway_dns_and_cidr_rules() {
+        let policy = policy(&["[::]/0:53"]);
+        let rules = policy["rules"].as_array().unwrap();
+
+        assert_eq!(rules.len(), 2);
+        assert_eq!(dns_rules(&policy).len(), 1);
+        assert_eq!(rules[1]["destination"], json!({ "cidr": "::/0" }));
     }
 }
