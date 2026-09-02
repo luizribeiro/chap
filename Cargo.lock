@@ -3105,29 +3105,36 @@ dependencies = [
 [[package]]
 name = "lockgate"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?rev=cc2b567249321096a0ac45f635e6bba67beee0e5#cc2b567249321096a0ac45f635e6bba67beee0e5"
+source = "git+https://github.com/luizribeiro/lockgate.git?rev=0a5971452fa3c3eda1e1d949488adef133e26b49#0a5971452fa3c3eda1e1d949488adef133e26b49"
 dependencies = [
  "anyhow",
+ "bytes",
  "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
  "jsonschema",
  "lockgate-macros",
  "lockgate-policy",
  "lockgate-schema",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "tokio",
+ "tokio-rustls",
  "wasmparser 0.254.0",
  "wasmtime",
  "wasmtime-wasi",
  "wasmtime-wasi-http",
+ "webpki-roots 1.0.9",
  "wit-parser 0.254.0",
 ]
 
 [[package]]
 name = "lockgate-http"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?rev=cc2b567249321096a0ac45f635e6bba67beee0e5#cc2b567249321096a0ac45f635e6bba67beee0e5"
+source = "git+https://github.com/luizribeiro/lockgate.git?rev=0a5971452fa3c3eda1e1d949488adef133e26b49#0a5971452fa3c3eda1e1d949488adef133e26b49"
 dependencies = [
  "bytes",
  "http",
@@ -3141,7 +3148,7 @@ dependencies = [
 [[package]]
 name = "lockgate-macros"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?rev=cc2b567249321096a0ac45f635e6bba67beee0e5#cc2b567249321096a0ac45f635e6bba67beee0e5"
+source = "git+https://github.com/luizribeiro/lockgate.git?rev=0a5971452fa3c3eda1e1d949488adef133e26b49#0a5971452fa3c3eda1e1d949488adef133e26b49"
 dependencies = [
  "heck 0.5.0",
  "lockgate-schema",
@@ -3156,7 +3163,7 @@ dependencies = [
 [[package]]
 name = "lockgate-plugin"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?rev=cc2b567249321096a0ac45f635e6bba67beee0e5#cc2b567249321096a0ac45f635e6bba67beee0e5"
+source = "git+https://github.com/luizribeiro/lockgate.git?rev=0a5971452fa3c3eda1e1d949488adef133e26b49#0a5971452fa3c3eda1e1d949488adef133e26b49"
 dependencies = [
  "lockgate-plugin-macros",
  "lockgate-policy",
@@ -3169,7 +3176,7 @@ dependencies = [
 [[package]]
 name = "lockgate-plugin-macros"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?rev=cc2b567249321096a0ac45f635e6bba67beee0e5#cc2b567249321096a0ac45f635e6bba67beee0e5"
+source = "git+https://github.com/luizribeiro/lockgate.git?rev=0a5971452fa3c3eda1e1d949488adef133e26b49#0a5971452fa3c3eda1e1d949488adef133e26b49"
 dependencies = [
  "lockgate-schema",
  "proc-macro-crate",
@@ -3183,7 +3190,7 @@ dependencies = [
 [[package]]
 name = "lockgate-policy"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?rev=cc2b567249321096a0ac45f635e6bba67beee0e5#cc2b567249321096a0ac45f635e6bba67beee0e5"
+source = "git+https://github.com/luizribeiro/lockgate.git?rev=0a5971452fa3c3eda1e1d949488adef133e26b49#0a5971452fa3c3eda1e1d949488adef133e26b49"
 dependencies = [
  "lockgate-macros",
  "url",
@@ -3192,7 +3199,7 @@ dependencies = [
 [[package]]
 name = "lockgate-schema"
 version = "0.1.0"
-source = "git+https://github.com/luizribeiro/lockgate.git?rev=cc2b567249321096a0ac45f635e6bba67beee0e5#cc2b567249321096a0ac45f635e6bba67beee0e5"
+source = "git+https://github.com/luizribeiro/lockgate.git?rev=0a5971452fa3c3eda1e1d949488adef133e26b49#0a5971452fa3c3eda1e1d949488adef133e26b49"
 dependencies = [
  "serde",
  "serde_json",
@@ -3915,7 +3922,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

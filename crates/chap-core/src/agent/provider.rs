@@ -82,6 +82,10 @@ fn map_plugin_call_error(provider: &str, error: CallError) -> ProviderError {
             deadline,
             source: Arc::new(source),
         },
+        source @ CallError::HostPanic { .. } => ProviderError::CallFailed {
+            provider: provider.to_owned(),
+            source: Arc::new(source),
+        },
         source => ProviderError::CallFailed {
             provider: provider.to_owned(),
             source: Arc::new(source),
@@ -316,6 +320,31 @@ mod tests {
             std::error::Error::source(&error)
                 .and_then(|source| source.downcast_ref::<Arc<CallError>>())
                 .is_some_and(|source| matches!(source.as_ref(), CallError::Trap { detail } if detail == "guest panicked"))
+        );
+    }
+
+    #[test]
+    fn provider_host_panics_name_the_import() {
+        let error = map_plugin_call_error(
+            "example",
+            CallError::HostPanic {
+                import: "chap:state/state.recall".to_owned(),
+                message: "host invariant failed".to_owned(),
+            },
+        );
+
+        assert_eq!(
+            error.to_string(),
+            "provider plugin `example` failed: host import `chap:state/state.recall` panicked: host invariant failed"
+        );
+        assert!(
+            std::error::Error::source(&error)
+                .and_then(|source| source.downcast_ref::<Arc<CallError>>())
+                .is_some_and(|source| matches!(
+                    source.as_ref(),
+                    CallError::HostPanic { import, message }
+                        if import == "chap:state/state.recall" && message == "host invariant failed"
+                ))
         );
     }
 

@@ -123,6 +123,9 @@ fn tool_call_error(plugin: &str, error: CallError) -> ToolError {
         CallError::DeadlineExceeded { deadline } => {
             format!("tool plugin `{plugin}` timed out after {deadline:?}")
         }
+        CallError::HostPanic { import, message } => {
+            format!("tool plugin `{plugin}` failed: host import `{import}` panicked: {message}")
+        }
         error => format!("tool plugin `{plugin}` failed: {error}"),
     })
 }
@@ -205,6 +208,23 @@ mod tests {
         for (error, expected) in errors {
             assert_eq!(map_tool_error("example", error), expected);
         }
+    }
+
+    #[test]
+    fn maps_host_panics_to_tool_failures_with_the_import_name() {
+        assert_eq!(
+            tool_call_error(
+                "example",
+                CallError::HostPanic {
+                    import: "chap:exec/exec.run".to_owned(),
+                    message: "host invariant failed".to_owned(),
+                },
+            ),
+            ToolError::Failed(
+                "tool plugin `example` failed: host import `chap:exec/exec.run` panicked: host invariant failed"
+                    .to_owned(),
+            )
+        );
     }
 
     #[test]
