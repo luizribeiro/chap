@@ -325,13 +325,14 @@ fn decrement_vm_count(counts: &Mutex<HashMap<String, u32>>, principal: &str) {
 }
 
 impl CapabilityHost {
-    fn authorize_manage(
-        &self,
-        cx: &HostCtx<'_, ()>,
-        owned_by_caller: bool,
-    ) -> Result<(), vm::VmError> {
-        cx.require_scoped(chap_vm::vm::MANAGE, &ManagedVm { owned_by_caller })
-            .map_err(Into::into)
+    fn authorize_manage(&self, cx: &HostCtx<'_, ()>) -> Result<(), vm::VmError> {
+        cx.require_scoped(
+            chap_vm::vm::MANAGE,
+            &ManagedVm {
+                owned_by_caller: true,
+            },
+        )
+        .map_err(Into::into)
     }
 
     async fn authorize_owned(
@@ -340,18 +341,29 @@ impl CapabilityHost {
         name: &str,
     ) -> Result<VmRef, vm::VmError> {
         let id = self.vm.identity(&cx.subject(), name);
-        let Some(vm) = self.vm.backend.get(&id).await? else {
-            // Physical identity includes the caller principal, so absence reveals no other VM.
-            return Err(vm::VmError::NoSuchVm);
-        };
         let subject = Subject(cx.subject().plugin_id().to_owned());
-        if self.vm.backend.owner_of(&vm).await? != Some(subject) {
-            self.authorize_manage(cx, false)?;
-            return Err(vm::VmError::NoSuchVm);
-        }
-        self.authorize_manage(cx, true)?;
-        Ok(vm)
+        authorize_backend_vm(self.vm.backend.as_ref(), &id, &subject, || {
+            self.authorize_manage(cx)
+        })
+        .await
     }
+}
+
+async fn authorize_backend_vm<B: VmBackend>(
+    backend: &B,
+    id: &VmIdentity,
+    subject: &Subject,
+    authorize: impl FnOnce() -> Result<(), vm::VmError>,
+) -> Result<VmRef, vm::VmError> {
+    let Some(vm) = backend.get(id).await? else {
+        // Physical identity includes the caller principal, so absence reveals no other VM.
+        return Err(vm::VmError::NoSuchVm);
+    };
+    if backend.owner_of(&vm).await?.as_ref() != Some(subject) {
+        return Err(vm::VmError::NoSuchVm);
+    }
+    authorize()?;
+    Ok(vm)
 }
 
 // Creation combines three guards, while management needs an async identity lookup first.
@@ -387,7 +399,7 @@ impl vm::Host for CapabilityHost {
         match self.vm.backend.get(&id).await? {
             None => Ok(None),
             Some(_) => {
-                self.authorize_manage(&cx, true)?;
+                self.authorize_manage(&cx)?;
                 Ok(Some(name))
             }
         }
@@ -485,7 +497,10 @@ impl From<VmExecOutcome> for vm::ExecResult {
 mod tests {
     use super::*;
     use chap_vm::host::{EnvVar, MountSpec, OciReference, ResolvedImage};
-    use std::collections::HashSet;
+    use std::{
+        collections::HashSet,
+        sync::atomic::{AtomicBool, Ordering},
+    };
     use tokio::sync::Notify;
 
     struct ControlledBackend {
@@ -494,6 +509,7 @@ mod tests {
         failed_identities: HashSet<(String, String)>,
         create_started: Notify,
         release_create: Notify,
+        vanish_on_owner: AtomicBool,
     }
 
     impl ControlledBackend {
@@ -510,7 +526,12 @@ mod tests {
                     .collect(),
                 create_started: Notify::new(),
                 release_create: Notify::new(),
+                vanish_on_owner: AtomicBool::new(false),
             }
+        }
+
+        fn vanish_on_next_owner_lookup(&self) {
+            self.vanish_on_owner.store(true, Ordering::SeqCst);
         }
     }
 
@@ -578,6 +599,9 @@ mod tests {
         }
 
         async fn owner_of(&self, vm: &VmRef) -> Result<Option<Subject>, chap_vm::host::VmError> {
+            if self.vanish_on_owner.swap(false, Ordering::SeqCst) {
+                self.inner.destroy(vm).await?;
+            }
             self.inner.owner_of(vm).await
         }
 
@@ -766,5 +790,18 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+    }
+
+    #[tokio::test]
+    async fn a_vm_that_vanishes_during_ownership_lookup_is_not_found() {
+        let backend = ControlledBackend::new(&[], &[]);
+        let id = identity("principal", "vanishing");
+        backend.create(&id, &resolved_config()).await.unwrap();
+        backend.vanish_on_next_owner_lookup();
+
+        let result =
+            authorize_backend_vm(&backend, &id, &Subject("principal".into()), || Ok(())).await;
+
+        assert!(matches!(result, Err(vm::VmError::NoSuchVm)));
     }
 }
