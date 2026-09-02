@@ -6,7 +6,8 @@ use std::{
     vec::Vec,
 };
 
-use super::{ExecOutcome, Subject, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmRef};
+use super::{ExecOutcome, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmRef};
+use lockgate_policy::PluginId;
 
 #[derive(Default)]
 pub struct MockVmBackend {
@@ -14,7 +15,7 @@ pub struct MockVmBackend {
 }
 
 struct MockVm {
-    owner: Subject,
+    owner: PluginId,
     config_hash: String,
     installation_id: String,
     session_epoch: u64,
@@ -34,7 +35,7 @@ impl MockVmBackend {
 impl MockVm {
     fn new(id: &VmIdentity, cfg: &VmConfig) -> Self {
         Self {
-            owner: Subject(id.principal.clone()),
+            owner: id.plugin_id.clone(),
             config_hash: cfg.config_hash.clone(),
             installation_id: id.installation_id.clone(),
             session_epoch: id.session_epoch,
@@ -120,7 +121,7 @@ impl VmBackend for MockVmBackend {
         }
     }
 
-    async fn owner_of(&self, vm: &VmRef) -> Result<Option<Subject>, VmError> {
+    async fn owner_of(&self, vm: &VmRef) -> Result<Option<PluginId>, VmError> {
         Ok(self
             .lock()
             .get(vm.physical_label())
@@ -144,6 +145,7 @@ impl VmBackend for MockVmBackend {
 
 #[cfg(test)]
 mod tests {
+    use lockgate_policy::PluginId;
     use std::{
         boxed::Box,
         future::Future,
@@ -154,7 +156,7 @@ mod tests {
 
     use super::MockVmBackend;
     use crate::host::{
-        ResolvedImage, Subject, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmSettings,
+        ResolvedImage, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmSettings,
     };
 
     fn block_on<F: Future>(future: F) -> F::Output {
@@ -168,11 +170,11 @@ mod tests {
         }
     }
 
-    fn identity(installation_id: &str, epoch: u64, principal: &str, name: &str) -> VmIdentity {
+    fn identity(installation_id: &str, epoch: u64, plugin_id: &str, name: &str) -> VmIdentity {
         VmIdentity {
             installation_id: installation_id.into(),
             session_epoch: epoch,
-            principal: principal.into(),
+            plugin_id: plugin_id.into(),
             logical_name: name.into(),
         }
     }
@@ -343,7 +345,7 @@ mod tests {
 
             assert_eq!(
                 backend.owner_of(&vm).await.unwrap(),
-                Some(Subject(String::from("builder@grant-a")))
+                Some(PluginId::from("builder@grant-a"))
             );
         });
     }

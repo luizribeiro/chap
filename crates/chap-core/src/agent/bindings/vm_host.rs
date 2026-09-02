@@ -5,10 +5,10 @@ use crate::{
     consent::ConsentError,
 };
 use chap_vm::host::{
-    Backend, ExecOutcome as VmExecOutcome, RequestedVmConfig, Subject, VmBackend, VmCommand,
-    VmConfig, VmIdentity, VmRef, VmSettings,
+    Backend, ExecOutcome as VmExecOutcome, RequestedVmConfig, VmBackend, VmCommand, VmConfig,
+    VmIdentity, VmRef, VmSettings,
 };
-use lockgate::{HostCtx, PermissionDenied, PluginSubject};
+use lockgate::{HostCtx, PermissionDenied, PluginId, PluginSubject};
 use std::{
     collections::HashMap,
     fmt,
@@ -29,7 +29,7 @@ pub(crate) struct VmHost<B: VmBackend = Backend> {
     pub(crate) settings: VmSettings,
     pub(crate) installation_id: String,
     pub(crate) session_epoch: u64,
-    pub(crate) vm_counts: Arc<Mutex<HashMap<String, u32>>>,
+    pub(crate) vm_counts: Arc<Mutex<HashMap<PluginId, u32>>>,
     cleanup: Arc<VmCleanup<B>>,
 }
 
@@ -139,7 +139,7 @@ impl<B: VmBackend> VmHost<B> {
         VmIdentity {
             installation_id: self.installation_id.clone(),
             session_epoch: self.session_epoch,
-            principal: subject.plugin_id().as_str().to_owned(),
+            plugin_id: subject.plugin_id().clone(),
             logical_name: logical_name.to_owned(),
         }
     }
@@ -174,21 +174,21 @@ impl<B: VmBackend> VmHost<B> {
         }
     }
 
-    fn counts(&self) -> MutexGuard<'_, HashMap<String, u32>> {
+    fn counts(&self) -> MutexGuard<'_, HashMap<PluginId, u32>> {
         self.vm_counts
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn reserve_vm(&self, principal: &str) -> Result<VmReservation, vm::VmError> {
+    fn reserve_vm(&self, plugin_id: &PluginId) -> Result<VmReservation, vm::VmError> {
         let mut counts = self.counts();
-        let count = counts.get(principal).copied().unwrap_or_default();
+        let count = counts.get(plugin_id).copied().unwrap_or_default();
         self.enforce_vm_limit(count)?;
-        counts.insert(principal.to_owned(), count + 1);
+        counts.insert(plugin_id.clone(), count + 1);
         drop(counts);
         Ok(VmReservation {
             counts: Arc::clone(&self.vm_counts),
-            principal: principal.to_owned(),
+            plugin_id: plugin_id.clone(),
             active: true,
         })
     }
@@ -212,7 +212,7 @@ impl<B: VmBackend> VmHost<B> {
         if self.backend_call(self.backend.get(id)).await?.is_some() {
             return Err(vm::VmError::AlreadyExists);
         }
-        let reservation = self.reserve_vm(&id.principal)?;
+        let reservation = self.reserve_vm(&id.plugin_id)?;
         let vm = self.backend_call(self.backend.create(id, &config)).await?;
         reservation.commit();
         Ok(vm)
@@ -228,7 +228,7 @@ impl<B: VmBackend> VmHost<B> {
         let reservation = if exists {
             None
         } else {
-            Some(self.reserve_vm(&id.principal)?)
+            Some(self.reserve_vm(&id.plugin_id)?)
         };
         let vm = self
             .backend_call(self.backend.get_or_create(id, &config))
@@ -280,9 +280,9 @@ impl<B: VmBackend> VmHost<B> {
             .map_err(Into::into)
     }
 
-    async fn destroy(&self, principal: &str, vm: &VmRef) -> Result<(), vm::VmError> {
+    async fn destroy(&self, plugin_id: &PluginId, vm: &VmRef) -> Result<(), vm::VmError> {
         self.backend_call(self.backend.destroy(vm)).await?;
-        decrement_vm_count(&self.vm_counts, principal);
+        decrement_vm_count(&self.vm_counts, plugin_id);
         Ok(())
     }
 }
@@ -343,8 +343,8 @@ fn session_epoch() -> u64 {
 }
 
 struct VmReservation {
-    counts: Arc<Mutex<HashMap<String, u32>>>,
-    principal: String,
+    counts: Arc<Mutex<HashMap<PluginId, u32>>>,
+    plugin_id: PluginId,
     active: bool,
 }
 
@@ -357,21 +357,21 @@ impl VmReservation {
 impl Drop for VmReservation {
     fn drop(&mut self) {
         if self.active {
-            decrement_vm_count(&self.counts, &self.principal);
+            decrement_vm_count(&self.counts, &self.plugin_id);
         }
     }
 }
 
-fn decrement_vm_count(counts: &Mutex<HashMap<String, u32>>, principal: &str) {
+fn decrement_vm_count(counts: &Mutex<HashMap<PluginId, u32>>, plugin_id: &PluginId) {
     let mut counts = counts.lock().unwrap_or_else(PoisonError::into_inner);
-    let remove = if let Some(count) = counts.get_mut(principal) {
+    let remove = if let Some(count) = counts.get_mut(plugin_id) {
         *count = count.saturating_sub(1);
         *count == 0
     } else {
         false
     };
     if remove {
-        counts.remove(principal);
+        counts.remove(plugin_id);
     }
 }
 
@@ -392,10 +392,12 @@ impl CapabilityHost {
         name: &str,
     ) -> Result<VmRef, vm::VmError> {
         let id = self.vm.identity(&cx.subject(), name);
-        let subject = Subject(cx.subject().plugin_id().as_str().to_owned());
-        authorize_backend_vm(self.vm.backend.as_ref(), &id, &subject, || {
-            self.authorize_manage(cx)
-        })
+        authorize_backend_vm(
+            self.vm.backend.as_ref(),
+            &id,
+            cx.subject().plugin_id(),
+            || self.authorize_manage(cx),
+        )
         .await
     }
 }
@@ -403,14 +405,14 @@ impl CapabilityHost {
 async fn authorize_backend_vm<B: VmBackend>(
     backend: &B,
     id: &VmIdentity,
-    subject: &Subject,
+    plugin_id: &PluginId,
     authorize: impl FnOnce() -> Result<(), vm::VmError>,
 ) -> Result<VmRef, vm::VmError> {
     let Some(vm) = backend.get(id).await? else {
-        // Physical identity includes the caller principal, so absence reveals no other VM.
+        // Physical identity includes the caller plugin id, so absence reveals no other VM.
         return Err(vm::VmError::NoSuchVm);
     };
-    if backend.owner_of(&vm).await?.as_ref() != Some(subject) {
+    if backend.owner_of(&vm).await?.as_ref() != Some(plugin_id) {
         return Err(vm::VmError::NoSuchVm);
     }
     authorize()?;
@@ -517,9 +519,7 @@ impl vm::Host for CapabilityHost {
     #[lockgate::no_capability_required(reason = "enforces vm::manage on the caller's own vm")]
     async fn destroy(&mut self, cx: HostCtx<'_, ()>, name: String) -> Result<(), vm::VmError> {
         let vm = self.authorize_owned(&cx, &name).await?;
-        self.vm
-            .destroy(cx.subject().plugin_id().as_str(), &vm)
-            .await
+        self.vm.destroy(cx.subject().plugin_id(), &vm).await
     }
 }
 
@@ -573,8 +573,8 @@ mod tests {
 
     struct ControlledBackend {
         inner: Backend,
-        blocked_principals: HashSet<String>,
-        failed_identities: HashSet<(String, String)>,
+        blocked_plugin_ids: HashSet<PluginId>,
+        failed_identities: HashSet<(PluginId, String)>,
         create_started: Notify,
         release_create: Notify,
         vanish_on_owner: AtomicBool,
@@ -582,16 +582,16 @@ mod tests {
     }
 
     impl ControlledBackend {
-        fn new(blocked_principals: &[&str], failed_identities: &[(&str, &str)]) -> Self {
+        fn new(blocked_plugin_ids: &[&str], failed_identities: &[(&str, &str)]) -> Self {
             Self {
                 inner: Backend::new(&VmSettings::default()),
-                blocked_principals: blocked_principals
+                blocked_plugin_ids: blocked_plugin_ids
                     .iter()
-                    .map(|principal| (*principal).to_owned())
+                    .map(|plugin_id| PluginId::from(*plugin_id))
                     .collect(),
                 failed_identities: failed_identities
                     .iter()
-                    .map(|(principal, name)| ((*principal).to_owned(), (*name).to_owned()))
+                    .map(|(plugin_id, name)| (PluginId::from(*plugin_id), (*name).to_owned()))
                     .collect(),
                 create_started: Notify::new(),
                 release_create: Notify::new(),
@@ -615,13 +615,13 @@ mod tests {
             id: &VmIdentity,
             cfg: &VmConfig,
         ) -> Result<VmRef, chap_vm::host::VmError> {
-            if self.blocked_principals.contains(&id.principal) {
+            if self.blocked_plugin_ids.contains(&id.plugin_id) {
                 self.create_started.notify_one();
                 self.release_create.notified().await;
             }
             if self
                 .failed_identities
-                .contains(&(id.principal.clone(), id.logical_name.clone()))
+                .contains(&(id.plugin_id.clone(), id.logical_name.clone()))
             {
                 return Err(chap_vm::host::VmError::Failed(
                     "injected create failure".into(),
@@ -672,7 +672,7 @@ mod tests {
             self.inner.destroy(vm).await
         }
 
-        async fn owner_of(&self, vm: &VmRef) -> Result<Option<Subject>, chap_vm::host::VmError> {
+        async fn owner_of(&self, vm: &VmRef) -> Result<Option<PluginId>, chap_vm::host::VmError> {
             if self.vanish_on_owner.swap(false, Ordering::SeqCst) {
                 self.inner.destroy(vm).await?;
             }
@@ -720,11 +720,11 @@ mod tests {
         .unwrap()
     }
 
-    fn identity(principal: &str, logical_name: &str) -> VmIdentity {
+    fn identity(plugin_id: &str, logical_name: &str) -> VmIdentity {
         VmIdentity {
             installation_id: "test-installation".into(),
             session_epoch: 1,
-            principal: principal.into(),
+            plugin_id: plugin_id.into(),
             logical_name: logical_name.into(),
         }
     }
@@ -759,7 +759,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slow_creates_do_not_block_other_principals_and_failures_release_the_count() {
+    async fn slow_creates_do_not_block_other_plugins_and_failures_release_the_count() {
         let backend = Arc::new(ControlledBackend::new(&["slow"], &[("failing", "first")]));
         let host = test_host(Arc::clone(&backend), 1).await;
         let slow_host = host.clone();
@@ -775,7 +775,7 @@ mod tests {
             host.create(&identity("fast", "first"), requested_config()),
         )
         .await
-        .expect("another principal must not wait for the slow backend call");
+        .expect("another plugin must not wait for the slow backend call");
         assert!(fast.is_ok());
 
         backend.release_create.notify_one();
@@ -792,7 +792,11 @@ mod tests {
                 .is_ok()
         );
         assert_eq!(
-            host.vm_counts.lock().unwrap().get("failing").copied(),
+            host.vm_counts
+                .lock()
+                .unwrap()
+                .get(&PluginId::from("failing"))
+                .copied(),
             Some(1)
         );
 
@@ -917,8 +921,8 @@ mod tests {
         backend.create(&id, &resolved_config()).await.unwrap();
         backend.vanish_on_next_owner_lookup();
 
-        let result =
-            authorize_backend_vm(&backend, &id, &Subject("principal".into()), || Ok(())).await;
+        let plugin_id = PluginId::from("principal");
+        let result = authorize_backend_vm(&backend, &id, &plugin_id, || Ok(())).await;
 
         assert!(matches!(result, Err(vm::VmError::NoSuchVm)));
     }

@@ -7,7 +7,7 @@ use std::{
     vec::Vec,
 };
 
-use lockgate_policy::ScopeRepr;
+use lockgate_policy::{PluginId, ScopeRepr};
 
 use crate::vm::{Egress, normalize_absolute_path};
 
@@ -24,7 +24,7 @@ pub use microsandbox::MicrosandboxBackend as Backend;
 pub struct VmIdentity {
     pub installation_id: String,
     pub session_epoch: u64,
-    pub principal: String,
+    pub plugin_id: PluginId,
     pub logical_name: String,
 }
 
@@ -35,14 +35,11 @@ impl VmIdentity {
         hash.update(b"chap-vm-identity-v0");
         hash_component(&mut hash, self.installation_id.as_bytes());
         hash_component(&mut hash, &self.session_epoch.to_be_bytes());
-        hash_component(&mut hash, self.principal.as_bytes());
+        hash_component(&mut hash, self.plugin_id.as_str().as_bytes());
         hash_component(&mut hash, self.logical_name.as_bytes());
         hex_digest(hash.finalize())
     }
 }
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Subject(pub String);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MountSpec {
@@ -232,7 +229,7 @@ pub trait VmBackend: Send + Sync + 'static {
     async fn read_file(&self, vm: &VmRef, path: &str, max_bytes: u64) -> Result<Vec<u8>, VmError>;
     async fn write_file(&self, vm: &VmRef, path: &str, bytes: &[u8]) -> Result<(), VmError>;
     async fn destroy(&self, vm: &VmRef) -> Result<(), VmError>;
-    async fn owner_of(&self, vm: &VmRef) -> Result<Option<Subject>, VmError>;
+    async fn owner_of(&self, vm: &VmRef) -> Result<Option<PluginId>, VmError>;
     async fn reap(&self, installation_id: &str, current_epoch: u64) -> Result<(), VmError>;
     async fn shutdown(&self, installation_id: &str, session_epoch: u64) -> Result<(), VmError>;
 }
@@ -516,7 +513,7 @@ mod tests {
         VmIdentity {
             installation_id: "installation-a".into(),
             session_epoch: 7,
-            principal: "build-plugin@grant-a".into(),
+            plugin_id: "build-plugin@grant-a".into(),
             logical_name: "build-env".into(),
         }
     }
@@ -560,7 +557,7 @@ mod tests {
                 ..original.clone()
             },
             VmIdentity {
-                principal: "build-plugin@grant-b".into(),
+                plugin_id: "build-plugin@grant-b".into(),
                 ..original.clone()
             },
             VmIdentity {
