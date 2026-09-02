@@ -11,17 +11,29 @@ use chap_vm::host::{
 use lockgate::{HostCtx, PermissionDenied, PluginSubject};
 use std::{
     collections::HashMap,
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    future::Future,
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-#[derive(Clone)]
-pub(crate) struct VmHost {
-    pub(crate) backend: Arc<Backend>,
+pub(crate) struct VmHost<B = Backend> {
+    pub(crate) backend: Arc<B>,
     pub(crate) settings: VmSettings,
     pub(crate) installation_id: String,
     pub(crate) session_epoch: u64,
-    pub(crate) vm_counts: Arc<tokio::sync::Mutex<HashMap<String, u32>>>,
+    pub(crate) vm_counts: Arc<Mutex<HashMap<String, u32>>>,
+}
+
+impl<B> Clone for VmHost<B> {
+    fn clone(&self) -> Self {
+        Self {
+            backend: Arc::clone(&self.backend),
+            settings: self.settings.clone(),
+            installation_id: self.installation_id.clone(),
+            session_epoch: self.session_epoch,
+            vm_counts: Arc::clone(&self.vm_counts),
+        }
+    }
 }
 
 pub(in crate::agent) fn new(config: &Config) -> Result<VmHost, ConsentError> {
@@ -44,7 +56,7 @@ pub(in crate::agent) fn new(config: &Config) -> Result<VmHost, ConsentError> {
     })
 }
 
-impl VmHost {
+impl<B: VmBackend> VmHost<B> {
     pub(crate) fn identity(&self, subject: &PluginSubject<'_>, logical_name: &str) -> VmIdentity {
         VmIdentity {
             installation_id: self.installation_id.clone(),
@@ -84,20 +96,47 @@ impl VmHost {
         }
     }
 
+    fn counts(&self) -> MutexGuard<'_, HashMap<String, u32>> {
+        self.vm_counts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn reserve_vm(&self, principal: &str) -> Result<VmReservation, vm::VmError> {
+        let mut counts = self.counts();
+        let count = counts.get(principal).copied().unwrap_or_default();
+        self.enforce_vm_limit(count)?;
+        counts.insert(principal.to_owned(), count + 1);
+        drop(counts);
+        Ok(VmReservation {
+            counts: Arc::clone(&self.vm_counts),
+            principal: principal.to_owned(),
+            active: true,
+        })
+    }
+
+    async fn backend_call<T, F>(&self, call: F) -> Result<T, vm::VmError>
+    where
+        F: Future<Output = Result<T, chap_vm::host::VmError>>,
+    {
+        match tokio::time::timeout(Duration::from_millis(self.settings.max_exec_ms), call).await {
+            Ok(result) => result.map_err(Into::into),
+            Err(_) => Err(vm::VmError::TimedOut),
+        }
+    }
+
     async fn create(
         &self,
         id: &VmIdentity,
         requested: RequestedVmConfig,
     ) -> Result<VmRef, vm::VmError> {
         let config = self.backend_config(requested)?;
-        let mut counts = self.vm_counts.lock().await;
-        if self.backend.get(id).await?.is_some() {
+        if self.backend_call(self.backend.get(id)).await?.is_some() {
             return Err(vm::VmError::AlreadyExists);
         }
-        let count = counts.get(&id.principal).copied().unwrap_or_default();
-        self.enforce_vm_limit(count)?;
-        let vm = self.backend.create(id, &config).await?;
-        counts.insert(id.principal.clone(), count + 1);
+        let reservation = self.reserve_vm(&id.principal)?;
+        let vm = self.backend_call(self.backend.create(id, &config)).await?;
+        reservation.commit();
         Ok(vm)
     }
 
@@ -107,15 +146,17 @@ impl VmHost {
         requested: RequestedVmConfig,
     ) -> Result<VmRef, vm::VmError> {
         let config = self.backend_config(requested)?;
-        let mut counts = self.vm_counts.lock().await;
-        let exists = self.backend.get(id).await?.is_some();
-        let count = counts.get(&id.principal).copied().unwrap_or_default();
-        if !exists {
-            self.enforce_vm_limit(count)?;
-        }
-        let vm = self.backend.get_or_create(id, &config).await?;
-        if !exists {
-            counts.insert(id.principal.clone(), count + 1);
+        let exists = self.backend_call(self.backend.get(id)).await?.is_some();
+        let reservation = if exists {
+            None
+        } else {
+            Some(self.reserve_vm(&id.principal)?)
+        };
+        let vm = self
+            .backend_call(self.backend.get_or_create(id, &config))
+            .await?;
+        if let Some(reservation) = reservation {
+            reservation.commit();
         }
         Ok(vm)
     }
@@ -162,18 +203,42 @@ impl VmHost {
     }
 
     async fn destroy(&self, principal: &str, vm: &VmRef) -> Result<(), vm::VmError> {
-        let mut counts = self.vm_counts.lock().await;
-        self.backend.destroy(vm).await?;
-        let remove = if let Some(count) = counts.get_mut(principal) {
-            *count = count.saturating_sub(1);
-            *count == 0
-        } else {
-            false
-        };
-        if remove {
-            counts.remove(principal);
-        }
+        self.backend_call(self.backend.destroy(vm)).await?;
+        decrement_vm_count(&self.vm_counts, principal);
         Ok(())
+    }
+}
+
+struct VmReservation {
+    counts: Arc<Mutex<HashMap<String, u32>>>,
+    principal: String,
+    active: bool,
+}
+
+impl VmReservation {
+    fn commit(mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for VmReservation {
+    fn drop(&mut self) {
+        if self.active {
+            decrement_vm_count(&self.counts, &self.principal);
+        }
+    }
+}
+
+fn decrement_vm_count(counts: &Mutex<HashMap<String, u32>>, principal: &str) {
+    let mut counts = counts.lock().unwrap_or_else(PoisonError::into_inner);
+    let remove = if let Some(count) = counts.get_mut(principal) {
+        *count = count.saturating_sub(1);
+        *count == 0
+    } else {
+        false
+    };
+    if remove {
+        counts.remove(principal);
     }
 }
 
@@ -331,5 +396,208 @@ impl From<VmExecOutcome> for vm::ExecResult {
             stderr: outcome.stderr,
             truncated: outcome.truncated,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chap_vm::host::{EnvVar, MountSpec, OciReference};
+    use std::collections::HashSet;
+    use tokio::sync::Notify;
+
+    struct ControlledBackend {
+        inner: Backend,
+        blocked_principals: HashSet<String>,
+        failed_identities: HashSet<(String, String)>,
+        create_started: Notify,
+        release_create: Notify,
+    }
+
+    impl ControlledBackend {
+        fn new(blocked_principals: &[&str], failed_identities: &[(&str, &str)]) -> Self {
+            Self {
+                inner: Backend::new(&VmSettings::default()),
+                blocked_principals: blocked_principals
+                    .iter()
+                    .map(|principal| (*principal).to_owned())
+                    .collect(),
+                failed_identities: failed_identities
+                    .iter()
+                    .map(|(principal, name)| ((*principal).to_owned(), (*name).to_owned()))
+                    .collect(),
+                create_started: Notify::new(),
+                release_create: Notify::new(),
+            }
+        }
+    }
+
+    impl VmBackend for ControlledBackend {
+        async fn create(
+            &self,
+            id: &VmIdentity,
+            cfg: &VmConfig,
+        ) -> Result<VmRef, chap_vm::host::VmError> {
+            if self.blocked_principals.contains(&id.principal) {
+                self.create_started.notify_one();
+                self.release_create.notified().await;
+            }
+            if self
+                .failed_identities
+                .contains(&(id.principal.clone(), id.logical_name.clone()))
+            {
+                return Err(chap_vm::host::VmError::Failed(
+                    "injected create failure".into(),
+                ));
+            }
+            self.inner.create(id, cfg).await
+        }
+
+        async fn get(&self, id: &VmIdentity) -> Result<Option<VmRef>, chap_vm::host::VmError> {
+            self.inner.get(id).await
+        }
+
+        async fn get_or_create(
+            &self,
+            id: &VmIdentity,
+            cfg: &VmConfig,
+        ) -> Result<VmRef, chap_vm::host::VmError> {
+            self.inner.get_or_create(id, cfg).await
+        }
+
+        async fn exec(
+            &self,
+            vm: &VmRef,
+            command: VmCommand,
+        ) -> Result<VmExecOutcome, chap_vm::host::VmError> {
+            self.inner.exec(vm, command).await
+        }
+
+        async fn read_file(
+            &self,
+            vm: &VmRef,
+            path: &str,
+            max_bytes: u64,
+        ) -> Result<Vec<u8>, chap_vm::host::VmError> {
+            self.inner.read_file(vm, path, max_bytes).await
+        }
+
+        async fn write_file(
+            &self,
+            vm: &VmRef,
+            path: &str,
+            bytes: &[u8],
+        ) -> Result<(), chap_vm::host::VmError> {
+            self.inner.write_file(vm, path, bytes).await
+        }
+
+        async fn destroy(&self, vm: &VmRef) -> Result<(), chap_vm::host::VmError> {
+            self.inner.destroy(vm).await
+        }
+
+        async fn owner_of(&self, vm: &VmRef) -> Result<Option<Subject>, chap_vm::host::VmError> {
+            self.inner.owner_of(vm).await
+        }
+
+        async fn reap(
+            &self,
+            installation_id: &str,
+            keep: &[&VmIdentity],
+        ) -> Result<(), chap_vm::host::VmError> {
+            self.inner.reap(installation_id, keep).await
+        }
+    }
+
+    fn test_host(
+        backend: Arc<ControlledBackend>,
+        max_vms_per_plugin: u32,
+    ) -> VmHost<ControlledBackend> {
+        VmHost {
+            backend,
+            settings: VmSettings {
+                max_vms_per_plugin,
+                max_exec_ms: 1_000,
+                registries: vec!["ghcr.io".into()],
+                ..VmSettings::default()
+            },
+            installation_id: "test-installation".into(),
+            session_epoch: 1,
+            vm_counts: Arc::default(),
+        }
+    }
+
+    fn identity(principal: &str, logical_name: &str) -> VmIdentity {
+        VmIdentity {
+            installation_id: "test-installation".into(),
+            session_epoch: 1,
+            principal: principal.into(),
+            logical_name: logical_name.into(),
+        }
+    }
+
+    fn requested_config() -> RequestedVmConfig {
+        RequestedVmConfig::normalized(
+            OciReference::parse("ghcr.io/acme/build:1.2").unwrap(),
+            Vec::<MountSpec>::new(),
+            Vec::new(),
+            Vec::<EnvVar>::new(),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn slow_creates_do_not_block_other_principals_and_failures_release_the_count() {
+        let backend = Arc::new(ControlledBackend::new(&["slow"], &[("failing", "first")]));
+        let host = test_host(Arc::clone(&backend), 1);
+        let slow_host = host.clone();
+        let slow = tokio::spawn(async move {
+            slow_host
+                .create(&identity("slow", "first"), requested_config())
+                .await
+        });
+        backend.create_started.notified().await;
+
+        let fast = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            host.create(&identity("fast", "first"), requested_config()),
+        )
+        .await
+        .expect("another principal must not wait for the slow backend call");
+        assert!(fast.is_ok());
+
+        backend.release_create.notify_one();
+        slow.await.unwrap().unwrap();
+
+        assert!(
+            host.create(&identity("failing", "first"), requested_config())
+                .await
+                .is_err()
+        );
+        assert!(
+            host.create(&identity("failing", "second"), requested_config())
+                .await
+                .is_ok()
+        );
+        assert_eq!(
+            host.vm_counts.lock().unwrap().get("failing").copied(),
+            Some(1)
+        );
+
+        let timeout_backend = Arc::new(ControlledBackend::new(&["timeout"], &[]));
+        let mut timeout_host = test_host(Arc::clone(&timeout_backend), 1);
+        timeout_host.settings.max_exec_ms = 10;
+        assert!(matches!(
+            timeout_host
+                .create(&identity("timeout", "first"), requested_config())
+                .await,
+            Err(vm::VmError::TimedOut)
+        ));
+        timeout_backend.release_create.notify_one();
+        assert!(
+            timeout_host
+                .create(&identity("timeout", "second"), requested_config())
+                .await
+                .is_ok()
+        );
     }
 }
