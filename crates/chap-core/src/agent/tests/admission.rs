@@ -354,7 +354,7 @@ async fn reviews_multiple_plugins_with_one_caller_owned_host() {
     .unwrap();
     let builder = load_test_builder(&config_path);
     let consent = builder.consent_store().unwrap();
-    let mut host = host_builder(&builder.config).unwrap();
+    let mut host = host_builder(&builder.config).await.unwrap();
 
     let reviews = builder
         .review_configured_plugins(&mut host, &consent, &["alpha", "bravo"])

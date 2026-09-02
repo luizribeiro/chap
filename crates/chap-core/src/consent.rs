@@ -55,6 +55,13 @@ pub enum ConsentError {
     },
     #[error("{0}")]
     HostConfiguration(#[source] LoadError),
+    #[cfg(feature = "vm")]
+    #[error("failed to {operation}: {source}")]
+    VmLifecycle {
+        operation: &'static str,
+        #[source]
+        source: chap_vm::host::VmError,
+    },
     #[error("failed to create Lockgate host: {source}")]
     HostConstruction {
         #[source]

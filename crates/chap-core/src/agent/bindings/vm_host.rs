@@ -12,19 +12,20 @@ use lockgate::{HostCtx, PermissionDenied, PluginSubject};
 use std::{
     collections::HashMap,
     future::Future,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-pub(crate) struct VmHost<B = Backend> {
+pub(crate) struct VmHost<B: VmBackend = Backend> {
     pub(crate) backend: Arc<B>,
     pub(crate) settings: VmSettings,
     pub(crate) installation_id: String,
     pub(crate) session_epoch: u64,
     pub(crate) vm_counts: Arc<Mutex<HashMap<String, u32>>>,
+    cleanup: Arc<VmCleanup<B>>,
 }
 
-impl<B> Clone for VmHost<B> {
+impl<B: VmBackend> Clone for VmHost<B> {
     fn clone(&self) -> Self {
         Self {
             backend: Arc::clone(&self.backend),
@@ -32,31 +33,61 @@ impl<B> Clone for VmHost<B> {
             installation_id: self.installation_id.clone(),
             session_epoch: self.session_epoch,
             vm_counts: Arc::clone(&self.vm_counts),
+            cleanup: Arc::clone(&self.cleanup),
         }
     }
 }
 
-pub(in crate::agent) fn new(config: &Config) -> Result<VmHost, ConsentError> {
+pub(in crate::agent) async fn new(config: &Config) -> Result<VmHost, ConsentError> {
     let project_root = std::env::current_dir()
         .map_err(|source| ConsentError::CurrentDirectoryUnavailable { source })?;
     let settings = config
         .vm_settings()
         .map_err(ConsentError::HostConfiguration)?;
-    Ok(VmHost {
-        backend: Arc::new(Backend::new(&settings)),
+    VmHost::with_backend(
+        Arc::new(Backend::new(&settings)),
         settings,
-        installation_id: project_root.to_string_lossy().into_owned(),
-        session_epoch: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            .try_into()
-            .unwrap_or(u64::MAX),
-        vm_counts: Arc::default(),
+        project_root.to_string_lossy().into_owned(),
+        session_epoch(),
+    )
+    .await
+    .map_err(|source| ConsentError::VmLifecycle {
+        operation: "reap stale VMs",
+        source,
     })
 }
 
 impl<B: VmBackend> VmHost<B> {
+    async fn with_backend(
+        backend: Arc<B>,
+        settings: VmSettings,
+        installation_id: String,
+        session_epoch: u64,
+    ) -> Result<Self, chap_vm::host::VmError> {
+        match tokio::time::timeout(
+            Duration::from_millis(settings.max_exec_ms),
+            backend.reap(&installation_id, session_epoch),
+        )
+        .await
+        {
+            Ok(result) => result?,
+            Err(_) => return Err(chap_vm::host::VmError::TimedOut),
+        }
+        Ok(Self {
+            cleanup: Arc::new(VmCleanup {
+                backend: Arc::clone(&backend),
+                installation_id: installation_id.clone(),
+                session_epoch,
+                timeout: Duration::from_millis(settings.max_exec_ms),
+            }),
+            backend,
+            settings,
+            installation_id,
+            session_epoch,
+            vm_counts: Arc::default(),
+        })
+    }
+
     pub(crate) fn identity(&self, subject: &PluginSubject<'_>, logical_name: &str) -> VmIdentity {
         VmIdentity {
             installation_id: self.installation_id.clone(),
@@ -207,6 +238,57 @@ impl<B: VmBackend> VmHost<B> {
         decrement_vm_count(&self.vm_counts, principal);
         Ok(())
     }
+}
+
+struct VmCleanup<B: VmBackend> {
+    backend: Arc<B>,
+    installation_id: String,
+    session_epoch: u64,
+    timeout: Duration,
+}
+
+impl<B: VmBackend> Drop for VmCleanup<B> {
+    fn drop(&mut self) {
+        let backend = Arc::clone(&self.backend);
+        let installation_id = self.installation_id.clone();
+        let session_epoch = self.session_epoch;
+        let timeout = self.timeout;
+        let cleanup = std::thread::Builder::new()
+            .name("chap-vm-cleanup".into())
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| error.to_string())?;
+                match runtime.block_on(async {
+                    tokio::time::timeout(timeout, backend.shutdown(&installation_id, session_epoch))
+                        .await
+                }) {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(error)) => Err(error.to_string()),
+                    Err(_) => Err("VM shutdown timed out".into()),
+                }
+            });
+        match cleanup {
+            Ok(cleanup) => match cleanup.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => tracing::warn!(%error, "failed to clean up session VMs"),
+                Err(_) => tracing::warn!("VM cleanup thread panicked"),
+            },
+            Err(error) => tracing::warn!(%error, "failed to start VM cleanup thread"),
+        }
+    }
+}
+
+fn session_epoch() -> u64 {
+    static SESSION_EPOCH: OnceLock<u64> = OnceLock::new();
+    *SESSION_EPOCH.get_or_init(|| {
+        let seconds = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        (seconds << 32) | u64::from(std::process::id())
+    })
 }
 
 struct VmReservation {
@@ -402,7 +484,7 @@ impl From<VmExecOutcome> for vm::ExecResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chap_vm::host::{EnvVar, MountSpec, OciReference};
+    use chap_vm::host::{EnvVar, MountSpec, OciReference, ResolvedImage};
     use std::collections::HashSet;
     use tokio::sync::Notify;
 
@@ -502,28 +584,37 @@ mod tests {
         async fn reap(
             &self,
             installation_id: &str,
-            keep: &[&VmIdentity],
+            current_epoch: u64,
         ) -> Result<(), chap_vm::host::VmError> {
-            self.inner.reap(installation_id, keep).await
+            self.inner.reap(installation_id, current_epoch).await
+        }
+
+        async fn shutdown(
+            &self,
+            installation_id: &str,
+            session_epoch: u64,
+        ) -> Result<(), chap_vm::host::VmError> {
+            self.inner.shutdown(installation_id, session_epoch).await
         }
     }
 
-    fn test_host(
+    async fn test_host(
         backend: Arc<ControlledBackend>,
         max_vms_per_plugin: u32,
     ) -> VmHost<ControlledBackend> {
-        VmHost {
+        VmHost::with_backend(
             backend,
-            settings: VmSettings {
+            VmSettings {
                 max_vms_per_plugin,
                 max_exec_ms: 1_000,
                 registries: vec!["ghcr.io".into()],
                 ..VmSettings::default()
             },
-            installation_id: "test-installation".into(),
-            session_epoch: 1,
-            vm_counts: Arc::default(),
-        }
+            "test-installation".into(),
+            1,
+        )
+        .await
+        .unwrap()
     }
 
     fn identity(principal: &str, logical_name: &str) -> VmIdentity {
@@ -545,10 +636,29 @@ mod tests {
         .unwrap()
     }
 
+    fn resolved_config() -> VmConfig {
+        VmConfig {
+            image: ResolvedImage {
+                registry: "ghcr.io".into(),
+                repository: "acme/build".into(),
+                tag: Some("1.2".into()),
+                digest: None,
+            },
+            mounts: Vec::new(),
+            egress: Vec::new(),
+            env: Vec::new(),
+            cpus: 1,
+            memory_mb: 512,
+            max_duration_ms: 3_600_000,
+            idle_timeout_ms: 300_000,
+            config_hash: "test-config".into(),
+        }
+    }
+
     #[tokio::test]
     async fn slow_creates_do_not_block_other_principals_and_failures_release_the_count() {
         let backend = Arc::new(ControlledBackend::new(&["slow"], &[("failing", "first")]));
-        let host = test_host(Arc::clone(&backend), 1);
+        let host = test_host(Arc::clone(&backend), 1).await;
         let slow_host = host.clone();
         let slow = tokio::spawn(async move {
             slow_host
@@ -584,7 +694,7 @@ mod tests {
         );
 
         let timeout_backend = Arc::new(ControlledBackend::new(&["timeout"], &[]));
-        let mut timeout_host = test_host(Arc::clone(&timeout_backend), 1);
+        let mut timeout_host = test_host(Arc::clone(&timeout_backend), 1).await;
         timeout_host.settings.max_exec_ms = 10;
         assert!(matches!(
             timeout_host
@@ -598,6 +708,63 @@ mod tests {
                 .create(&identity("timeout", "second"), requested_config())
                 .await
                 .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn host_lifecycle_reaps_stale_vms_and_destroys_only_its_epoch_on_drop() {
+        let backend = Arc::new(ControlledBackend::new(&[], &[]));
+        let stale = VmIdentity {
+            session_epoch: 1,
+            ..identity("stale", "vm")
+        };
+        let current = VmIdentity {
+            session_epoch: 2,
+            ..identity("current", "vm")
+        };
+        let other_installation = VmIdentity {
+            installation_id: "other-installation".into(),
+            session_epoch: 1,
+            ..identity("other", "vm")
+        };
+        for id in [&stale, &current, &other_installation] {
+            backend.inner.create(id, &resolved_config()).await.unwrap();
+        }
+
+        let host = VmHost::with_backend(
+            Arc::clone(&backend),
+            VmSettings {
+                max_exec_ms: 1_000,
+                registries: vec!["ghcr.io".into()],
+                ..VmSettings::default()
+            },
+            "test-installation".into(),
+            current.session_epoch,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(backend.inner.get(&stale).await.unwrap(), None);
+        assert!(backend.inner.get(&current).await.unwrap().is_some());
+        assert!(
+            backend
+                .inner
+                .get(&other_installation)
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        drop(host);
+
+        assert_eq!(backend.inner.get(&current).await.unwrap(), None);
+        assert!(
+            backend
+                .inner
+                .get(&other_installation)
+                .await
+                .unwrap()
+                .is_some()
         );
     }
 }

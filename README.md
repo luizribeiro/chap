@@ -226,10 +226,16 @@ VM authority is split into four permissions:
 
 VM identities include the plugin instance and session. Each plugin can see and
 manage only its own namespace, even when another plugin uses the same logical VM
-name. Before checking a mount grant or starting a VM, the host resolves every
-bind root to its canonical path and passes that same path to the backend. An
-empty egress list disables the network interface; otherwise the backend
-installs a default-deny policy for the granted destinations. DNS is
+name. The backend labels each sandbox with an installation and process epoch,
+reaps older epochs for that installation at startup, and destroys only its own
+epoch on graceful shutdown. The epoch combines the process start second with
+the process ID, so two processes started in the same directory and second do
+not collide unless the operating system also reuses a PID in that second.
+
+Before checking a mount grant or starting a VM, the host resolves every bind
+root to its canonical path and passes that same path to the backend. An empty
+egress list disables the network interface; otherwise the backend installs a
+default-deny policy for the granted destinations. DNS is
 also explicit: only a whole-family port-53 grant such as `0.0.0.0/0:53` (or
 `[::]/0:53`) enables the gateway resolver. A narrower port-53 grant does not,
 so operations such as Alpine's `apk add` need the whole-family grant as well as

@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     format,
     net::IpAddr,
     string::{String, ToString},
@@ -19,6 +18,7 @@ use super::{
 
 const NAME_PREFIX: &str = "chap-";
 const INSTALLATION_LABEL: &str = "chap.installation";
+const EPOCH_LABEL: &str = "chap.epoch";
 const PRINCIPAL_LABEL: &str = "chap.principal";
 const PHYSICAL_LABEL: &str = "chap.physical";
 const CONFIG_LABEL: &str = "chap.config";
@@ -187,43 +187,54 @@ impl VmBackend for MicrosandboxBackend {
             .map(Subject))
     }
 
-    async fn reap(&self, installation_id: &str, keep: &[&VmIdentity]) -> Result<(), VmError> {
-        let keep = keep
-            .iter()
-            .map(|identity| identity.physical_label())
-            .collect::<HashSet<_>>();
-        let mut cursor = None;
-        let mut handles = Vec::new();
-
-        loop {
-            let page_cursor = cursor.take();
-            let page = Sandbox::list_with(|list| {
-                let list = list
-                    .limit(LIST_PAGE_SIZE)
-                    .label(INSTALLATION_LABEL, installation_id);
-                match page_cursor {
-                    Some(cursor) => list.cursor(cursor),
-                    None => list,
-                }
-            })
-            .await
-            .map_err(map_sdk_error)?;
-            handles.extend(page.sandboxes);
-            cursor = page.next_cursor;
-            if cursor.is_none() {
-                break;
-            }
-        }
-
-        for handle in handles {
-            let config = handle.config().map_err(map_sdk_error)?;
-            let physical = config.spec.labels.get(PHYSICAL_LABEL);
-            if physical.is_none_or(|physical| !keep.contains(physical)) {
-                destroy_handle(handle).await?;
-            }
-        }
-        Ok(())
+    async fn reap(&self, installation_id: &str, current_epoch: u64) -> Result<(), VmError> {
+        destroy_installation_vms(installation_id, |epoch| epoch != Some(current_epoch)).await
     }
+
+    async fn shutdown(&self, installation_id: &str, session_epoch: u64) -> Result<(), VmError> {
+        destroy_installation_vms(installation_id, |epoch| epoch == Some(session_epoch)).await
+    }
+}
+
+async fn destroy_installation_vms(
+    installation_id: &str,
+    should_destroy: impl Fn(Option<u64>) -> bool,
+) -> Result<(), VmError> {
+    let mut cursor = None;
+    let mut handles = Vec::new();
+
+    loop {
+        let page_cursor = cursor.take();
+        let page = Sandbox::list_with(|list| {
+            let list = list
+                .limit(LIST_PAGE_SIZE)
+                .label(INSTALLATION_LABEL, installation_id);
+            match page_cursor {
+                Some(cursor) => list.cursor(cursor),
+                None => list,
+            }
+        })
+        .await
+        .map_err(map_sdk_error)?;
+        handles.extend(page.sandboxes);
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+
+    for handle in handles {
+        let config = handle.config().map_err(map_sdk_error)?;
+        let epoch = config
+            .spec
+            .labels
+            .get(EPOCH_LABEL)
+            .and_then(|epoch| epoch.parse().ok());
+        if should_destroy(epoch) {
+            destroy_handle(handle).await?;
+        }
+    }
+    Ok(())
 }
 
 fn sandbox_builder(id: &VmIdentity, cfg: &VmConfig) -> Result<SandboxBuilder, VmError> {
@@ -241,6 +252,7 @@ fn sandbox_builder(id: &VmIdentity, cfg: &VmConfig) -> Result<SandboxBuilder, Vm
         .max_duration(cfg.max_duration_ms.div_ceil(1_000))
         .idle_timeout(cfg.idle_timeout_ms.div_ceil(1_000))
         .label(INSTALLATION_LABEL, &id.installation_id)
+        .label(EPOCH_LABEL, id.session_epoch.to_string())
         .label(PRINCIPAL_LABEL, &id.principal)
         .label(PHYSICAL_LABEL, &physical_label)
         .label(CONFIG_LABEL, &cfg.config_hash);

@@ -129,7 +129,10 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
         backend.owner_of(&vm).await.unwrap(),
         Some(Subject(identity.principal.clone()))
     );
-    backend.reap(&identity.installation_id, &[]).await.unwrap();
+    backend
+        .shutdown(&identity.installation_id, identity.session_epoch)
+        .await
+        .unwrap();
     assert_eq!(backend.get(&identity).await.unwrap(), None);
     println!("microsandbox boot: reap removed the sandbox");
 
@@ -182,7 +185,7 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
         .await;
 
     network_backend
-        .reap(&identity.installation_id, &[])
+        .shutdown(&identity.installation_id, identity.session_epoch)
         .await
         .unwrap();
     assert_eq!(network_backend.get(&dns_identity).await.unwrap(), None);

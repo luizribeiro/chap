@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     format,
     string::String,
     sync::{Mutex, MutexGuard, PoisonError},
@@ -17,7 +17,7 @@ struct MockVm {
     owner: Subject,
     config_hash: String,
     installation_id: String,
-    _session_epoch: u64,
+    session_epoch: u64,
     files: HashMap<String, Vec<u8>>,
 }
 
@@ -37,7 +37,7 @@ impl MockVm {
             owner: Subject(id.principal.clone()),
             config_hash: cfg.config_hash.clone(),
             installation_id: id.installation_id.clone(),
-            _session_epoch: id.session_epoch,
+            session_epoch: id.session_epoch,
             files: HashMap::new(),
         }
     }
@@ -127,13 +127,16 @@ impl VmBackend for MockVmBackend {
             .map(|vm| vm.owner.clone()))
     }
 
-    async fn reap(&self, installation_id: &str, keep: &[&VmIdentity]) -> Result<(), VmError> {
-        let keep = keep
-            .iter()
-            .map(|identity| identity.physical_label())
-            .collect::<HashSet<_>>();
-        self.lock().retain(|physical_label, vm| {
-            vm.installation_id != installation_id || keep.contains(physical_label)
+    async fn reap(&self, installation_id: &str, current_epoch: u64) -> Result<(), VmError> {
+        self.lock().retain(|_, vm| {
+            vm.installation_id != installation_id || vm.session_epoch == current_epoch
+        });
+        Ok(())
+    }
+
+    async fn shutdown(&self, installation_id: &str, session_epoch: u64) -> Result<(), VmError> {
+        self.lock().retain(|_, vm| {
+            vm.installation_id != installation_id || vm.session_epoch != session_epoch
         });
         Ok(())
     }
@@ -367,22 +370,49 @@ mod tests {
     }
 
     #[test]
-    fn reap_is_scoped_to_installation_and_preserves_the_keep_set() {
+    fn startup_reap_is_scoped_to_installation_and_preserves_the_current_epoch() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
             let keep = identity("installation-a", 8, "builder@grant-a", "keep");
-            let orphan = identity("installation-a", 8, "builder@grant-a", "orphan");
+            let same_epoch = identity("installation-a", 8, "builder@grant-a", "same-epoch");
             let prior_epoch = identity("installation-a", 7, "builder@grant-a", "stale");
             let other_installation = identity("installation-b", 7, "builder@grant-a", "other");
-            for id in [&keep, &orphan, &prior_epoch, &other_installation] {
+            for id in [&keep, &same_epoch, &prior_epoch, &other_installation] {
                 backend.create(id, &config("hash-a")).await.unwrap();
             }
 
-            backend.reap("installation-a", &[&keep]).await.unwrap();
+            backend
+                .reap("installation-a", keep.session_epoch)
+                .await
+                .unwrap();
 
             assert!(backend.get(&keep).await.unwrap().is_some());
-            assert_eq!(backend.get(&orphan).await.unwrap(), None);
+            assert!(backend.get(&same_epoch).await.unwrap().is_some());
             assert_eq!(backend.get(&prior_epoch).await.unwrap(), None);
+            assert!(backend.get(&other_installation).await.unwrap().is_some());
+        });
+    }
+
+    #[test]
+    fn shutdown_destroys_only_the_current_epochs_vms() {
+        block_on(async {
+            let backend = MockVmBackend::new(&VmSettings::default());
+            let first = identity("installation-a", 8, "builder@grant-a", "first");
+            let second = identity("installation-a", 8, "builder@grant-b", "second");
+            let prior_epoch = identity("installation-a", 7, "builder@grant-a", "prior");
+            let other_installation = identity("installation-b", 8, "builder@grant-a", "other");
+            for id in [&first, &second, &prior_epoch, &other_installation] {
+                backend.create(id, &config("hash-a")).await.unwrap();
+            }
+
+            backend
+                .shutdown("installation-a", first.session_epoch)
+                .await
+                .unwrap();
+
+            assert_eq!(backend.get(&first).await.unwrap(), None);
+            assert_eq!(backend.get(&second).await.unwrap(), None);
+            assert!(backend.get(&prior_epoch).await.unwrap().is_some());
             assert!(backend.get(&other_installation).await.unwrap().is_some());
         });
     }

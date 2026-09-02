@@ -235,14 +235,14 @@ type StartDropResources = (
     Option<HostBuilder<()>>,
 );
 
-fn host_builder(_config: &Config) -> Result<HostBuilder<()>, ConsentError> {
+async fn host_builder(_config: &Config) -> Result<HostBuilder<()>, ConsentError> {
     let imports: HostImports = bindings::CapabilityHost {
         #[cfg(feature = "exec")]
         executor: bindings::exec_host::new(_config)?,
         #[cfg(feature = "state")]
         store: bindings::state_host::new(_config)?,
         #[cfg(feature = "vm")]
-        vm: bindings::vm_host::new(_config)?,
+        vm: bindings::vm_host::new(_config).await?,
     };
     let builder =
         HostBuilder::new(imports).map_err(|source| ConsentError::HostConstruction { source })?;
@@ -409,7 +409,8 @@ impl AgentBuilder {
     pub async fn approve_plugin(&self, id: &str) -> Result<ConsentRecord, ConsentError> {
         let consent = self.consent_store()?;
         self.configured_plugin(id)?;
-        let mut resources = StartResources::new(ToolRegistry::new(), host_builder(&self.config)?);
+        let mut resources =
+            StartResources::new(ToolRegistry::new(), host_builder(&self.config).await?);
         let result = self
             .approve_configured_plugin(
                 resources.builder.as_mut().expect("uninitialized host"),
@@ -459,7 +460,8 @@ impl AgentBuilder {
         for id in ids {
             self.configured_plugin(id)?;
         }
-        let mut resources = StartResources::new(ToolRegistry::new(), host_builder(&self.config)?);
+        let mut resources =
+            StartResources::new(ToolRegistry::new(), host_builder(&self.config).await?);
         let result = self
             .review_configured_plugins(
                 resources.builder.as_mut().expect("uninitialized host"),
@@ -560,7 +562,7 @@ impl AgentBuilder {
             tools,
             call_budgets,
         } = self;
-        let builder = host_builder(&config).map_err(StartError::Consent)?;
+        let builder = host_builder(&config).await.map_err(StartError::Consent)?;
         let mut resources = StartResources::new(tools, builder);
         let plugins =
             match Self::initialize_plugins(&mut resources, &config, &consent, call_budgets).await {

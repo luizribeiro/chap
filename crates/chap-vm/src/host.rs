@@ -224,7 +224,7 @@ impl std::error::Error for VmError {}
     async_fn_in_trait,
     reason = "VM backends are selected statically and are never used through dyn"
 )]
-pub trait VmBackend {
+pub trait VmBackend: Send + Sync + 'static {
     async fn create(&self, id: &VmIdentity, cfg: &VmConfig) -> Result<VmRef, VmError>;
     async fn get(&self, id: &VmIdentity) -> Result<Option<VmRef>, VmError>;
     async fn get_or_create(&self, id: &VmIdentity, cfg: &VmConfig) -> Result<VmRef, VmError>;
@@ -233,7 +233,8 @@ pub trait VmBackend {
     async fn write_file(&self, vm: &VmRef, path: &str, bytes: &[u8]) -> Result<(), VmError>;
     async fn destroy(&self, vm: &VmRef) -> Result<(), VmError>;
     async fn owner_of(&self, vm: &VmRef) -> Result<Option<Subject>, VmError>;
-    async fn reap(&self, installation_id: &str, keep: &[&VmIdentity]) -> Result<(), VmError>;
+    async fn reap(&self, installation_id: &str, current_epoch: u64) -> Result<(), VmError>;
+    async fn shutdown(&self, installation_id: &str, session_epoch: u64) -> Result<(), VmError>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
