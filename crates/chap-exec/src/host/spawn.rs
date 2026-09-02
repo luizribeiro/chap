@@ -60,42 +60,77 @@ pub(super) async fn run(
     let stderr = child.stderr.take().ok_or_else(|| {
         ExecError::Failed(format!("could not capture stderr from program {program:?}"))
     })?;
-    let stdout_task = tokio::spawn(read_capped(stdout));
-    let stderr_task = tokio::spawn(read_capped(stderr));
+    let mut readers = ReaderTasks::new(stdout, stderr);
+    let mut process_group = Some(process_group);
 
-    let waited = tokio::time::timeout(timeout, child.wait()).await;
-    drop(process_group);
+    let completed = tokio::time::timeout(timeout, async {
+        let status = child.wait().await.map_err(|error| {
+            ExecError::Failed(format!("could not wait for program {program:?}: {error}"))
+        })?;
+        drop(process_group.take());
 
-    let status = match waited {
-        Ok(Ok(status)) => status,
-        Ok(Err(error)) => {
-            stdout_task.abort();
-            stderr_task.abort();
-            return Err(ExecError::Failed(format!(
-                "could not wait for program {program:?}: {error}"
-            )));
-        }
-        Err(_) => {
-            let _ = child.wait().await;
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
-            return Err(ExecError::TimedOut);
-        }
-    };
-
-    let stdout = captured(stdout_task, "stdout", &program).await?;
-    let stderr = captured(stderr_task, "stderr", &program).await?;
-    Ok(ExecOutcome {
-        exit_code: exit_code(status),
-        stdout: String::from_utf8_lossy(&stdout.bytes).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr.bytes).into_owned(),
-        truncated: stdout.truncated || stderr.truncated,
+        let (stdout, stderr) = readers.capture(&program).await?;
+        Ok(ExecOutcome {
+            exit_code: exit_code(status),
+            stdout: String::from_utf8_lossy(&stdout.bytes).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr.bytes).into_owned(),
+            truncated: stdout.truncated || stderr.truncated,
+        })
     })
+    .await;
+
+    match completed {
+        Ok(outcome) => outcome,
+        Err(_) => {
+            drop(process_group.take());
+            readers.abort_and_wait().await;
+            let _ = child.wait().await;
+            Err(ExecError::TimedOut)
+        }
+    }
 }
 
 struct Captured {
     bytes: Vec<u8>,
     truncated: bool,
+}
+
+struct ReaderTasks {
+    stdout: tokio::task::JoinHandle<Result<Captured, io::Error>>,
+    stderr: tokio::task::JoinHandle<Result<Captured, io::Error>>,
+}
+
+impl ReaderTasks {
+    fn new(
+        stdout: impl AsyncRead + Unpin + Send + 'static,
+        stderr: impl AsyncRead + Unpin + Send + 'static,
+    ) -> Self {
+        Self {
+            stdout: tokio::spawn(read_capped(stdout)),
+            stderr: tokio::spawn(read_capped(stderr)),
+        }
+    }
+
+    async fn capture(&mut self, program: &str) -> Result<(Captured, Captured), ExecError> {
+        let stdout = captured(&mut self.stdout, "stdout", program);
+        let stderr = captured(&mut self.stderr, "stderr", program);
+        let (stdout, stderr) = tokio::join!(stdout, stderr);
+        Ok((stdout?, stderr?))
+    }
+
+    async fn abort_and_wait(&mut self) {
+        self.stdout.abort();
+        self.stderr.abort();
+        let _ = (&mut self.stdout).await;
+        let _ = (&mut self.stderr).await;
+    }
+}
+
+impl Drop for ReaderTasks {
+    fn drop(&mut self) {
+        self.stdout.abort();
+        self.stderr.abort();
+    }
 }
 
 async fn read_capped(mut reader: impl AsyncRead + Unpin) -> Result<Captured, io::Error> {
@@ -123,7 +158,7 @@ async fn read_capped(mut reader: impl AsyncRead + Unpin) -> Result<Captured, io:
 }
 
 async fn captured(
-    task: tokio::task::JoinHandle<Result<Captured, io::Error>>,
+    task: &mut tokio::task::JoinHandle<Result<Captured, io::Error>>,
     stream: &str,
     program: &str,
 ) -> Result<Captured, ExecError> {
@@ -194,7 +229,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             match test_kill_process_group(pgid) {
-                Err(Errno::SRCH) => break,
+                Err(Errno::SRCH | Errno::PERM) => break,
                 Ok(()) => {}
                 Err(error) => panic!("could not inspect process group {pgid}: {error}"),
             }
@@ -284,6 +319,26 @@ mod tests {
         .unwrap_err();
         assert_eq!(error, ExecError::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn timeout_does_not_wait_for_detached_pipe_holders() {
+        let project = TempDir::new().unwrap();
+        let invocation = execute(
+            project.path(),
+            "sh",
+            &[
+                "-c",
+                "perl -MPOSIX -e 'POSIX::setsid(); sleep 3' & sleep 30",
+            ],
+            Duration::from_millis(200),
+        );
+
+        let error = tokio::time::timeout(Duration::from_millis(500), invocation)
+            .await
+            .expect("reader tasks outlived the command deadline")
+            .unwrap_err();
+        assert_eq!(error, ExecError::TimedOut);
     }
 
     #[tokio::test]
