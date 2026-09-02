@@ -821,7 +821,7 @@ impl AgentBuilder {
             (prior.request_digest != manifest.request_digest
                 || prior.exported_interfaces != manifest.exported_interfaces)
                 .then(|| ConsentRecord {
-                    instance_id: manifest.plugin_id.as_str().to_owned(),
+                    plugin_id: manifest.plugin_id.clone(),
                     request_digest: manifest.request_digest,
                     component_digest: Some(manifest.component_digest),
                     exported_interfaces: manifest.exported_interfaces,

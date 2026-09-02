@@ -16,6 +16,7 @@ chap-vm = { workspace = true, optional = true, features = ["host"] }
 chap-wit.workspace = true
 futures.workspace = true
 lockgate.workspace = true
+lockgate-policy = { workspace = true, features = ["serde"] }
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true

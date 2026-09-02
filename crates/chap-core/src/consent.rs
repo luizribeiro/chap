@@ -186,7 +186,7 @@ impl ConsentStore {
     pub fn load(&self, plugin_id: &PluginId) -> Option<ConsentRecord> {
         self.records()
             .and_then(|records| records.get(plugin_id.as_str()).cloned())
-            .filter(|record| record.instance_id == plugin_id.as_str())
+            .filter(|record| record.plugin_id.as_str() == plugin_id.as_str())
     }
 
     pub fn save(&self, record: ConsentRecord) -> Result<(), ConsentError> {
@@ -202,7 +202,7 @@ impl ConsentStore {
                 BTreeMap::new()
             }
         };
-        records.insert(record.instance_id.clone(), record);
+        records.insert(record.plugin_id.as_str().to_owned(), record);
         self.write(&records)
     }
 
