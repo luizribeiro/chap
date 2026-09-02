@@ -1,6 +1,6 @@
 use super::{InnerHost, StartError, bindings, telemetry::trace_plugin_call};
 use crate::{ExecutionMode, Tool, ToolDefinition, ToolError, config::roles::ToolsSettings};
-use lockgate::{CallError, PluginHandle};
+use lockgate::{CallError, PluginHandle, PluginId};
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use bindings::{
@@ -9,7 +9,6 @@ use bindings::{
 };
 
 pub(super) struct PluginTool {
-    plugin: String,
     handle: PluginHandle,
     definition: ToolDefinition,
     execution_mode: ExecutionMode,
@@ -18,29 +17,29 @@ pub(super) struct PluginTool {
 
 impl PluginTool {
     pub(super) async fn load(
-        plugin: &str,
         runtime: Arc<InnerHost>,
         handle: PluginHandle,
         settings: &ToolsSettings,
     ) -> Result<Vec<Self>, StartError> {
-        let definitions = trace_plugin_call(plugin, "tools", "definitions", async {
+        let plugin_id = handle.id();
+        let definitions = trace_plugin_call(plugin_id.as_str(), "tools", "definitions", async {
             runtime
                 .client::<tool_bindings::Role>(&handle)
                 .map_err(|source| StartError::RoleClientUnavailable {
                     role: "tools",
-                    plugin: plugin.to_owned(),
+                    plugin_id: plugin_id.clone(),
                     source,
                 })?
                 .definitions()
                 .await
                 .map_err(|source| StartError::RoleCallFailed {
                     role: "tools",
-                    plugin: plugin.to_owned(),
+                    plugin_id: plugin_id.clone(),
                     source,
                 })?
                 .map_err(|message| StartError::RoleReportedError {
                     role: "tools",
-                    plugin: plugin.to_owned(),
+                    plugin_id: plugin_id.clone(),
                     message,
                 })
         })
@@ -50,7 +49,6 @@ impl PluginTool {
             .map(|registration| {
                 let declared_mode = registration.execution_mode.into();
                 Self {
-                    plugin: plugin.to_owned(),
                     handle: handle.clone(),
                     definition: registration.definition.into(),
                     execution_mode: resolve_tool_mode(declared_mode, settings.execution()),
@@ -74,27 +72,28 @@ impl Tool for PluginTool {
         &self,
         arguments: String,
     ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + '_>> {
+        let plugin_id = self.handle.id();
         Box::pin(trace_plugin_call(
-            &self.plugin,
+            plugin_id.as_str(),
             "tools",
             "execute",
             async move {
                 self.runtime
                     .client::<tool_bindings::Role>(&self.handle)
                     .map_err(|error| {
-                        ToolError::Failed(format!("tool plugin `{}` failed: {error}", self.plugin))
+                        ToolError::Failed(format!("tool plugin `{plugin_id}` failed: {error}"))
                     })?
                     .execute(&self.definition.name, &arguments)
                     .await
-                    .map_err(|error| tool_call_error(&self.plugin, error))?
-                    .map_err(|error| map_tool_error(&self.plugin, error))
+                    .map_err(|error| tool_call_error(plugin_id, error))?
+                    .map_err(|error| map_tool_error(plugin_id, error))
             },
         ))
     }
 }
 
-fn map_tool_error(plugin: &str, error: tool_bindings::ToolError) -> ToolError {
-    let message = |detail| format!("tool plugin `{plugin}`: {detail}");
+fn map_tool_error(plugin_id: &PluginId, error: tool_bindings::ToolError) -> ToolError {
+    let message = |detail| format!("tool plugin `{plugin_id}`: {detail}");
     match error {
         tool_bindings::ToolError::InvalidInput(error) => ToolError::InvalidInput(message(error)),
         tool_bindings::ToolError::Denied(error) => ToolError::Denied(message(error)),
@@ -103,15 +102,15 @@ fn map_tool_error(plugin: &str, error: tool_bindings::ToolError) -> ToolError {
     }
 }
 
-fn tool_call_error(plugin: &str, error: CallError) -> ToolError {
+fn tool_call_error(plugin_id: &PluginId, error: CallError) -> ToolError {
     ToolError::Failed(match error {
         CallError::DeadlineExceeded { deadline } => {
-            format!("tool plugin `{plugin}` timed out after {deadline:?}")
+            format!("tool plugin `{plugin_id}` timed out after {deadline:?}")
         }
         CallError::HostPanic { import, message } => {
-            format!("tool plugin `{plugin}` failed: host import `{import}` panicked: {message}")
+            format!("tool plugin `{plugin_id}` failed: host import `{import}` panicked: {message}")
         }
-        error => format!("tool plugin `{plugin}` failed: {error}"),
+        error => format!("tool plugin `{plugin_id}` failed: {error}"),
     })
 }
 
@@ -191,7 +190,7 @@ mod tests {
         ];
 
         for (error, expected) in errors {
-            assert_eq!(map_tool_error("example", error), expected);
+            assert_eq!(map_tool_error(&"example".into(), error), expected);
         }
     }
 
@@ -199,7 +198,7 @@ mod tests {
     fn maps_host_panics_to_tool_failures_with_the_import_name() {
         assert_eq!(
             tool_call_error(
-                "example",
+                &"example".into(),
                 CallError::HostPanic {
                     import: "chap:exec/exec.run".to_owned(),
                     message: "host invariant failed".to_owned(),

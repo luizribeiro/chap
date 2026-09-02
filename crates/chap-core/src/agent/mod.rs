@@ -41,11 +41,11 @@ const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
 #[derive(Debug, Error)]
 #[error(
-    "plugin `{instance_id}` from `{}` was refused admission: {reason}",
+    "plugin `{plugin_id}` from `{}` was refused admission: {reason}",
     source_path.display()
 )]
 pub struct PluginRefusal {
-    pub instance_id: String,
+    pub plugin_id: PluginId,
     pub source_path: PathBuf,
     #[source]
     pub reason: PluginRefusalReason,
@@ -87,30 +87,30 @@ pub enum StartError {
         source: Box<StartError>,
         cleanup: Box<ConsentError>,
     },
-    #[error("failed to clean up refused plugin `{plugin}`: {source}")]
+    #[error("failed to clean up refused plugin `{plugin_id}`: {source}")]
     RefusedPluginCleanup {
-        plugin: String,
+        plugin_id: PluginId,
         #[source]
         source: tokio::task::JoinError,
     },
-    #[error("{} plugin `{plugin}` failed: {source}", role_label(role))]
+    #[error("{} plugin `{plugin_id}` failed: {source}", role_label(role))]
     RoleClientUnavailable {
         role: &'static str,
-        plugin: String,
+        plugin_id: PluginId,
         #[source]
         source: lockgate::RoleError,
     },
-    #[error("{} plugin `{plugin}` failed: {source}", role_label(role))]
+    #[error("{} plugin `{plugin_id}` failed: {source}", role_label(role))]
     RoleCallFailed {
         role: &'static str,
-        plugin: String,
+        plugin_id: PluginId,
         #[source]
         source: lockgate::CallError,
     },
-    #[error("{} plugin `{plugin}`: {message}", role_label(role))]
+    #[error("{} plugin `{plugin_id}`: {message}", role_label(role))]
     RoleReportedError {
         role: &'static str,
-        plugin: String,
+        plugin_id: PluginId,
         message: String,
     },
     #[error("{0}")]
@@ -312,7 +312,7 @@ pub struct AgentBuilder {
 /// The consent-free coherence result for one configured plugin.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PluginCheck {
-    pub instance_id: String,
+    pub plugin_id: PluginId,
     pub required_environment_variables: Vec<RequiredEnvironmentVariable>,
 }
 
@@ -474,7 +474,7 @@ impl AgentBuilder {
             .preflight(&prepared, &runtime_limits())
             .await
             .map(|preflight| PluginCheck {
-                instance_id: plugin_id.as_str().to_owned(),
+                plugin_id: plugin_id.clone(),
                 required_environment_variables: preflight.required_environment_variables,
             })
             .map_err(|source| ConsentError::LoadPlugin {
@@ -726,12 +726,11 @@ impl AgentBuilder {
         let builder = resources.builder.take().expect("uninitialized host");
         resources.host = Some(Arc::new(builder.finish()));
         let lockgate = resources.host.as_ref().expect("initialized host");
-        for (plugin_id, plugin) in &plugins {
+        for plugin in plugins.values() {
             if !plugin.has_role(&chap_wit::TOOLS) {
                 continue;
             }
             for tool in PluginTool::load(
-                plugin_id.as_str(),
                 Arc::clone(lockgate),
                 plugin.handle.clone(),
                 &plugin.role_settings.tools,
@@ -811,7 +810,7 @@ impl AgentBuilder {
                 tokio::task::spawn_blocking(move || drop(prepared))
                     .await
                     .map_err(|source| StartError::RefusedPluginCleanup {
-                        plugin: plugin_id.as_str().to_owned(),
+                        plugin_id: plugin_id.clone(),
                         source,
                     })?;
                 return Ok(PluginLoad::Refused(refusal));
@@ -905,7 +904,7 @@ impl AgentBuilder {
             }
         };
         PluginRefusal {
-            instance_id: plugin_id.as_str().to_owned(),
+            plugin_id: plugin_id.clone(),
             source_path: path.to_path_buf(),
             reason,
         }
@@ -936,7 +935,7 @@ impl AgentBuilder {
             error => return Err(StartError::Consent(error)),
         };
         Ok(PluginRefusal {
-            instance_id: plugin_id.as_str().to_owned(),
+            plugin_id: plugin_id.clone(),
             source_path: path.to_path_buf(),
             reason,
         })

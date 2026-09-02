@@ -260,13 +260,13 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
     );
     let StartError::RoleCallFailed {
         role: "tools",
-        plugin,
+        plugin_id,
         source,
     } = error
     else {
         panic!("tool definition failures must preserve their call error")
     };
-    assert_eq!(plugin, "sdk-multi-role");
+    assert_eq!(plugin_id.as_str(), "sdk-multi-role");
     assert!(matches!(
         source,
         lockgate::CallError::DeadlineExceeded { deadline }
@@ -318,10 +318,10 @@ async fn preserves_a_tool_plugin_definitions_error_at_the_host_boundary() {
         error,
         StartError::RoleReportedError {
             role: "tools",
-            plugin,
+            plugin_id,
             message,
         }
-            if plugin == "sdk-multi-role" && message == "tool catalog is unavailable"
+            if plugin_id.as_str() == "sdk-multi-role" && message == "tool catalog is unavailable"
     ));
 }
 

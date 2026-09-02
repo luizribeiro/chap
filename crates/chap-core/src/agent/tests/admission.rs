@@ -63,7 +63,7 @@ async fn panic_join_error() -> tokio::task::JoinError {
 #[tokio::test]
 async fn refused_plugin_cleanup_preserves_the_join_error() {
     let error = StartError::RefusedPluginCleanup {
-        plugin: "example".to_owned(),
+        plugin_id: "example".into(),
         source: panic_join_error().await,
     };
 
@@ -83,7 +83,7 @@ async fn refused_plugin_cleanup_preserves_the_join_error() {
 async fn operation_and_cleanup_preserves_the_cleanup_join_error() {
     let error = StartError::OperationAndCleanup {
         source: Box::new(StartError::RefusedPluginCleanup {
-            plugin: "example".to_owned(),
+            plugin_id: "example".into(),
             source: panic_join_error().await,
         }),
         cleanup: Box::new(ConsentError::HostCleanup {
@@ -238,7 +238,7 @@ async fn expanded_exec_settings_drift_and_block_readmission() {
 
     let error = builder.start().await.err().unwrap();
     let refusal = only_refusal(error);
-    assert_eq!(refusal.instance_id, "example");
+    assert_eq!(refusal.plugin_id.as_str(), "example");
     let PluginRefusalReason::RenewedApprovalRequired { drift } = refusal.reason else {
         panic!("expected renewed approval")
     };
@@ -576,12 +576,12 @@ async fn start_refuses_and_names_every_unapproved_plugin() {
 
     let refusals = refused_plugins(error);
     assert_eq!(refusals.len(), 2);
-    assert_eq!(refusals[0].instance_id, "alpha-unapproved");
+    assert_eq!(refusals[0].plugin_id.as_str(), "alpha-unapproved");
     assert!(matches!(
         refusals[0].reason,
         PluginRefusalReason::ApprovalRequired
     ));
-    assert_eq!(refusals[1].instance_id, "bravo-unapproved");
+    assert_eq!(refusals[1].plugin_id.as_str(), "bravo-unapproved");
     assert!(matches!(
         refusals[1].reason,
         PluginRefusalReason::ApprovalRequired
@@ -610,7 +610,7 @@ async fn coherence_check_accepts_an_unapproved_plugin_without_minting_consent() 
     assert_eq!(
         checks,
         [super::super::PluginCheck {
-            instance_id: "example".to_owned(),
+            plugin_id: "example".into(),
             required_environment_variables: Vec::new(),
         }]
     );
@@ -674,7 +674,7 @@ async fn coherence_check_reports_an_unset_required_environment_variable() {
         .unwrap();
 
     assert_eq!(checks.len(), 1);
-    assert_eq!(checks[0].instance_id, "example");
+    assert_eq!(checks[0].plugin_id.as_str(), "example");
     assert_eq!(checks[0].required_environment_variables.len(), 1);
     assert_eq!(
         checks[0].required_environment_variables[0].name,
@@ -775,7 +775,7 @@ async fn approving_then_denying_toggles_plugin_admission() {
     );
     let error = builder.start().await.err().unwrap();
     let refusal = only_refusal(error);
-    assert_eq!(refusal.instance_id, "example");
+    assert_eq!(refusal.plugin_id.as_str(), "example");
     assert!(matches!(
         refusal.reason,
         PluginRefusalReason::ApprovalRequired
@@ -793,7 +793,7 @@ async fn start_refuses_a_plugin_that_gains_a_role_after_approval() {
     let error = builder.start().await.err().unwrap();
 
     let refusal = only_refusal(error);
-    assert_eq!(refusal.instance_id, "example");
+    assert_eq!(refusal.plugin_id.as_str(), "example");
     let PluginRefusalReason::RenewedApprovalRequired { drift } = refusal.reason else {
         panic!("expected renewed approval")
     };
@@ -934,7 +934,7 @@ async fn nonblocking_drift_errors_are_reported_without_panicking() {
         },
     );
 
-    assert_eq!(refusal.instance_id, "example");
+    assert_eq!(refusal.plugin_id.as_str(), "example");
     assert_eq!(refusal.source_path, component);
     let PluginRefusalReason::RenewedApprovalRequired { drift } = refusal.reason else {
         panic!("expected renewed approval")
@@ -974,7 +974,7 @@ async fn rejects_missing_required_settings_during_prepare() {
     };
 
     let refusal = only_refusal(error);
-    assert_eq!(refusal.instance_id, "example.provider");
+    assert_eq!(refusal.plugin_id.as_str(), "example.provider");
     assert_eq!(refusal.source_path, component);
     assert!(matches!(
         refusal.reason,
@@ -1015,7 +1015,7 @@ async fn validates_settings_before_loading_tool_definitions() {
     };
 
     let refusal = only_refusal(error);
-    assert_eq!(refusal.instance_id, "example.tools");
+    assert_eq!(refusal.plugin_id.as_str(), "example.tools");
     assert_eq!(refusal.source_path, component);
     assert!(matches!(
         refusal.reason,
@@ -1051,7 +1051,7 @@ async fn reports_framework_schema_transport_errors() {
         Err(error) => error,
     };
     let refusal = only_refusal(error);
-    assert_eq!(refusal.instance_id, "example");
+    assert_eq!(refusal.plugin_id.as_str(), "example");
     assert!(matches!(
         refusal.reason,
         PluginRefusalReason::ComponentLoad { source }
@@ -1327,7 +1327,7 @@ async fn rejects_tools_config_for_a_provider_only_plugin() {
     let error = load_test_builder(&config_path).start().await.err().unwrap();
 
     let refusal = only_refusal(error);
-    assert_eq!(refusal.instance_id, "example.provider");
+    assert_eq!(refusal.plugin_id.as_str(), "example.provider");
     assert!(matches!(
         refusal.reason,
         PluginRefusalReason::RoleConfigInvalid { ref role } if role == "tools"
@@ -1362,7 +1362,7 @@ async fn rejects_context_config_for_a_provider_only_plugin() {
     let error = load_test_builder(&config_path).start().await.err().unwrap();
 
     let refusal = only_refusal(error);
-    assert_eq!(refusal.instance_id, "example.provider");
+    assert_eq!(refusal.plugin_id.as_str(), "example.provider");
     assert!(matches!(
         refusal.reason,
         PluginRefusalReason::RoleConfigInvalid { ref role } if role == "context"
@@ -1430,7 +1430,7 @@ async fn drops_partial_start_resources_on_a_blocking_thread() {
     };
 
     let refusal = only_refusal(error);
-    assert_eq!(refusal.instance_id, "z-missing");
+    assert_eq!(refusal.plugin_id.as_str(), "z-missing");
     assert_eq!(refusal.source_path, directory.join("missing.wasm"));
     assert!(matches!(
         refusal.reason,
@@ -1450,7 +1450,7 @@ async fn reports_the_component_path_for_an_unsupported_plugin_role() {
     };
 
     let refusal = only_refusal(error);
-    assert_eq!(refusal.instance_id, "example");
+    assert_eq!(refusal.plugin_id.as_str(), "example");
     assert_eq!(refusal.source_path, component);
     assert!(matches!(
         refusal.reason,

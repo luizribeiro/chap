@@ -195,7 +195,7 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
         panic!("expected structured plugin refusals")
     };
     assert_eq!(refusals.len(), 1);
-    assert_eq!(refusals[0].instance_id, "openai");
+    assert_eq!(refusals[0].plugin_id.as_str(), "openai");
     let PluginRefusalReason::RenewedApprovalRequired { drift } = &refusals[0].reason else {
         panic!("expected renewed approval")
     };

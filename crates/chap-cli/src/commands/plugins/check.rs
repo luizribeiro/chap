@@ -13,7 +13,7 @@ fn render_plugin_checks(checks: &[PluginCheck]) -> String {
     }
     let mut output = String::new();
     for check in checks {
-        output.push_str(&format!("plugin `{}`: OK\n", check.instance_id));
+        output.push_str(&format!("plugin `{}`: OK\n", check.plugin_id));
         for variable in &check.required_environment_variables {
             let presence = if variable.present { "set" } else { "unset" };
             output.push_str(&format!("  requires env {} ({presence})\n", variable.name));
@@ -32,14 +32,14 @@ mod tests {
         assert_eq!(
             render_plugin_checks(&[
                 PluginCheck {
-                    instance_id: "kagi".to_owned(),
+                    plugin_id: "kagi".into(),
                     required_environment_variables: vec![RequiredEnvironmentVariable {
                         name: "KAGI_API_KEY".to_owned(),
                         present: false,
                     }],
                 },
                 PluginCheck {
-                    instance_id: "persona".to_owned(),
+                    plugin_id: "persona".into(),
                     required_environment_variables: Vec::new(),
                 },
             ]),

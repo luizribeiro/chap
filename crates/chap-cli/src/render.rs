@@ -40,33 +40,33 @@ fn render_plugin_refusals(refusals: &[PluginRefusal]) -> String {
 }
 
 fn render_plugin_refusal(refusal: &PluginRefusal) -> String {
-    let id = &refusal.instance_id;
+    let plugin_id = &refusal.plugin_id;
     match &refusal.reason {
         PluginRefusalReason::ApprovalRequired => format!(
-            "plugin `{id}` from `{}` requires approval before admission{}",
+            "plugin `{plugin_id}` from `{}` requires approval before admission{}",
             refusal.source_path.display(),
-            approval_remedy(id)
+            approval_remedy(plugin_id)
         ),
         PluginRefusalReason::RenewedApprovalRequired { drift } => format!(
-            "plugin `{id}` from `{}` {} and requires renewed approval before admission{}",
+            "plugin `{plugin_id}` from `{}` {} and requires renewed approval before admission{}",
             refusal.source_path.display(),
             drift_description(drift),
-            approval_remedy(id)
+            approval_remedy(plugin_id)
         ),
         PluginRefusalReason::UnsupportedRole {
             role,
             exported_interfaces,
-        } => render_unsupported_role(id, &refusal.source_path, role, exported_interfaces),
+        } => render_unsupported_role(plugin_id, &refusal.source_path, role, exported_interfaces),
         PluginRefusalReason::RoleConfigInvalid { role } => format!(
-            "plugin `{id}` configures a `{role}` section, but its component does not export the {role} interface"
+            "plugin `{plugin_id}` configures a `{role}` section, but its component does not export the {role} interface"
         ),
         PluginRefusalReason::ComponentLoad { source } => source.to_string(),
         _ => refusal.to_string(),
     }
 }
 
-fn approval_remedy(id: &str) -> String {
-    format!("; run `chap grants review {id}` and then `chap grants approve {id}`")
+fn approval_remedy(plugin_id: &chap_core::PluginId) -> String {
+    format!("; run `chap grants review {plugin_id}` and then `chap grants approve {plugin_id}`")
 }
 
 fn drift_description(drift: &chap_core::DriftReport) -> &'static str {
@@ -93,19 +93,19 @@ pub(crate) fn render_consent_error(error: ConsentError) -> String {
             path,
             role,
             exported_interfaces,
-        } => render_unsupported_role(plugin_id.as_str(), &path, &role, &exported_interfaces),
+        } => render_unsupported_role(&plugin_id, &path, &role, &exported_interfaces),
         error => error.to_string(),
     }
 }
 
 fn render_unsupported_role(
-    plugin: &str,
+    plugin_id: &chap_core::PluginId,
     path: &Path,
     role: &str,
     exported_interfaces: &[String],
 ) -> String {
     format!(
-        "plugin `{plugin}` from `{}` does not implement a supported role; expected an export from the `{role}` package, but the component exports {}",
+        "plugin `{plugin_id}` from `{}` does not implement a supported role; expected an export from the `{role}` package, but the component exports {}",
         path.display(),
         render_exported_interfaces(exported_interfaces)
     )
@@ -130,9 +130,9 @@ mod tests {
     };
     use std::{io, path::PathBuf};
 
-    fn refusal(id: &str, component: &str, reason: PluginRefusalReason) -> PluginRefusal {
+    fn refusal(plugin_id: &str, component: &str, reason: PluginRefusalReason) -> PluginRefusal {
         PluginRefusal {
-            instance_id: id.to_owned(),
+            plugin_id: plugin_id.into(),
             source_path: PathBuf::from(component),
             reason,
         }
@@ -369,7 +369,7 @@ mod tests {
                 if plugin_id.as_str() == "broken" && path == &component
         ));
         let refusal = PluginRefusal {
-            instance_id: "broken".to_owned(),
+            plugin_id: "broken".into(),
             source_path: component.clone(),
             reason: PluginRefusalReason::ComponentLoad {
                 source: Box::new(error),
