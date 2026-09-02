@@ -56,6 +56,24 @@
         cargoVendorDir = craneLib.vendorCargoDeps {
           src = packageSrc;
         };
+        microsandboxBundle = pkgs.fetchurl {
+          url = "https://github.com/superradcompany/microsandbox/releases/download/v0.6.16/microsandbox-darwin-aarch64.tar.gz";
+          hash = "sha256-Z6EDvYCfaQyEfkuCMFKPV1Rll7ID9Xj8QomWZZQX/IE=";
+        };
+        microsandboxAgentd = pkgs.fetchurl {
+          url = "https://github.com/superradcompany/microsandbox/releases/download/v0.6.16/agentd-aarch64";
+          hash = "sha256-qHZPws20rZIe9sfxaIH9CkJyahCVq1nJA4yw55ZqwDA=";
+        };
+        microsandboxHome = pkgs.runCommand "microsandbox-runtime-0.6.16" { } ''
+          mkdir -p "$out/bin" "$out/lib"
+          tar -xzf ${microsandboxBundle} -C "$out"
+          mv "$out/msb" "$out/bin/msb"
+          mv "$out/libkrunfw.5.dylib" "$out/lib/libkrunfw.5.dylib"
+        '';
+        microsandboxBuildArgs = pkgs.lib.optionalAttrs (system == "aarch64-darwin") {
+          MSB_HOME = microsandboxHome;
+          MSB_AGENTD_PATH = microsandboxAgentd;
+        };
         packageArgs = {
           pname = "chap";
           version = "0.1.0";
@@ -63,7 +81,7 @@
           inherit cargoVendorDir;
           cargoExtraArgs = "--locked -p chap-cli";
           doCheck = false;
-        };
+        } // microsandboxBuildArgs;
         cargoArtifacts = craneLib.buildDepsOnly packageArgs;
         chap = pkgs.lib.makeOverridable (
           { withExec ? false, withState ? false, withVm ? false }:
