@@ -8,12 +8,12 @@ use std::collections::BTreeSet;
 
 pub(super) async fn grants_review(
     builder: &AgentBuilder,
-    plugin_id: Option<&str>,
+    plugin_id: Option<&PluginId>,
 ) -> Result<String, String> {
     let consent_path = builder.consent_path().map_err(render_load_error)?;
     let mut output = format!("Consent store: {}\n", consent_path.display());
     let plugin_ids = match plugin_id {
-        Some(plugin_id) => vec![PluginId::from(plugin_id)],
+        Some(plugin_id) => vec![plugin_id.clone()],
         None => builder
             .plugins()
             .map(|(plugin_id, _)| plugin_id)
@@ -181,9 +181,9 @@ mod tests {
         ConsentManifest, ConsentRecord, DriftReport, GrantReview, PluginConsentReview,
     };
 
-    fn consent_record(instance_id: &str, digest_byte: char) -> ConsentRecord {
+    fn consent_record(plugin_id: &str, digest_byte: char) -> ConsentRecord {
         serde_json::from_value(serde_json::json!({
-            "instance_id": instance_id,
+            "instance_id": plugin_id,
             "fingerprint": format!("sha256:{}", digest_byte.to_string().repeat(64)),
             "grants": [{
                 "capability": "net",

@@ -15,17 +15,17 @@ pub(crate) enum GrantsCommand {
     /// Approve the plugin's exact currently resolved permission manifest.
     Approve {
         /// Plugin instance to approve.
-        plugin_id: String,
+        plugin_id: PluginId,
     },
     /// Remove a plugin's stored approval.
     Deny {
         /// Plugin instance to deny.
-        plugin_id: String,
+        plugin_id: PluginId,
     },
     /// Review resolved permission requests without approving them.
     Review {
         /// Plugin instance to review; omit to review every configured plugin.
-        plugin_id: Option<String>,
+        plugin_id: Option<PluginId>,
     },
 }
 
@@ -33,7 +33,6 @@ impl GrantsCommand {
     pub(crate) async fn run(self, builder: &AgentBuilder) -> Result<(), String> {
         match self {
             Self::Approve { plugin_id } => {
-                let plugin_id = PluginId::from(plugin_id);
                 builder
                     .approve_plugin(&plugin_id)
                     .await
@@ -43,7 +42,6 @@ impl GrantsCommand {
                 );
             }
             Self::Deny { plugin_id } => {
-                let plugin_id = PluginId::from(plugin_id);
                 builder
                     .deny_plugin(&plugin_id)
                     .map_err(render_consent_error)?;
@@ -54,7 +52,7 @@ impl GrantsCommand {
             Self::Review { plugin_id } => {
                 print!(
                     "{}",
-                    review::grants_review(builder, plugin_id.as_deref()).await?
+                    review::grants_review(builder, plugin_id.as_ref()).await?
                 );
             }
         }
@@ -84,13 +82,13 @@ mod tests {
             approve.command,
             Some(Command::Grants(Grants {
                 command: GrantsCommand::Approve { plugin_id }
-            })) if plugin_id == "openai"
+            })) if plugin_id == PluginId::from("openai")
         ));
         assert!(matches!(
             deny.command,
             Some(Command::Grants(Grants {
                 command: GrantsCommand::Deny { plugin_id }
-            })) if plugin_id == "openai"
+            })) if plugin_id == PluginId::from("openai")
         ));
     }
 }
