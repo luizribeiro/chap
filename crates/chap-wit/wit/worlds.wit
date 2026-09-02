@@ -22,28 +22,3 @@ world host {
   export tools;
   export context;
 }
-
-world host-exec {
-  export types;
-  export provider;
-  export tools;
-  export context;
-  import exec;
-}
-
-world host-state {
-  export types;
-  export provider;
-  export tools;
-  export context;
-  import state;
-}
-
-world host-exec-state {
-  export types;
-  export provider;
-  export tools;
-  export context;
-  import exec;
-  import state;
-}

@@ -223,13 +223,6 @@ impl Default for CallBudgets {
     }
 }
 
-#[cfg(not(feature = "exec"))]
-#[cfg(not(feature = "state"))]
-type HostImports = ();
-#[cfg(feature = "exec")]
-type HostImports = bindings::CapabilityHost;
-#[cfg(not(feature = "exec"))]
-#[cfg(feature = "state")]
 type HostImports = bindings::CapabilityHost;
 type InnerHost = Host<()>;
 type StartDropResources = (
@@ -239,18 +232,10 @@ type StartDropResources = (
 );
 
 fn host_builder(_config: &Config) -> Result<HostBuilder<()>, ConsentError> {
-    #[cfg(not(feature = "exec"))]
-    #[cfg(not(feature = "state"))]
-    let imports: HostImports = ();
-    #[cfg(feature = "exec")]
     let imports: HostImports = bindings::CapabilityHost {
+        #[cfg(feature = "exec")]
         executor: bindings::exec_host::new(_config)?,
         #[cfg(feature = "state")]
-        store: bindings::state_host::new(_config)?,
-    };
-    #[cfg(not(feature = "exec"))]
-    #[cfg(feature = "state")]
-    let imports: HostImports = bindings::CapabilityHost {
         store: bindings::state_host::new(_config)?,
     };
     let builder =
