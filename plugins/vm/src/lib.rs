@@ -38,7 +38,7 @@ impl Tools for Sandbox {
         Ok(vec![ToolDefinition {
             name: RUN.to_owned(),
             description: format!(
-                "Run a command in a reusable microVM. Allowed host mounts: [{allowed_mounts}]. Configured egress scopes: [{allowed_egress}]."
+                "Run a command in a reusable microVM with network access for configured egress scopes. Allowed host mounts: [{allowed_mounts}]. Configured egress scopes: [{allowed_egress}]."
             ),
             parameters: r#"{
                 "type":"object",
@@ -60,20 +60,7 @@ impl Tools for Sandbox {
             )));
         }
         let arguments = parse_arguments(&arguments)?;
-        let config = VmConfig {
-            image: self.settings.image.clone(),
-            mounts: arguments
-                .mounts
-                .iter()
-                .map(|host| Mount {
-                    host: host.clone(),
-                    guest: format!("/mnt{host}"),
-                    readonly: true,
-                })
-                .collect(),
-            egress: vec![],
-            env: vec![],
-        };
+        let config = vm_config(&self.settings, &arguments.mounts);
         let vm = Vm::get_or_create("workspace", config)
             .await
             .map_err(ToolError::from)?;
@@ -91,6 +78,22 @@ impl Tools for Sandbox {
             output.exit_code,
             String::from_utf8_lossy(&output.stdout)
         ))
+    }
+}
+
+fn vm_config(settings: &Settings, mounts: &[String]) -> VmConfig {
+    VmConfig {
+        image: settings.image.clone(),
+        mounts: mounts
+            .iter()
+            .map(|host| Mount {
+                host: host.clone(),
+                guest: format!("/mnt{host}"),
+                readonly: true,
+            })
+            .collect(),
+        egress: settings.allowed_egress.clone(),
+        env: vec![],
     }
 }
 
@@ -161,6 +164,19 @@ mod tests {
         .unwrap();
 
         assert_eq!(settings.image, "docker.io/library/alpine:3.20");
+    }
+
+    #[test]
+    fn configures_the_vm_with_allowed_egress() {
+        let settings = Settings {
+            image: default_image(),
+            allowed_mounts: vec![],
+            allowed_egress: vec!["0.0.0.0/0:443".to_owned(), "10.0.0.0/8:80".to_owned()],
+        };
+
+        let config = vm_config(&settings, &[]);
+
+        assert_eq!(config.egress, settings.allowed_egress);
     }
 
     #[test]
