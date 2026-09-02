@@ -308,7 +308,7 @@ fn network_policy(egress: &[Egress]) -> Result<NetworkPolicy, VmError> {
 }
 
 fn enables_gateway_dns(destination: &Egress) -> bool {
-    destination.port() == Some(53)
+    destination.port().is_none_or(|port| port == 53)
         && destination.prefix_len() == 0
         && destination.addr().is_unspecified()
 }
@@ -504,6 +504,18 @@ mod tests {
     #[test]
     fn whole_ipv4_port_53_grant_adds_gateway_dns_and_cidr_rules() {
         let policy = policy(&["0.0.0.0/0:53"]);
+        let rules = policy["rules"].as_array().unwrap();
+
+        assert_eq!(rules.len(), 2);
+        assert_eq!(dns_rules(&policy).len(), 1);
+        assert_eq!(rules[0]["protocols"], json!(["udp", "tcp"]));
+        assert_eq!(rules[0]["ports"], json!([{ "start": 53, "end": 53 }]));
+        assert_eq!(rules[1]["destination"], json!({ "cidr": "0.0.0.0/0" }));
+    }
+
+    #[test]
+    fn whole_ipv4_any_port_grant_adds_gateway_dns_and_cidr_rules() {
+        let policy = policy(&["0.0.0.0/0:*"]);
         let rules = policy["rules"].as_array().unwrap();
 
         assert_eq!(rules.len(), 2);
