@@ -27,7 +27,8 @@ struct ScenarioResult {
 async fn runs_a_command_in_a_vm_with_a_granted_mount() {
     let result = run_scenario(
         "granted",
-        json!({"command": ["echo", "vm-e2e-ok"], "mounts": ["/project"]}),
+        &["/project"],
+        json!({"command": ["echo", "vm-e2e-ok"]}),
     )
     .await;
 
@@ -40,7 +41,8 @@ async fn runs_a_command_in_a_vm_with_a_granted_mount() {
 async fn denies_a_mount_outside_the_grant() {
     let result = run_scenario(
         "denied",
-        json!({"command": ["echo", "x"], "mounts": ["/project", "/etc"]}),
+        &["/project", "/etc"],
+        json!({"command": ["echo", "x"]}),
     )
     .await;
 
@@ -53,7 +55,7 @@ async fn denies_a_mount_outside_the_grant() {
     assert_eq!(result.provider_output, error.as_str());
 }
 
-async fn run_scenario(call_id: &str, arguments: Value) -> ScenarioResult {
+async fn run_scenario(call_id: &str, allowed_mounts: &[&str], arguments: Value) -> ScenarioResult {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let components = components(&workspace);
     let mock = MockServer::start(&[ToolRequest {
@@ -63,12 +65,25 @@ async fn run_scenario(call_id: &str, arguments: Value) -> ScenarioResult {
     }]);
     let directory = tempfile::tempdir().unwrap();
     let config_path = directory.path().join("chap.json");
-    write_config(&config_path, components, &mock.origin);
+    let sandbox = sandbox_with_project_mount_grant(&components.sandbox, directory.path());
+    write_config(
+        &config_path,
+        &sandbox,
+        &components.openai,
+        &mock.origin,
+        allowed_mounts,
+    );
 
     let builder = AgentBuilder::load(&config_path)
         .unwrap()
         .state_dir(directory.path());
-    builder.approve_plugin("sandbox").await.unwrap();
+    let sandbox_approval = builder.approve_plugin("sandbox").await.unwrap();
+    let mount_grant = sandbox_approval
+        .grants
+        .iter()
+        .find(|grant| grant.capability == "vm" && grant.permission == "mount")
+        .expect("the sandbox approval must include vm.mount");
+    assert_eq!(mount_grant.scopes, ["/project"]);
     builder.approve_plugin("openai").await.unwrap();
     let agent = builder.start().await.unwrap();
     let session = agent.session(SessionOptions::new("openai")).await.unwrap();
@@ -92,17 +107,40 @@ async fn run_scenario(call_id: &str, arguments: Value) -> ScenarioResult {
     }
 }
 
-fn write_config(path: &Path, components: &Components, origin: &str) {
-    // Required setting references must resolve to a scope; the VM requests no egress.
+fn sandbox_with_project_mount_grant(source: &Path, directory: &Path) -> PathBuf {
+    const NEEDS_SECTION: &[u8] = b"lockgate:needs";
+    const SETTINGS_SCOPE: &[u8] = b"setting:/allowed_mounts";
+    // Repeated slashes canonicalize to `/project` while preserving the encoded section length.
+    const PROJECT_SCOPE: &[u8] = b"/project///////////////";
+
+    assert_eq!(SETTINGS_SCOPE.len(), PROJECT_SCOPE.len());
+    let mut component = std::fs::read(source).unwrap();
+    let needs_offset = component
+        .windows(NEEDS_SECTION.len())
+        .rposition(|window| window == NEEDS_SECTION)
+        .expect("sandbox component must declare a needs section");
+    let scope_offset = component[needs_offset..]
+        .windows(SETTINGS_SCOPE.len())
+        .position(|window| window == SETTINGS_SCOPE)
+        .map(|offset| needs_offset + offset)
+        .expect("sandbox needs must derive vm.mount from allowed_mounts");
+    component[scope_offset..scope_offset + SETTINGS_SCOPE.len()].copy_from_slice(PROJECT_SCOPE);
+
+    let destination = directory.join("sandbox-project-mount-grant.wasm");
+    std::fs::write(&destination, component).unwrap();
+    destination
+}
+
+fn write_config(path: &Path, sandbox: &Path, openai: &Path, origin: &str, allowed_mounts: &[&str]) {
     std::fs::write(
         path,
         serde_json::to_vec_pretty(&json!({
             "plugins": {
                 "sandbox": {
-                    "component": components.sandbox.display().to_string(),
+                    "component": sandbox.display().to_string(),
                     "settings": {
                         "image": "docker.io/library/alpine:3.20",
-                        "allowed_mounts": ["/project"],
+                        "allowed_mounts": allowed_mounts,
                         "allowed_egress": ["127.0.0.1:1"],
                     },
                     "tools": {
@@ -110,7 +148,7 @@ fn write_config(path: &Path, components: &Components, origin: &str) {
                     },
                 },
                 "openai": {
-                    "component": components.openai.display().to_string(),
+                    "component": openai.display().to_string(),
                     "settings": {
                         "base_url": format!("{origin}/v1"),
                         "model": "mock-model",

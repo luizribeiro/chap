@@ -33,18 +33,23 @@ impl Plugin for Sandbox {
 
 impl Tools for Sandbox {
     fn definitions(&self) -> Result<Vec<ToolDefinition>, String> {
-        let allowed_mounts = self.settings.allowed_mounts.join(", ");
+        let guest_mounts = self
+            .settings
+            .allowed_mounts
+            .iter()
+            .map(|host| format!("/mnt{host}"))
+            .collect::<Vec<_>>()
+            .join(", ");
         let allowed_egress = self.settings.allowed_egress.join(", ");
         Ok(vec![ToolDefinition {
             name: RUN.to_owned(),
             description: format!(
-                "Run a command in a reusable microVM with network access for configured egress scopes. Allowed host mounts: [{allowed_mounts}]. Configured egress scopes: [{allowed_egress}]."
+                "Run a command in a reusable microVM with network access for configured egress scopes. Read-only guest mount points: [{guest_mounts}]. Configured egress scopes: [{allowed_egress}]."
             ),
             parameters: r#"{
                 "type":"object",
                 "properties":{
-                    "command":{"type":"array","items":{"type":"string"},"description":"Command and arguments to run without a shell."},
-                    "mounts":{"type":"array","items":{"type":"string"},"default":[],"description":"Host paths to mount read-only under /mnt."}
+                    "command":{"type":"array","items":{"type":"string"},"description":"Command and arguments to run without a shell."}
                 },
                 "required":["command"],
                 "additionalProperties":false
@@ -60,7 +65,7 @@ impl Tools for Sandbox {
             )));
         }
         let arguments = parse_arguments(&arguments)?;
-        let config = vm_config(&self.settings, &arguments.mounts);
+        let config = vm_config(&self.settings);
         let vm = Vm::get_or_create("workspace", config)
             .await
             .map_err(ToolError::from)?;
@@ -81,10 +86,11 @@ impl Tools for Sandbox {
     }
 }
 
-fn vm_config(settings: &Settings, mounts: &[String]) -> VmConfig {
+fn vm_config(settings: &Settings) -> VmConfig {
     VmConfig {
         image: settings.image.clone(),
-        mounts: mounts
+        mounts: settings
+            .allowed_mounts
             .iter()
             .map(|host| Mount {
                 host: host.clone(),
@@ -122,8 +128,6 @@ fn default_image() -> String {
 #[serde(deny_unknown_fields)]
 struct RunArguments {
     command: Vec<String>,
-    #[serde(default)]
-    mounts: Vec<String>,
 }
 
 #[cfg(test)]
@@ -174,29 +178,40 @@ mod tests {
             allowed_egress: vec!["0.0.0.0/0:443".to_owned(), "10.0.0.0/8:80".to_owned()],
         };
 
-        let config = vm_config(&settings, &[]);
+        let config = vm_config(&settings);
 
         assert_eq!(config.egress, settings.allowed_egress);
     }
 
     #[test]
-    fn parses_run_arguments_and_defaults_mounts() {
+    fn configures_the_vm_with_all_allowed_mounts() {
+        let settings = Settings {
+            image: default_image(),
+            allowed_mounts: vec!["/project".to_owned(), "/var/log".to_owned()],
+            allowed_egress: vec![],
+        };
+
+        let config = vm_config(&settings);
+
+        assert_eq!(config.mounts.len(), 2);
+        assert_eq!(config.mounts[0].host, "/project");
+        assert_eq!(config.mounts[0].guest, "/mnt/project");
+        assert!(config.mounts[0].readonly);
+        assert_eq!(config.mounts[1].host, "/var/log");
+        assert_eq!(config.mounts[1].guest, "/mnt/var/log");
+        assert!(config.mounts[1].readonly);
+    }
+
+    #[test]
+    fn parses_run_arguments() {
         assert_eq!(
             parse_arguments(r#"{"command":["echo","hello"]}"#).unwrap(),
             RunArguments {
                 command: vec!["echo".to_owned(), "hello".to_owned()],
-                mounts: vec![],
-            }
-        );
-        assert_eq!(
-            parse_arguments(r#"{"command":["pwd"],"mounts":["/project"]}"#).unwrap(),
-            RunArguments {
-                command: vec!["pwd".to_owned()],
-                mounts: vec!["/project".to_owned()],
             }
         );
         assert!(matches!(
-            parse_arguments(r#"{"command":["pwd"],"cwd":"/work"}"#),
+            parse_arguments(r#"{"command":["pwd"],"mounts":["/project"]}"#),
             Err(ToolError::InvalidInput(message)) if message.starts_with("invalid `run` arguments:")
         ));
     }
@@ -212,6 +227,8 @@ mod tests {
         assert_eq!(parameters["type"], "object");
         assert_eq!(parameters["additionalProperties"], false);
         assert_eq!(parameters["required"], serde_json::json!(["command"]));
+        assert!(parameters["properties"].get("mounts").is_none());
+        assert!(definitions[0].description.contains("/mnt/project"));
     }
 
     #[test]
