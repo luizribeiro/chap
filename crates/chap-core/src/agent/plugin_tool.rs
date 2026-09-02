@@ -22,7 +22,7 @@ impl PluginTool {
         settings: &ToolsSettings,
     ) -> Result<Vec<Self>, StartError> {
         let plugin_id = handle.id();
-        let definitions = trace_plugin_call(plugin_id.as_str(), "tools", "definitions", async {
+        let definitions = trace_plugin_call(plugin_id, "tools", "definitions", async {
             runtime
                 .client::<tool_bindings::Role>(&handle)
                 .map_err(|source| StartError::RoleClientUnavailable {
@@ -74,7 +74,7 @@ impl Tool for PluginTool {
     ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + '_>> {
         let plugin_id = self.handle.id();
         Box::pin(trace_plugin_call(
-            plugin_id.as_str(),
+            plugin_id,
             "tools",
             "execute",
             async move {

@@ -45,7 +45,7 @@ impl AgentInner {
             .ok_or_else(|| ProviderError::NotConfigured {
                 provider: provider.clone(),
             })?;
-        trace_plugin_call(provider.as_str(), "provider", "complete", async {
+        trace_plugin_call(provider, "provider", "complete", async {
             self.lockgate
                 .client::<provider_bindings::Role>(&plugin.handle)
                 .map_err(|source| ProviderError::RoleUnavailable {

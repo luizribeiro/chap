@@ -1,8 +1,10 @@
 use std::future::Future;
+
+use lockgate::PluginId;
 use tracing::{Instrument, debug, info_span};
 
 pub(super) async fn trace_plugin_call<F, T, E>(
-    plugin_id: &str,
+    plugin_id: &PluginId,
     role: &'static str,
     function: &'static str,
     call: F,
