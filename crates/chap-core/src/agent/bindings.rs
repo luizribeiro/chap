@@ -10,7 +10,7 @@ lockgate::host_bindings!({
 lockgate::host_bindings!({
     path: "../chap-wit/wit",
     world: "host-exec",
-    imports: CapabilityHost,
+    imports_type: CapabilityHost,
     data: (),
 });
 
@@ -19,7 +19,7 @@ lockgate::host_bindings!({
 lockgate::host_bindings!({
     path: "../chap-wit/wit",
     world: "host-state",
-    imports: CapabilityHost,
+    imports_type: CapabilityHost,
     data: (),
 });
 
@@ -28,7 +28,7 @@ lockgate::host_bindings!({
 lockgate::host_bindings!({
     path: "../chap-wit/wit",
     world: "host-exec-state",
-    imports: CapabilityHost,
+    imports_type: CapabilityHost,
     data: (),
 });
 
