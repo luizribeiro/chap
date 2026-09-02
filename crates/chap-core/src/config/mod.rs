@@ -8,6 +8,7 @@ pub(crate) mod agent;
 pub(crate) mod roles;
 
 use agent::AgentSettings;
+use lockgate::PluginId;
 use roles::{ContextSettings, ToolsSettings};
 use serde::Deserialize;
 use serde_json::Value;
@@ -134,14 +135,14 @@ impl Config {
         self.name.as_deref()
     }
 
-    pub(crate) fn plugins(&self) -> impl Iterator<Item = (&str, &ConfiguredPlugin)> {
+    pub(crate) fn plugins(&self) -> impl Iterator<Item = (PluginId, &ConfiguredPlugin)> {
         self.plugins
             .iter()
-            .map(|(id, plugin)| (id.as_str(), plugin))
+            .map(|(id, plugin)| (PluginId::from(id.clone()), plugin))
     }
 
-    pub(crate) fn plugin(&self, id: &str) -> Option<&ConfiguredPlugin> {
-        self.plugins.get(id)
+    pub(crate) fn plugin(&self, plugin_id: &PluginId) -> Option<&ConfiguredPlugin> {
+        self.plugins.get(plugin_id.as_str())
     }
 
     pub(crate) fn component_path(&self, plugin: &ConfiguredPlugin) -> PathBuf {
@@ -394,7 +395,7 @@ mod tests {
         .unwrap();
 
         let (id, plugin) = config.plugins().next().unwrap();
-        assert_eq!(id, "openai");
+        assert_eq!(id, PluginId::from("openai"));
         assert_eq!(
             plugin.component(),
             Path::new("./plugins/openai-compatible.wasm")
@@ -450,7 +451,7 @@ mod tests {
             let Ok(config) = serde_json::from_str::<Config>(&source) else {
                 continue;
             };
-            let plugin = config.plugin("example").unwrap();
+            let plugin = config.plugin(&PluginId::from("example")).unwrap();
 
             assert!(
                 plugin.has_section(role.interface),
@@ -476,7 +477,10 @@ mod tests {
         )
         .unwrap();
 
-        let settings = config.plugin("example").unwrap().settings();
+        let settings = config
+            .plugin(&PluginId::from("example"))
+            .unwrap()
+            .settings();
         assert_eq!(settings["api_key_env"], "EXAMPLE_API_KEY");
         assert!(settings.get("api_key").is_none());
     }

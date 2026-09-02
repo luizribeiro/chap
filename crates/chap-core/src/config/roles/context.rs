@@ -61,11 +61,17 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            config.plugin("default-context").unwrap().context_channel(),
+            config
+                .plugin(&"default-context".into())
+                .unwrap()
+                .context_channel(),
             ContextChannel::Context
         );
         assert_eq!(
-            config.plugin("operator-context").unwrap().context_channel(),
+            config
+                .plugin(&"operator-context".into())
+                .unwrap()
+                .context_channel(),
             ContextChannel::System
         );
     }

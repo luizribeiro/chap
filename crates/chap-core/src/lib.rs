@@ -10,7 +10,7 @@ pub use config::LoadError;
 pub use consent::{ConsentError, ConsentStore, PluginConsentReview};
 pub use lockgate::{
     CallBudget, ConsentManifest, ConsentRecord, DriftChange, DriftKind, DriftReport, ExportDrift,
-    ExportDriftKind, GrantReview, RequiredEnvironmentVariable,
+    ExportDriftKind, GrantReview, PluginId, RequiredEnvironmentVariable,
 };
 pub use provider::{FinishReason, ProviderError};
 pub use session::{

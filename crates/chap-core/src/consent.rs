@@ -1,5 +1,5 @@
 use crate::config::LoadError;
-use lockgate::{ConsentManifest, ConsentRecord, DriftReport};
+use lockgate::{ConsentManifest, ConsentRecord, DriftReport, PluginId};
 use std::{
     collections::BTreeMap,
     fs, io,
@@ -183,10 +183,10 @@ impl ConsentStore {
         &self.path
     }
 
-    pub fn load(&self, instance_id: &str) -> Option<ConsentRecord> {
+    pub fn load(&self, plugin_id: &PluginId) -> Option<ConsentRecord> {
         self.records()
-            .and_then(|records| records.get(instance_id).cloned())
-            .filter(|record| record.instance_id == instance_id)
+            .and_then(|records| records.get(plugin_id.as_str()).cloned())
+            .filter(|record| record.instance_id == plugin_id.as_str())
     }
 
     pub fn save(&self, record: ConsentRecord) -> Result<(), ConsentError> {
@@ -206,11 +206,11 @@ impl ConsentStore {
         self.write(&records)
     }
 
-    pub fn remove(&self, instance_id: &str) -> Result<(), ConsentError> {
+    pub fn remove(&self, plugin_id: &PluginId) -> Result<(), ConsentError> {
         let Some(mut records) = self.records() else {
             return Ok(());
         };
-        if records.remove(instance_id).is_none() {
+        if records.remove(plugin_id.as_str()).is_none() {
             return Ok(());
         }
         if records.is_empty() {
@@ -342,6 +342,10 @@ mod tests {
         .unwrap()
     }
 
+    fn plugin_id(id: &str) -> PluginId {
+        PluginId::from(id)
+    }
+
     #[test]
     fn consent_record_round_trips_through_json_storage() {
         let directory = tempfile::tempdir().unwrap();
@@ -351,12 +355,12 @@ mod tests {
 
         store.save(record.clone()).unwrap();
 
-        assert_eq!(store.load("example"), Some(record.clone()));
+        assert_eq!(store.load(&plugin_id("example")), Some(record.clone()));
         let persisted: BTreeMap<String, ConsentRecord> =
             serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(persisted.get("example"), Some(&record));
-        store.remove("example").unwrap();
-        assert_eq!(store.load("example"), None);
+        store.remove(&plugin_id("example")).unwrap();
+        assert_eq!(store.load(&plugin_id("example")), None);
         assert!(!path.exists());
     }
 
@@ -370,8 +374,8 @@ mod tests {
         store.save(first.clone()).unwrap();
         store.save(second.clone()).unwrap();
 
-        assert_eq!(store.load("first"), Some(first));
-        assert_eq!(store.load("second"), Some(second));
+        assert_eq!(store.load(&plugin_id("first")), Some(first));
+        assert_eq!(store.load(&plugin_id("second")), Some(second));
     }
 
     #[test]
@@ -387,7 +391,7 @@ mod tests {
         store.save(replacement.clone()).unwrap();
 
         assert_eq!(fs::read(corrupt_path).unwrap(), corrupt);
-        assert_eq!(store.load("replacement"), Some(replacement));
+        assert_eq!(store.load(&plugin_id("replacement")), Some(replacement));
     }
 
     #[test]
@@ -396,9 +400,9 @@ mod tests {
         let path = directory.path().join("consent.json");
         let store = store(directory.path());
 
-        assert_eq!(store.load("example"), None);
+        assert_eq!(store.load(&plugin_id("example")), None);
         fs::write(path, b"not JSON").unwrap();
-        assert_eq!(store.load("example"), None);
+        assert_eq!(store.load(&plugin_id("example")), None);
     }
 
     #[test]

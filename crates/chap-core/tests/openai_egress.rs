@@ -226,10 +226,11 @@ async fn admission_after_narrowed_egress_refreshes_the_stored_record() {
         .scopes
         .push("http://127.0.0.1:41002".to_owned());
     prior.approved_at = "2026-08-01T12:00:00Z".to_owned();
+    let plugin_id = chap_core::PluginId::from("openai");
     consent.save(prior.clone()).unwrap();
 
     let agent = load_builder(&config_path).start().await.unwrap();
-    let refreshed = consent.load("openai").unwrap();
+    let refreshed = consent.load(&plugin_id).unwrap();
 
     assert_eq!(refreshed.request_digest, approved.request_digest);
     assert_eq!(refreshed.component_digest, approved.component_digest);

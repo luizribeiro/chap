@@ -6,9 +6,11 @@ use unicode_width::UnicodeWidthStr;
 pub(super) fn plugin_list(builder: &AgentBuilder) -> Result<String, String> {
     let mut rows = Vec::new();
     for (id, component) in builder.plugins() {
-        let roles = builder.plugin_roles(id).map_err(render_consent_error)?;
+        let roles = builder
+            .plugin_roles(id.as_str())
+            .map_err(render_consent_error)?;
         rows.push([
-            id.to_owned(),
+            id.to_string(),
             if roles.is_empty() {
                 "-".to_owned()
             } else {

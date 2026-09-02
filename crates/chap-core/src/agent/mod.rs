@@ -382,19 +382,18 @@ impl AgentBuilder {
         }
     }
 
-    pub fn plugins(&self) -> impl Iterator<Item = (&str, &Path)> {
+    pub fn plugins(&self) -> impl Iterator<Item = (PluginId, &Path)> {
         self.config
             .plugins()
             .map(|(id, plugin)| (id, plugin.component()))
     }
 
     pub fn plugin_roles(&self, id: &str) -> Result<Vec<&'static str>, ConsentError> {
-        let plugin = self
-            .config
-            .plugin(id)
-            .ok_or_else(|| ConsentError::PluginNotConfigured {
+        let plugin = self.config.plugin(&PluginId::from(id)).ok_or_else(|| {
+            ConsentError::PluginNotConfigured {
                 plugin: id.to_owned(),
-            })?;
+            }
+        })?;
         let bytes = Self::plugin_bytes(&self.config, id, plugin)?;
         let inspection =
             lockgate::inspect(&bytes).map_err(|source| ConsentError::InspectPlugin {
@@ -450,9 +449,9 @@ impl AgentBuilder {
         let mut refusals = Vec::new();
         for (id, plugin) in config.plugins() {
             let path = config.component_path(plugin);
-            match Self::preflight_plugin(builder, config, id, plugin).await {
+            match Self::preflight_plugin(builder, config, id.as_str(), plugin).await {
                 Ok(check) => checks.push(check),
-                Err(error) => refusals.push(Self::plugin_refusal(id, &path, error)?),
+                Err(error) => refusals.push(Self::plugin_refusal(id.as_str(), &path, error)?),
             }
         }
         if refusals.is_empty() {
@@ -534,12 +533,13 @@ impl AgentBuilder {
     }
 
     pub fn deny_plugin(&self, id: &str) -> Result<(), ConsentError> {
-        if self.config.plugin(id).is_none() {
+        let plugin_id = PluginId::from(id);
+        if self.config.plugin(&plugin_id).is_none() {
             return Err(ConsentError::PluginNotConfigured {
                 plugin: id.to_owned(),
             });
         }
-        self.consent_store()?.remove(id)
+        self.consent_store()?.remove(&plugin_id)
     }
 
     pub async fn review_plugin(&self, id: &str) -> Result<PluginConsentReview, ConsentError> {
@@ -597,7 +597,7 @@ impl AgentBuilder {
     ) -> Result<PluginConsentReview, ConsentError> {
         let prepared = self.prepare_configured_plugin(builder, id).await?;
         let manifest = prepared.review();
-        let prior = consent.load(id);
+        let prior = consent.load(&PluginId::from(id));
         let drift = prior
             .as_ref()
             .filter(|prior| {
@@ -625,7 +625,7 @@ impl AgentBuilder {
 
     fn configured_plugin(&self, id: &str) -> Result<&ConfiguredPlugin, ConsentError> {
         self.config
-            .plugin(id)
+            .plugin(&PluginId::from(id))
             .ok_or_else(|| ConsentError::PluginNotConfigured {
                 plugin: id.to_owned(),
             })
@@ -744,9 +744,9 @@ impl AgentBuilder {
         let mut refusals = Vec::new();
 
         for (id, plugin) in config.plugins() {
-            match Self::load_plugin(builder, config, consent, id, plugin).await? {
+            match Self::load_plugin(builder, config, consent, id.as_str(), plugin).await? {
                 PluginLoad::Admitted(admitted) => {
-                    plugins.insert(id.to_owned(), admitted);
+                    plugins.insert(id.as_str().to_owned(), admitted);
                 }
                 PluginLoad::Refused(error) => {
                     tracing::warn!(plugin = %id, error = %error, "plugin admission failed");
@@ -776,7 +776,7 @@ impl AgentBuilder {
                 return Ok(PluginLoad::Refused(Self::plugin_refusal(id, &path, error)?));
             }
         };
-        let record = consent.load(id);
+        let record = consent.load(&PluginId::from(id));
         let acceptance = match prepared.accept_reviewed(record.as_ref()) {
             Ok(acceptance) => acceptance,
             Err(required) => {

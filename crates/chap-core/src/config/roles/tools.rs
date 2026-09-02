@@ -22,7 +22,7 @@ impl ToolsSettings {
 #[cfg(test)]
 impl Config {
     pub(crate) fn plugin_tools_execution(&self, id: &str) -> ExecutionMode {
-        self.plugin(id)
+        self.plugin(&id.into())
             .map(|plugin| plugin.role_settings())
             .map(|settings| settings.tools.execution())
             .unwrap_or_default()

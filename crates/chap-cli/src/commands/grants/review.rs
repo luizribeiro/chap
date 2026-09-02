@@ -15,7 +15,7 @@ pub(super) async fn grants_review(
         Some(id) => vec![id.to_owned()],
         None => builder
             .plugins()
-            .map(|(id, _)| id.to_owned())
+            .map(|(id, _)| id.to_string())
             .collect::<Vec<_>>(),
     };
     if ids.is_empty() {
