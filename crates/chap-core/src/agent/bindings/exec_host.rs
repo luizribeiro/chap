@@ -42,7 +42,7 @@ impl exec::Host for CapabilityHost {
     ) -> Result<exec::ExecResult, exec::ExecError> {
         self.executor
             .execute(
-                cx.subject().plugin_id().as_str(),
+                cx.subject().plugin_id(),
                 &command,
                 timeout_ms.map(Duration::from_millis),
             )

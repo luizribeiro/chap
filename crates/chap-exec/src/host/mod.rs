@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::vec::Vec;
 
+use lockgate::PluginId;
 use serde::Deserialize;
 use tokio::process::Command;
 use tokio::sync::Semaphore;
@@ -73,7 +74,7 @@ pub struct Executor {
     project_root: PathBuf,
     sandbox: sandbox::Sandbox,
     max_concurrent_processes: usize,
-    spawn_slots: Mutex<HashMap<String, Arc<Semaphore>>>,
+    spawn_slots: Mutex<HashMap<PluginId, Arc<Semaphore>>>,
 }
 
 impl Executor {
@@ -89,21 +90,21 @@ impl Executor {
         }
     }
 
-    fn spawn_slots_for(&self, plugin_id: &str) -> Arc<Semaphore> {
+    fn spawn_slots_for(&self, plugin_id: &PluginId) -> Arc<Semaphore> {
         let mut slots = self
             .spawn_slots
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         Arc::clone(
             slots
-                .entry(String::from(plugin_id))
+                .entry(plugin_id.clone())
                 .or_insert_with(|| Arc::new(Semaphore::new(self.max_concurrent_processes))),
         )
     }
 
     pub async fn execute(
         &self,
-        plugin_id: &str,
+        plugin_id: &PluginId,
         target: &CommandTarget,
         timeout: Option<Duration>,
     ) -> Result<ExecOutcome, ExecError> {
@@ -144,7 +145,11 @@ mod host_tests {
 
     use tempfile::TempDir;
 
-    use super::{CommandTarget, ExecError, ExecSettings, Executor};
+    use super::{CommandTarget, ExecError, ExecSettings, Executor, PluginId};
+
+    fn plugin_id(id: &str) -> PluginId {
+        PluginId::from(id)
+    }
 
     fn target(program: &str, args: &[&str]) -> CommandTarget {
         CommandTarget {
@@ -159,7 +164,11 @@ mod host_tests {
         let executor = Executor::new(ExecSettings::default(), project.path());
 
         let outcome = executor
-            .execute("plugin", &target("echo", &["executor-ok"]), None)
+            .execute(
+                &plugin_id("plugin"),
+                &target("echo", &["executor-ok"]),
+                None,
+            )
             .await
             .unwrap();
 
@@ -183,7 +192,7 @@ mod host_tests {
 
         let error = executor
             .execute(
-                "plugin",
+                &plugin_id("plugin"),
                 &target("sh", &["-c", "sleep 30"]),
                 Some(Duration::from_secs(10)),
             )
@@ -209,7 +218,7 @@ mod host_tests {
         let first = tokio::spawn(async move {
             first_executor
                 .execute(
-                    "plugin",
+                    &plugin_id("plugin"),
                     &target(
                         "sh",
                         &[
@@ -235,7 +244,8 @@ mod host_tests {
             "sh",
             &["-c", "touch second-started; test -e first-finished"],
         );
-        let second = executor.execute("plugin", &second_target, None);
+        let plugin_id = plugin_id("plugin");
+        let second = executor.execute(&plugin_id, &second_target, None);
         let (first, second) = tokio::join!(first, second);
 
         assert_eq!(first.unwrap().unwrap().exit_code, 0);
@@ -259,7 +269,7 @@ mod host_tests {
         let first = tokio::spawn(async move {
             first_executor
                 .execute(
-                    "holder",
+                    &plugin_id("holder"),
                     &target(
                         "sh",
                         &[
@@ -283,7 +293,7 @@ mod host_tests {
 
         let other = executor
             .execute(
-                "other",
+                &plugin_id("other"),
                 &target("sh", &["-c", "test ! -e holder-finished"]),
                 None,
             )
