@@ -660,7 +660,7 @@
           packages = [
             rust
             pkgs.wasmtime
-          ] ++ gitHooks.enabledPackages;
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.libcap_ng ] ++ gitHooks.enabledPackages;
 
           shellHook = gitHooks.shellHook;
 
