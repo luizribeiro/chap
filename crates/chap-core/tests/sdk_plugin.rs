@@ -219,6 +219,11 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
     std::fs::write(
         &config_path,
         json!({
+            "agent": {
+                "budgets": {
+                    "tools": { "deadline_ms": 1000 },
+                },
+            },
             "plugins": {
                 "sdk-multi-role": {
                     "component": components.multi_role.display().to_string(),
@@ -234,11 +239,7 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
     .unwrap();
     let builder = AgentBuilder::load(&config_path)
         .unwrap()
-        .state_dir(config_directory.path())
-        .tools_budget(CallBudget {
-            fuel: INVOCATION_FUEL,
-            deadline: Duration::from_secs(1),
-        });
+        .state_dir(config_directory.path());
     builder.approve_plugin("sdk-multi-role").await.unwrap();
 
     // Generous outer bound: start() also wasmtime-compiles the component,

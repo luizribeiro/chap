@@ -350,6 +350,29 @@ whose tool resolves to sequential makes the whole batch sequential; otherwise
 `agent.tool_execution.max_concurrency` limits the number of calls in flight.
 The limit must be at least 1 and has no fixed upper bound.
 
+### Plugin call budgets
+
+Fuel and wall-clock deadlines are configured agent-wide by plugin role:
+
+```json
+{
+  "agent": {
+    "budgets": {
+      "admission": { "fuel": 25000000, "deadline_ms": 30000 },
+      "provider": { "fuel": 25000000, "deadline_ms": 120000 },
+      "tools": { "fuel": 25000000, "deadline_ms": 30000 },
+      "context": { "fuel": 25000000, "deadline_ms": 10000 }
+    }
+  }
+}
+```
+
+The values shown are the defaults; they are initial guesses pending measurement
+of realistic plugin workloads. Omitted roles or fields retain their defaults.
+The `tools` budget covers both tool-definition loading and tool execution.
+Every fuel value must be between 1 and 1,000,000,000 instructions, and every
+`deadline_ms` must be between 1 and 600,000 milliseconds (10 minutes).
+
 A plugin's `tools` section can tighten all tools loaded from that plugin:
 
 ```json

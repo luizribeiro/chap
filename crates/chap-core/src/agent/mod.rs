@@ -1,5 +1,7 @@
 use crate::config::{
-    Config, ConfiguredPlugin, LoadError, agent::ToolExecutionSettings, roles::PluginRoleSettings,
+    Config, ConfiguredPlugin, LoadError,
+    agent::{PluginBudgetSettings, ToolExecutionSettings},
+    roles::PluginRoleSettings,
 };
 use crate::consent::{ConsentError, ConsentStore, PluginConsentReview};
 use crate::session::{
@@ -33,8 +35,6 @@ mod turn;
 #[path = "vm.rs"]
 mod vm_host;
 
-const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
-const PLUGIN_ADMISSION_DEADLINE: Duration = Duration::from_secs(30);
 const GUEST_HTTP_REQUEST_CEILING: Duration = Duration::from_secs(120);
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
@@ -131,33 +131,24 @@ struct PluginBudgets {
 
 impl Default for PluginBudgets {
     fn default() -> Self {
+        Self::from(PluginBudgetSettings::default())
+    }
+}
+
+impl From<PluginBudgetSettings> for PluginBudgets {
+    fn from(budgets: PluginBudgetSettings) -> Self {
         Self {
             provider: bindings::provider::Budgets {
-                complete: CallBudget {
-                    fuel: PLUGIN_FUEL_PER_CALL,
-                    deadline: Duration::from_secs(120),
-                },
+                complete: budgets.provider,
             },
             tools: bindings::tools::Budgets {
-                definitions: CallBudget {
-                    fuel: PLUGIN_FUEL_PER_CALL,
-                    deadline: Duration::from_secs(30),
-                },
-                execute: CallBudget {
-                    fuel: PLUGIN_FUEL_PER_CALL,
-                    deadline: Duration::from_secs(30),
-                },
+                definitions: budgets.tools,
+                execute: budgets.tools,
             },
             context: bindings::context::Budgets {
-                segments: CallBudget {
-                    fuel: PLUGIN_FUEL_PER_CALL,
-                    deadline: Duration::from_secs(10),
-                },
+                segments: budgets.context,
             },
-            admission: CallBudget {
-                fuel: PLUGIN_FUEL_PER_CALL,
-                deadline: PLUGIN_ADMISSION_DEADLINE,
-            },
+            admission: budgets.admission,
         }
     }
 }
@@ -314,11 +305,12 @@ pub(crate) struct AgentInner {
 impl AgentBuilder {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, LoadError> {
         let config = Config::load(path.as_ref())?;
+        let budgets = PluginBudgets::from(config.plugin_budgets());
         Ok(Self {
             config,
             state_dir: None,
             tools: ToolRegistry::new(),
-            budgets: PluginBudgets::default(),
+            budgets,
         })
     }
 
@@ -339,19 +331,6 @@ impl AgentBuilder {
             self.consent_path().map_err(ConsentError::StateLocation)?,
             self.config.source_path(),
         ))
-    }
-
-    /// Overrides the provider-role execution budget on every plugin.
-    pub fn provider_budget(mut self, budget: CallBudget) -> Self {
-        self.budgets.provider.complete = budget;
-        self
-    }
-
-    /// Overrides both tools-role execution budgets on every plugin.
-    pub fn tools_budget(mut self, budget: CallBudget) -> Self {
-        self.budgets.tools.definitions = budget;
-        self.budgets.tools.execute = budget;
-        self
     }
 
     pub fn plugins(&self) -> impl Iterator<Item = (&str, &Path)> {

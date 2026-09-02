@@ -1,6 +1,6 @@
 use super::{
     super::{
-        AgentBuilder, PLUGIN_ADMISSION_DEADLINE, PLUGIN_FUEL_PER_CALL, PluginBudgets, host_builder,
+        AgentBuilder, PluginBudgets, host_builder,
         provider::{CompletionBackend, PluginBackend},
         runtime_limits,
     },
@@ -128,36 +128,36 @@ fn default_call_budgets_preserve_existing_bounds() {
     assert_eq!(
         budgets.provider.complete,
         CallBudget {
-            fuel: PLUGIN_FUEL_PER_CALL,
+            fuel: 25_000_000,
             deadline: Duration::from_secs(120),
         }
     );
     assert_eq!(
         budgets.tools.definitions,
         CallBudget {
-            fuel: PLUGIN_FUEL_PER_CALL,
+            fuel: 25_000_000,
             deadline: Duration::from_secs(30),
         }
     );
     assert_eq!(
         budgets.tools.execute,
         CallBudget {
-            fuel: PLUGIN_FUEL_PER_CALL,
+            fuel: 25_000_000,
             deadline: Duration::from_secs(30),
         }
     );
     assert_eq!(
         budgets.context.segments,
         CallBudget {
-            fuel: PLUGIN_FUEL_PER_CALL,
+            fuel: 25_000_000,
             deadline: Duration::from_secs(10),
         }
     );
     assert_eq!(
         budgets.admission,
         CallBudget {
-            fuel: PLUGIN_FUEL_PER_CALL,
-            deadline: PLUGIN_ADMISSION_DEADLINE,
+            fuel: 25_000_000,
+            deadline: Duration::from_secs(30),
         }
     );
 }
@@ -420,7 +420,7 @@ async fn classifies_a_trapping_provider_as_a_plugin_failure() {
 }
 
 #[tokio::test]
-async fn times_out_a_hanging_provider_plugin() {
+async fn configured_provider_budget_reaches_the_host_builder() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
@@ -431,6 +431,11 @@ async fn times_out_a_hanging_provider_plugin() {
     fs::write(
         &config_path,
         r#"{
+            "agent": {
+                "budgets": {
+                    "provider": { "deadline_ms": 1000 }
+                }
+            },
             "plugins": {
                 "example": {
                     "component": "provider.wasm"
@@ -439,7 +444,7 @@ async fn times_out_a_hanging_provider_plugin() {
         }"#,
     )
     .unwrap();
-    let builder = load_test_builder(&config_path).provider_budget(one_second_call_budget());
+    let builder = load_test_builder(&config_path);
     builder.approve_plugin("example").await.unwrap();
     let agent = builder.start().await.unwrap();
     let backend = PluginBackend::new(&agent.inner, "example");
@@ -1087,6 +1092,11 @@ async fn times_out_a_hanging_tool_plugin() {
     fs::write(
         &config_path,
         r#"{
+            "agent": {
+                "budgets": {
+                    "tools": { "deadline_ms": 1000 }
+                }
+            },
             "plugins": {
                 "example.tools": {
                     "component": "tools.wasm"
@@ -1096,7 +1106,7 @@ async fn times_out_a_hanging_tool_plugin() {
     )
     .unwrap();
 
-    let builder = load_test_builder(&config_path).tools_budget(one_second_call_budget());
+    let builder = load_test_builder(&config_path);
     builder.approve_plugin("example.tools").await.unwrap();
     let agent = builder.start().await.unwrap();
 
@@ -1117,13 +1127,6 @@ async fn times_out_a_hanging_tool_plugin() {
     );
     assert!(!message.contains(" failed: "), "{message}");
     fs::remove_dir_all(directory).unwrap();
-}
-
-fn one_second_call_budget() -> CallBudget {
-    CallBudget {
-        fuel: PLUGIN_FUEL_PER_CALL,
-        deadline: Duration::from_secs(1),
-    }
 }
 
 #[tokio::test]
