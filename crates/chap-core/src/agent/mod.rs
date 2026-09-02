@@ -27,6 +27,7 @@ mod bindings;
 mod context;
 mod plugin_tool;
 mod provider;
+mod telemetry;
 mod turn;
 #[cfg(feature = "vm")]
 #[path = "vm.rs"]
@@ -641,7 +642,10 @@ impl AgentBuilder {
                 PluginLoad::Admitted(admitted) => {
                     plugins.insert(id.to_owned(), admitted);
                 }
-                PluginLoad::Refused(error) => refusals.push(error),
+                PluginLoad::Refused(error) => {
+                    tracing::warn!(plugin = %id, error = %error, "plugin admission failed");
+                    refusals.push(error);
+                }
             }
         }
 

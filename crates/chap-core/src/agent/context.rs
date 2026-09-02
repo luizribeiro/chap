@@ -1,4 +1,4 @@
-use super::{AgentInner, PluginCall, bindings};
+use super::{AgentInner, PluginCall, bindings, telemetry::trace_plugin_call};
 use crate::{
     config::roles::ContextChannel,
     session::{AssembledContext, ContextError, ContextFailure},
@@ -45,18 +45,21 @@ impl AgentInner {
         &self,
         plugin: &lockgate::PluginHandle,
     ) -> Result<Vec<ContextSegment>, ContextError> {
-        self.lockgate
-            .client::<context_bindings::Role>(plugin)
-            .map_err(|source| ContextError::RoleUnavailable { source })?
-            .segments(
-                self.call_budgets
-                    .resolve(PluginCall::ContextSegments)
-                    .invocation_context(),
-            )
-            .await
-            .map_err(ContextError::from)?
-            .map_err(|message| ContextError::PluginReported { message })
-            .map(|segments| segments.into_iter().map(Into::into).collect())
+        trace_plugin_call(plugin.id(), "context", "segments", async {
+            self.lockgate
+                .client::<context_bindings::Role>(plugin)
+                .map_err(|source| ContextError::RoleUnavailable { source })?
+                .segments(
+                    self.call_budgets
+                        .resolve(PluginCall::ContextSegments)
+                        .invocation_context(),
+                )
+                .await
+                .map_err(ContextError::from)?
+                .map_err(|message| ContextError::PluginReported { message })
+                .map(|segments| segments.into_iter().map(Into::into).collect())
+        })
+        .await
     }
 }
 
@@ -69,6 +72,7 @@ fn compose_context(results: PluginResults) -> Result<AssembledContext, Vec<Conte
         let segments = match result.segments {
             Ok(segments) => segments,
             Err(source) => {
+                tracing::warn!(plugin = %plugin, error = %source, "context plugin failed");
                 failures.push(ContextFailure { plugin, source });
                 continue;
             }

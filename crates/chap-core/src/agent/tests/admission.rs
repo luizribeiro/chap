@@ -23,8 +23,9 @@ use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role, RuntimeLimits};
 use std::{
     collections::BTreeSet,
     fs,
+    io::{self, Write},
     path::{Path, PathBuf},
-    sync::mpsc,
+    sync::{Arc, Mutex, mpsc},
     time::Duration,
 };
 use wit_parser::{Resolve, WorldItem, WorldKey};
@@ -40,6 +41,20 @@ fn only_refusal(error: StartError) -> PluginRefusal {
     let mut refusals = refused_plugins(error);
     assert_eq!(refusals.len(), 1);
     refusals.pop().unwrap()
+}
+
+#[derive(Clone)]
+struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+impl Write for CapturedLogs {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 async fn panic_join_error() -> tokio::task::JoinError {
@@ -593,6 +608,49 @@ async fn start_refuses_and_names_every_unapproved_plugin() {
         refusals[1].reason,
         PluginRefusalReason::ApprovalRequired
     ));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn admission_refusal_emits_a_warning_with_the_plugin_id() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component("example.provider"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.json");
+    fs::write(
+        &config_path,
+        r#"{
+            "plugins": {
+                "tracing-admission-test": { "component": "provider.wasm" }
+            }
+        }"#,
+    )
+    .unwrap();
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .without_time()
+        .with_max_level(tracing::Level::WARN)
+        .with_writer({
+            let captured = Arc::clone(&captured);
+            move || CapturedLogs(Arc::clone(&captured))
+        })
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    let error = match load_test_builder(&config_path).start().await {
+        Ok(_) => panic!("unapproved plugin unexpectedly admitted"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(error, StartError::AdmissionRefused(_)));
+    let output = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
+    assert!(output.contains("WARN"), "{output}");
+    assert!(output.contains("plugin admission failed"), "{output}");
+    assert!(output.contains("plugin=tracing-admission-test"), "{output}");
     fs::remove_dir_all(directory).unwrap();
 }
 
