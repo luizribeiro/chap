@@ -20,7 +20,7 @@ impl state::Host for CapabilityHost {
         key: String,
     ) -> Result<Option<Vec<u8>>, state::StateError> {
         self.store
-            .get(cx.subject().plugin_id().as_str(), &key)
+            .get(cx.subject().plugin_id(), &key)
             .map_err(Into::into)
     }
 
@@ -32,14 +32,14 @@ impl state::Host for CapabilityHost {
         value: Vec<u8>,
     ) -> Result<(), state::StateError> {
         self.store
-            .set(cx.subject().plugin_id().as_str(), &key, value)
+            .set(cx.subject().plugin_id(), &key, value)
             .map_err(Into::into)
     }
 
     #[lockgate::requires(permission = chap_state::state::ACCESS)]
     async fn delete(&mut self, cx: HostCtx<'_, ()>, key: String) -> Result<(), state::StateError> {
         self.store
-            .delete(cx.subject().plugin_id().as_str(), &key)
+            .delete(cx.subject().plugin_id(), &key)
             .map_err(Into::into)
     }
 }

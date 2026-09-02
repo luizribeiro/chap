@@ -1,3 +1,4 @@
+use lockgate_policy::PluginId;
 use serde::Deserialize;
 use std::{
     borrow::ToOwned,
@@ -40,7 +41,7 @@ pub struct StateStore {
 
 #[derive(Default)]
 struct StoreData {
-    data_by_plugin: HashMap<String, PluginData>,
+    data_by_plugin: HashMap<PluginId, PluginData>,
 }
 
 #[derive(Default)]
@@ -57,7 +58,7 @@ impl StateStore {
         }
     }
 
-    pub fn get(&self, plugin_id: &str, key: &str) -> Result<Option<Vec<u8>>, StateError> {
+    pub fn get(&self, plugin_id: &PluginId, key: &str) -> Result<Option<Vec<u8>>, StateError> {
         validate_key(key)?;
 
         let store = self.lock();
@@ -68,7 +69,7 @@ impl StateStore {
             .cloned())
     }
 
-    pub fn set(&self, plugin_id: &str, key: &str, value: Vec<u8>) -> Result<(), StateError> {
+    pub fn set(&self, plugin_id: &PluginId, key: &str, value: Vec<u8>) -> Result<(), StateError> {
         validate_key(key)?;
 
         let quota_error = || StateError::QuotaExceeded(self.max_bytes);
@@ -94,16 +95,13 @@ impl StateStore {
             .filter(|bytes| *bytes <= self.max_bytes)
             .ok_or_else(quota_error)?;
 
-        let plugin_data = store
-            .data_by_plugin
-            .entry(plugin_id.to_owned())
-            .or_default();
+        let plugin_data = store.data_by_plugin.entry(plugin_id.clone()).or_default();
         plugin_data.bytes = next_bytes;
         plugin_data.entries.insert(key.to_owned(), value);
         Ok(())
     }
 
-    pub fn delete(&self, plugin_id: &str, key: &str) -> Result<(), StateError> {
+    pub fn delete(&self, plugin_id: &PluginId, key: &str) -> Result<(), StateError> {
         validate_key(key)?;
 
         let mut store = self.lock();
@@ -142,7 +140,11 @@ fn validate_key(key: &str) -> Result<(), StateError> {
 mod tests {
     use std::vec;
 
-    use super::{StateError, StateSettings, StateStore};
+    use super::{PluginId, StateError, StateSettings, StateStore};
+
+    fn plugin_id(id: &str) -> PluginId {
+        PluginId::from(id)
+    }
 
     fn store_with_quota(max_bytes: u64) -> StateStore {
         StateStore::new(StateSettings { max_bytes })
@@ -152,36 +154,41 @@ mod tests {
     fn stores_and_reads_values() {
         let store = StateStore::new(StateSettings::default());
 
-        assert_eq!(store.get("calendar", "cursor"), Ok(None));
+        assert_eq!(store.get(&plugin_id("calendar"), "cursor"), Ok(None));
 
         let cursor = br#"{"last_event":"evt_1042"}"#.to_vec();
-        store.set("calendar", "cursor", cursor.clone()).unwrap();
+        store
+            .set(&plugin_id("calendar"), "cursor", cursor.clone())
+            .unwrap();
 
-        assert_eq!(store.get("calendar", "cursor"), Ok(Some(cursor)));
+        assert_eq!(
+            store.get(&plugin_id("calendar"), "cursor"),
+            Ok(Some(cursor))
+        );
     }
 
     #[test]
     fn delete_removes_values_and_ignores_missing_keys() {
         let store = StateStore::new(StateSettings::default());
         store
-            .set("mail", "refresh-token", b"token-123".to_vec())
+            .set(&plugin_id("mail"), "refresh-token", b"token-123".to_vec())
             .unwrap();
 
-        assert_eq!(store.delete("mail", "refresh-token"), Ok(()));
-        assert_eq!(store.get("mail", "refresh-token"), Ok(None));
-        assert_eq!(store.delete("mail", "refresh-token"), Ok(()));
+        assert_eq!(store.delete(&plugin_id("mail"), "refresh-token"), Ok(()));
+        assert_eq!(store.get(&plugin_id("mail"), "refresh-token"), Ok(None));
+        assert_eq!(store.delete(&plugin_id("mail"), "refresh-token"), Ok(()));
     }
 
     #[test]
     fn plugins_are_isolated() {
         let store = StateStore::new(StateSettings::default());
         store
-            .set("a", "cursor", b"plugin-a-cursor".to_vec())
+            .set(&plugin_id("a"), "cursor", b"plugin-a-cursor".to_vec())
             .unwrap();
 
-        assert_eq!(store.get("b", "cursor"), Ok(None));
+        assert_eq!(store.get(&plugin_id("b"), "cursor"), Ok(None));
         assert_eq!(
-            store.get("a", "cursor"),
+            store.get(&plugin_id("a"), "cursor"),
             Ok(Some(b"plugin-a-cursor".to_vec()))
         );
     }
@@ -189,39 +196,57 @@ mod tests {
     #[test]
     fn set_uses_last_writer_wins() {
         let store = StateStore::new(StateSettings::default());
-        store.set("search", "page", b"first".to_vec()).unwrap();
-        store.set("search", "page", b"second".to_vec()).unwrap();
+        store
+            .set(&plugin_id("search"), "page", b"first".to_vec())
+            .unwrap();
+        store
+            .set(&plugin_id("search"), "page", b"second".to_vec())
+            .unwrap();
 
-        assert_eq!(store.get("search", "page"), Ok(Some(b"second".to_vec())));
+        assert_eq!(
+            store.get(&plugin_id("search"), "page"),
+            Ok(Some(b"second".to_vec()))
+        );
     }
 
     #[test]
     fn quota_rejects_without_modifying_and_frees_replaced_or_deleted_bytes() {
         let store = store_with_quota(64);
         let original = vec![b'a'; 55];
-        store.set("plugin", "cache", original.clone()).unwrap();
+        store
+            .set(&plugin_id("plugin"), "cache", original.clone())
+            .unwrap();
 
         assert_eq!(
-            store.set("plugin", "cache", vec![b'b'; 60]),
+            store.set(&plugin_id("plugin"), "cache", vec![b'b'; 60]),
             Err(StateError::QuotaExceeded(64))
         );
-        assert_eq!(store.get("plugin", "cache"), Ok(Some(original)));
+        assert_eq!(store.get(&plugin_id("plugin"), "cache"), Ok(Some(original)));
 
         let smaller = vec![b'c'; 40];
-        store.set("plugin", "cache", smaller.clone()).unwrap();
-        store.set("plugin", "other", vec![b'd'; 14]).unwrap();
+        store
+            .set(&plugin_id("plugin"), "cache", smaller.clone())
+            .unwrap();
+        store
+            .set(&plugin_id("plugin"), "other", vec![b'd'; 14])
+            .unwrap();
         assert_eq!(
-            store.set("plugin", "fresh", vec![b'e'; 14]),
+            store.set(&plugin_id("plugin"), "fresh", vec![b'e'; 14]),
             Err(StateError::QuotaExceeded(64))
         );
 
-        store.delete("plugin", "other").unwrap();
-        store.set("plugin", "fresh", vec![b'e'; 14]).unwrap();
-        assert_eq!(store.get("plugin", "cache"), Ok(Some(smaller)));
-        assert_eq!(store.get("plugin", "fresh"), Ok(Some(vec![b'e'; 14])));
+        store.delete(&plugin_id("plugin"), "other").unwrap();
+        store
+            .set(&plugin_id("plugin"), "fresh", vec![b'e'; 14])
+            .unwrap();
+        assert_eq!(store.get(&plugin_id("plugin"), "cache"), Ok(Some(smaller)));
+        assert_eq!(
+            store.get(&plugin_id("plugin"), "fresh"),
+            Ok(Some(vec![b'e'; 14]))
+        );
 
         store
-            .set("other-plugin", "payload", vec![b'f'; 57])
+            .set(&plugin_id("other-plugin"), "payload", vec![b'f'; 57])
             .unwrap();
     }
 
@@ -235,11 +260,11 @@ mod tests {
             "cache-entry-004",
         ] {
             assert_eq!(key.len(), 15);
-            store.set("plugin", key, vec![b'x']).unwrap();
+            store.set(&plugin_id("plugin"), key, vec![b'x']).unwrap();
         }
 
         assert_eq!(
-            store.set("plugin", "cache-entry-005", vec![b'x']),
+            store.set(&plugin_id("plugin"), "cache-entry-005", vec![b'x']),
             Err(StateError::QuotaExceeded(64))
         );
     }
@@ -248,11 +273,17 @@ mod tests {
     fn empty_keys_are_rejected() {
         let store = StateStore::new(StateSettings::default());
 
-        assert_eq!(store.get("plugin", ""), Err(StateError::InvalidKey));
         assert_eq!(
-            store.set("plugin", "", b"value".to_vec()),
+            store.get(&plugin_id("plugin"), ""),
             Err(StateError::InvalidKey)
         );
-        assert_eq!(store.delete("plugin", ""), Err(StateError::InvalidKey));
+        assert_eq!(
+            store.set(&plugin_id("plugin"), "", b"value".to_vec()),
+            Err(StateError::InvalidKey)
+        );
+        assert_eq!(
+            store.delete(&plugin_id("plugin"), ""),
+            Err(StateError::InvalidKey)
+        );
     }
 }
