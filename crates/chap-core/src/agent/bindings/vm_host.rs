@@ -11,10 +11,18 @@ use chap_vm::host::{
 use lockgate::{HostCtx, PermissionDenied, PluginSubject};
 use std::{
     collections::HashMap,
+    fmt,
     future::Future,
     sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+const STARTUP_REAP_OPERATION: &str = "reap stale VMs at startup";
+const SHUTDOWN_REAP_OPERATION: &str = "reap session VMs at shutdown";
+
+fn warn_lifecycle_failure(operation: &'static str, error: impl fmt::Display) {
+    tracing::warn!(operation, error = %error, "VM lifecycle operation failed");
+}
 
 pub(crate) struct VmHost<B: VmBackend = Backend> {
     pub(crate) backend: Arc<B>,
@@ -78,14 +86,16 @@ impl<B: VmBackend> VmHost<B> {
         installation_id: String,
         session_epoch: u64,
     ) -> Result<Self, chap_vm::host::VmError> {
-        match tokio::time::timeout(
+        if let Err(error) = match tokio::time::timeout(
             Duration::from_millis(settings.max_exec_ms),
             backend.reap(&installation_id, session_epoch),
         )
         .await
         {
-            Ok(result) => result?,
-            Err(_) => return Err(chap_vm::host::VmError::TimedOut),
+            Ok(result) => result,
+            Err(_) => Err(chap_vm::host::VmError::TimedOut),
+        } {
+            warn_lifecycle_failure(STARTUP_REAP_OPERATION, error);
         }
         Ok(Self {
             cleanup: Arc::new(VmCleanup {
@@ -313,7 +323,7 @@ impl<B: VmBackend> Drop for VmCleanup<B> {
         match cleanup {
             Ok(cleanup) => match cleanup.join() {
                 Ok(Ok(())) => {}
-                Ok(Err(error)) => tracing::warn!(%error, "failed to clean up session VMs"),
+                Ok(Err(error)) => warn_lifecycle_failure(SHUTDOWN_REAP_OPERATION, error),
                 Err(_) => tracing::warn!("VM cleanup thread panicked"),
             },
             Err(error) => tracing::warn!(%error, "failed to start VM cleanup thread"),
@@ -540,9 +550,24 @@ mod tests {
     use chap_vm::host::{EnvVar, MountSpec, OciReference, ResolvedImage};
     use std::{
         collections::HashSet,
+        io::{self, Write},
         sync::atomic::{AtomicBool, Ordering},
     };
     use tokio::sync::Notify;
+
+    #[derive(Clone)]
+    struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for CapturedLogs {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     struct ControlledBackend {
         inner: Backend,
@@ -551,6 +576,7 @@ mod tests {
         create_started: Notify,
         release_create: Notify,
         vanish_on_owner: AtomicBool,
+        reap_fails: AtomicBool,
     }
 
     impl ControlledBackend {
@@ -568,11 +594,16 @@ mod tests {
                 create_started: Notify::new(),
                 release_create: Notify::new(),
                 vanish_on_owner: AtomicBool::new(false),
+                reap_fails: AtomicBool::new(false),
             }
         }
 
         fn vanish_on_next_owner_lookup(&self) {
             self.vanish_on_owner.store(true, Ordering::SeqCst);
+        }
+
+        fn fail_reap(&self) {
+            self.reap_fails.store(true, Ordering::SeqCst);
         }
     }
 
@@ -651,6 +682,11 @@ mod tests {
             installation_id: &str,
             current_epoch: u64,
         ) -> Result<(), chap_vm::host::VmError> {
+            if self.reap_fails.load(Ordering::SeqCst) {
+                return Err(chap_vm::host::VmError::Failed(
+                    "injected reap failure".into(),
+                ));
+            }
             self.inner.reap(installation_id, current_epoch).await
         }
 
@@ -774,6 +810,45 @@ mod tests {
                 .await
                 .is_ok()
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn host_construction_warns_and_continues_when_startup_reap_fails() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_max_level(tracing::Level::WARN)
+            .with_writer({
+                let captured = Arc::clone(&captured);
+                move || CapturedLogs(Arc::clone(&captured))
+            })
+            .finish();
+        let _subscriber = tracing::subscriber::set_default(subscriber);
+        let backend = Arc::new(ControlledBackend::new(&[], &[]));
+        backend.fail_reap();
+
+        let host = VmHost::with_backend(
+            backend,
+            VmSettings {
+                max_exec_ms: 1_000,
+                registries: vec!["ghcr.io".into()],
+                ..VmSettings::default()
+            },
+            "test-installation".into(),
+            2,
+        )
+        .await;
+
+        assert!(host.is_ok());
+        let output = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
+        assert!(output.contains("WARN"), "{output}");
+        assert!(output.contains("VM lifecycle operation failed"), "{output}");
+        assert!(
+            output.contains("operation=\"reap stale VMs at startup\""),
+            "{output}"
+        );
+        assert!(output.contains("error=injected reap failure"), "{output}");
     }
 
     #[tokio::test]
