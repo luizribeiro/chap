@@ -1,5 +1,5 @@
 use chap_plugin::tools::{ToolDefinition, ToolError, Tools};
-use chap_plugin::vm::{Mount, Vm, VmConfig};
+use chap_plugin::vm::{ExecResult, Mount, Vm, VmConfig};
 use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, capabilities};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -78,12 +78,25 @@ impl Tools for Sandbox {
             .exec(&command_refs, None, None, None)
             .await
             .map_err(ToolError::from)?;
-        Ok(format!(
-            "Exit code: {}\n\n{}",
-            output.exit_code,
-            String::from_utf8_lossy(&output.stdout)
-        ))
+        Ok(format_output(output))
     }
+}
+
+fn format_output(output: ExecResult) -> String {
+    let mut sections = vec![format!("Exit code: {}", output.exit_code)];
+    if !output.stdout.is_empty() {
+        sections.push(String::from_utf8_lossy(&output.stdout).into_owned());
+    }
+    if !output.stderr.is_empty() {
+        sections.push(format!(
+            "stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    if output.truncated {
+        sections.push("[Command output was truncated.]".to_owned());
+    }
+    sections.join("\n\n")
 }
 
 fn vm_config(settings: &Settings) -> VmConfig {
@@ -229,6 +242,45 @@ mod tests {
         assert_eq!(parameters["required"], serde_json::json!(["command"]));
         assert!(parameters["properties"].get("mounts").is_none());
         assert!(definitions[0].description.contains("/mnt/project"));
+    }
+
+    #[test]
+    fn formats_stdout_after_the_exit_code() {
+        assert_eq!(
+            format_output(ExecResult {
+                exit_code: 0,
+                stdout: b"hello\n".to_vec(),
+                stderr: vec![],
+                truncated: false,
+            }),
+            "Exit code: 0\n\nhello\n"
+        );
+    }
+
+    #[test]
+    fn includes_nonempty_stderr_after_stdout() {
+        assert_eq!(
+            format_output(ExecResult {
+                exit_code: 7,
+                stdout: b"partial stdout".to_vec(),
+                stderr: b"not found\n".to_vec(),
+                truncated: false,
+            }),
+            "Exit code: 7\n\npartial stdout\n\nstderr:\nnot found\n"
+        );
+    }
+
+    #[test]
+    fn reports_truncated_output_last() {
+        assert_eq!(
+            format_output(ExecResult {
+                exit_code: 0,
+                stdout: b"partial".to_vec(),
+                stderr: vec![],
+                truncated: true,
+            }),
+            "Exit code: 0\n\npartial\n\n[Command output was truncated.]"
+        );
     }
 
     #[test]
