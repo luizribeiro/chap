@@ -30,7 +30,7 @@ impl AgentInner {
             .filter(|(_, plugin)| plugin.has_role(&chap_wit::CONTEXT))
             .map(|(id, plugin)| async move {
                 (
-                    id.clone(),
+                    id.as_str().to_owned(),
                     PluginResult {
                         channel: plugin.role_settings.context.channel(),
                         segments: self.request_context_segments(&plugin.handle).await,

@@ -318,7 +318,7 @@ async fn reviews_multiple_plugins_with_one_caller_owned_host() {
     .unwrap();
 
     let reviews = builder
-        .review_configured_plugins(&mut host, &consent, &["alpha", "bravo"])
+        .review_configured_plugins(&mut host, &consent, &["alpha".into(), "bravo".into()])
         .await
         .unwrap();
 
@@ -382,7 +382,7 @@ async fn approved_matching_manifest_admits_a_configured_provider() {
         .is_ok()
     );
     let agent = builder.start().await.unwrap();
-    assert!(agent.inner.plugins.contains_key("example.provider"));
+    assert!(agent.inner.plugins.contains_key(&"example.provider".into()));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -905,7 +905,7 @@ async fn nonblocking_drift_errors_are_reported_without_panicking() {
     let manifest = builder.review_plugin("example").await.unwrap().manifest;
 
     let refusal = AgentBuilder::consent_refusal(
-        "example",
+        &"example".into(),
         &component,
         ConsentRequired::Drift {
             manifest,

@@ -322,7 +322,7 @@ pub struct Agent {
 
 pub(crate) struct AgentInner {
     lockgate: Arc<InnerHost>,
-    plugins: BTreeMap<String, ActivePlugin>,
+    plugins: BTreeMap<PluginId, ActivePlugin>,
     sessions: SessionManager,
     tools: ToolRegistry,
     /// Agent-level scheduling settings; see [`crate::config`] for the settings layers.
@@ -388,16 +388,18 @@ impl AgentBuilder {
             .map(|(id, plugin)| (id, plugin.component()))
     }
 
-    pub fn plugin_roles(&self, id: &str) -> Result<Vec<&'static str>, ConsentError> {
-        let plugin = self.config.plugin(&PluginId::from(id)).ok_or_else(|| {
-            ConsentError::PluginNotConfigured {
-                plugin: id.to_owned(),
-            }
-        })?;
-        let bytes = Self::plugin_bytes(&self.config, id, plugin)?;
+    pub fn plugin_roles(&self, plugin_id: &str) -> Result<Vec<&'static str>, ConsentError> {
+        let plugin_id = PluginId::from(plugin_id);
+        let plugin =
+            self.config
+                .plugin(&plugin_id)
+                .ok_or_else(|| ConsentError::PluginNotConfigured {
+                    plugin: plugin_id.as_str().to_owned(),
+                })?;
+        let bytes = Self::plugin_bytes(&self.config, &plugin_id, plugin)?;
         let inspection =
             lockgate::inspect(&bytes).map_err(|source| ConsentError::InspectPlugin {
-                plugin: id.to_owned(),
+                plugin: plugin_id.as_str().to_owned(),
                 source: Box::new(source),
             })?;
         Ok(supported_roles(inspection.exported_interfaces()))
@@ -447,11 +449,11 @@ impl AgentBuilder {
     ) -> Result<Vec<PluginCheck>, StartError> {
         let mut checks = Vec::new();
         let mut refusals = Vec::new();
-        for (id, plugin) in config.plugins() {
+        for (plugin_id, plugin) in config.plugins() {
             let path = config.component_path(plugin);
-            match Self::preflight_plugin(builder, config, id.as_str(), plugin).await {
+            match Self::preflight_plugin(builder, config, &plugin_id, plugin).await {
                 Ok(check) => checks.push(check),
-                Err(error) => refusals.push(Self::plugin_refusal(id.as_str(), &path, error)?),
+                Err(error) => refusals.push(Self::plugin_refusal(&plugin_id, &path, error)?),
             }
         }
         if refusals.is_empty() {
@@ -464,24 +466,24 @@ impl AgentBuilder {
     async fn preflight_plugin(
         builder: &mut HostBuilder<()>,
         config: &Config,
-        id: &str,
+        plugin_id: &PluginId,
         plugin: &ConfiguredPlugin,
     ) -> Result<PluginCheck, ConsentError> {
         let path = config.component_path(plugin);
-        let prepared = Self::prepare_plugin(builder, config, id, plugin).await?;
+        let prepared = Self::prepare_plugin(builder, config, plugin_id, plugin).await?;
         let operation = builder
             .preflight(&prepared, &runtime_limits())
             .await
             .map(|preflight| PluginCheck {
-                instance_id: id.to_owned(),
+                instance_id: plugin_id.as_str().to_owned(),
                 required_environment_variables: preflight.required_environment_variables,
             })
             .map_err(|source| ConsentError::LoadPlugin {
-                plugin: id.to_owned(),
+                plugin: plugin_id.as_str().to_owned(),
                 path,
                 source: Box::new(source),
             });
-        let cleanup = Self::cleanup_prepared_plugin(id, prepared).await;
+        let cleanup = Self::cleanup_prepared_plugin(plugin_id, prepared).await;
         match (operation, cleanup) {
             (Ok(check), Ok(())) => Ok(check),
             (Ok(_), Err(cleanup)) => Err(cleanup),
@@ -493,9 +495,10 @@ impl AgentBuilder {
         }
     }
 
-    pub async fn approve_plugin(&self, id: &str) -> Result<ConsentRecord, ConsentError> {
+    pub async fn approve_plugin(&self, plugin_id: &str) -> Result<ConsentRecord, ConsentError> {
+        let plugin_id = PluginId::from(plugin_id);
         let consent = self.consent_store()?;
-        self.configured_plugin(id)?;
+        self.configured_plugin(&plugin_id)?;
         let mut resources = StartResources::new(
             ToolRegistry::new(),
             host_builder(
@@ -510,7 +513,7 @@ impl AgentBuilder {
             .approve_configured_plugin(
                 resources.builder.as_mut().expect("uninitialized host"),
                 &consent,
-                id,
+                &plugin_id,
             )
             .await;
         Self::finish_consent_operation(result, resources).await
@@ -520,41 +523,48 @@ impl AgentBuilder {
         &self,
         builder: &mut HostBuilder<()>,
         consent: &ConsentStore,
-        id: &str,
+        plugin_id: &PluginId,
     ) -> Result<ConsentRecord, ConsentError> {
-        let prepared = self.prepare_configured_plugin(builder, id).await?;
+        let prepared = self.prepare_configured_plugin(builder, plugin_id).await?;
         let record = prepared.approve(now_rfc3339());
         let save_result = consent.save(record.clone());
-        let cleanup_result = Self::cleanup_prepared_plugin(id, prepared).await;
+        let cleanup_result = Self::cleanup_prepared_plugin(plugin_id, prepared).await;
 
         save_result?;
         cleanup_result?;
         Ok(record)
     }
 
-    pub fn deny_plugin(&self, id: &str) -> Result<(), ConsentError> {
-        let plugin_id = PluginId::from(id);
+    pub fn deny_plugin(&self, plugin_id: &str) -> Result<(), ConsentError> {
+        let plugin_id = PluginId::from(plugin_id);
         if self.config.plugin(&plugin_id).is_none() {
             return Err(ConsentError::PluginNotConfigured {
-                plugin: id.to_owned(),
+                plugin: plugin_id.as_str().to_owned(),
             });
         }
         self.consent_store()?.remove(&plugin_id)
     }
 
-    pub async fn review_plugin(&self, id: &str) -> Result<PluginConsentReview, ConsentError> {
-        let mut reviews = self.review_plugins(&[id]).await?;
+    pub async fn review_plugin(
+        &self,
+        plugin_id: &str,
+    ) -> Result<PluginConsentReview, ConsentError> {
+        let mut reviews = self.review_plugins(&[plugin_id]).await?;
         Ok(reviews.pop().expect("one plugin was reviewed"))
     }
 
     /// Reviews several configured plugins against one shared host builder.
     pub async fn review_plugins(
         &self,
-        ids: &[&str],
+        plugin_ids: &[&str],
     ) -> Result<Vec<PluginConsentReview>, ConsentError> {
         let consent = self.consent_store()?;
-        for id in ids {
-            self.configured_plugin(id)?;
+        let plugin_ids = plugin_ids
+            .iter()
+            .map(|plugin_id| PluginId::from(*plugin_id))
+            .collect::<Vec<_>>();
+        for plugin_id in &plugin_ids {
+            self.configured_plugin(plugin_id)?;
         }
         let mut resources = StartResources::new(
             ToolRegistry::new(),
@@ -570,7 +580,7 @@ impl AgentBuilder {
             .review_configured_plugins(
                 resources.builder.as_mut().expect("uninitialized host"),
                 &consent,
-                ids,
+                &plugin_ids,
             )
             .await;
         Self::finish_consent_operation(result, resources).await
@@ -580,11 +590,14 @@ impl AgentBuilder {
         &self,
         builder: &mut HostBuilder<()>,
         consent: &ConsentStore,
-        ids: &[&str],
+        plugin_ids: &[PluginId],
     ) -> Result<Vec<PluginConsentReview>, ConsentError> {
-        let mut reviews = Vec::with_capacity(ids.len());
-        for id in ids {
-            reviews.push(self.review_configured_plugin(builder, consent, id).await?);
+        let mut reviews = Vec::with_capacity(plugin_ids.len());
+        for plugin_id in plugin_ids {
+            reviews.push(
+                self.review_configured_plugin(builder, consent, plugin_id)
+                    .await?,
+            );
         }
         Ok(reviews)
     }
@@ -593,11 +606,11 @@ impl AgentBuilder {
         &self,
         builder: &mut HostBuilder<()>,
         consent: &ConsentStore,
-        id: &str,
+        plugin_id: &PluginId,
     ) -> Result<PluginConsentReview, ConsentError> {
-        let prepared = self.prepare_configured_plugin(builder, id).await?;
+        let prepared = self.prepare_configured_plugin(builder, plugin_id).await?;
         let manifest = prepared.review();
-        let prior = consent.load(&PluginId::from(id));
+        let prior = consent.load(plugin_id);
         let drift = prior
             .as_ref()
             .filter(|prior| {
@@ -610,32 +623,35 @@ impl AgentBuilder {
             prior,
             drift,
         };
-        Self::cleanup_prepared_plugin(id, prepared).await?;
+        Self::cleanup_prepared_plugin(plugin_id, prepared).await?;
         Ok(review)
     }
 
     async fn prepare_configured_plugin(
         &self,
         builder: &mut HostBuilder<()>,
-        id: &str,
+        plugin_id: &PluginId,
     ) -> Result<Prepared, ConsentError> {
-        let plugin = self.configured_plugin(id)?;
-        Self::prepare_plugin(builder, &self.config, id, plugin).await
+        let plugin = self.configured_plugin(plugin_id)?;
+        Self::prepare_plugin(builder, &self.config, plugin_id, plugin).await
     }
 
-    fn configured_plugin(&self, id: &str) -> Result<&ConfiguredPlugin, ConsentError> {
+    fn configured_plugin(&self, plugin_id: &PluginId) -> Result<&ConfiguredPlugin, ConsentError> {
         self.config
-            .plugin(&PluginId::from(id))
+            .plugin(plugin_id)
             .ok_or_else(|| ConsentError::PluginNotConfigured {
-                plugin: id.to_owned(),
+                plugin: plugin_id.as_str().to_owned(),
             })
     }
 
-    async fn cleanup_prepared_plugin(id: &str, prepared: Prepared) -> Result<(), ConsentError> {
+    async fn cleanup_prepared_plugin(
+        plugin_id: &PluginId,
+        prepared: Prepared,
+    ) -> Result<(), ConsentError> {
         tokio::task::spawn_blocking(move || drop(prepared))
             .await
             .map_err(|source| ConsentError::PreparedPluginCleanup {
-                plugin: id.to_owned(),
+                plugin: plugin_id.as_str().to_owned(),
                 source,
             })
     }
@@ -702,7 +718,7 @@ impl AgentBuilder {
         resources: &mut StartResources,
         config: &Config,
         consent: &ConsentStore,
-    ) -> Result<BTreeMap<String, ActivePlugin>, StartError> {
+    ) -> Result<BTreeMap<PluginId, ActivePlugin>, StartError> {
         let plugins = Self::load_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
             config,
@@ -712,12 +728,12 @@ impl AgentBuilder {
         let builder = resources.builder.take().expect("uninitialized host");
         resources.host = Some(Arc::new(builder.finish()));
         let lockgate = resources.host.as_ref().expect("initialized host");
-        for (id, plugin) in &plugins {
+        for (plugin_id, plugin) in &plugins {
             if !plugin.has_role(&chap_wit::TOOLS) {
                 continue;
             }
             for tool in PluginTool::load(
-                id,
+                plugin_id.as_str(),
                 Arc::clone(lockgate),
                 plugin.handle.clone(),
                 &plugin.role_settings.tools,
@@ -739,17 +755,17 @@ impl AgentBuilder {
         builder: &mut HostBuilder<()>,
         config: &Config,
         consent: &ConsentStore,
-    ) -> Result<BTreeMap<String, ActivePlugin>, StartError> {
+    ) -> Result<BTreeMap<PluginId, ActivePlugin>, StartError> {
         let mut plugins = BTreeMap::new();
         let mut refusals = Vec::new();
 
-        for (id, plugin) in config.plugins() {
-            match Self::load_plugin(builder, config, consent, id.as_str(), plugin).await? {
+        for (plugin_id, plugin) in config.plugins() {
+            match Self::load_plugin(builder, config, consent, &plugin_id, plugin).await? {
                 PluginLoad::Admitted(admitted) => {
-                    plugins.insert(id.as_str().to_owned(), admitted);
+                    plugins.insert(plugin_id, admitted);
                 }
                 PluginLoad::Refused(error) => {
-                    tracing::warn!(plugin = %id, error = %error, "plugin admission failed");
+                    tracing::warn!(plugin = %plugin_id, error = %error, "plugin admission failed");
                     refusals.push(error);
                 }
             }
@@ -766,27 +782,29 @@ impl AgentBuilder {
         builder: &mut HostBuilder<()>,
         config: &Config,
         consent: &ConsentStore,
-        id: &str,
+        plugin_id: &PluginId,
         plugin: &ConfiguredPlugin,
     ) -> Result<PluginLoad, StartError> {
         let path = config.component_path(plugin);
-        let prepared = match Self::prepare_plugin(builder, config, id, plugin).await {
+        let prepared = match Self::prepare_plugin(builder, config, plugin_id, plugin).await {
             Ok(prepared) => prepared,
             Err(error) => {
-                return Ok(PluginLoad::Refused(Self::plugin_refusal(id, &path, error)?));
+                return Ok(PluginLoad::Refused(Self::plugin_refusal(
+                    plugin_id, &path, error,
+                )?));
             }
         };
-        let record = consent.load(&PluginId::from(id));
+        let record = consent.load(plugin_id);
         let acceptance = match prepared.accept_reviewed(record.as_ref()) {
             Ok(acceptance) => acceptance,
             Err(required) => {
                 let refusal = match builder.preflight(&prepared, &runtime_limits()).await {
-                    Ok(_) => Self::consent_refusal(id, &path, required),
+                    Ok(_) => Self::consent_refusal(plugin_id, &path, required),
                     Err(source) => Self::plugin_refusal(
-                        id,
+                        plugin_id,
                         &path,
                         ConsentError::LoadPlugin {
-                            plugin: id.to_owned(),
+                            plugin: plugin_id.as_str().to_owned(),
                             path: path.clone(),
                             source: Box::new(source),
                         },
@@ -795,7 +813,7 @@ impl AgentBuilder {
                 tokio::task::spawn_blocking(move || drop(prepared))
                     .await
                     .map_err(|source| StartError::RefusedPluginCleanup {
-                        plugin: id.to_owned(),
+                        plugin: plugin_id.as_str().to_owned(),
                         source,
                     })?;
                 return Ok(PluginLoad::Refused(refusal));
@@ -825,14 +843,16 @@ impl AgentBuilder {
             .admit(prepared, acceptance, runtime_limits())
             .await
             .map_err(|source| ConsentError::LoadPlugin {
-                plugin: id.to_owned(),
+                plugin: plugin_id.as_str().to_owned(),
                 path: path.clone(),
                 source: Box::new(source),
             });
         let handle = match handle {
             Ok(handle) => handle,
             Err(error) => {
-                return Ok(PluginLoad::Refused(Self::plugin_refusal(id, &path, error)?));
+                return Ok(PluginLoad::Refused(Self::plugin_refusal(
+                    plugin_id, &path, error,
+                )?));
             }
         };
         if let Some(record) = refreshed_record {
@@ -848,15 +868,15 @@ impl AgentBuilder {
     async fn prepare_plugin(
         builder: &mut HostBuilder<()>,
         config: &Config,
-        id: &str,
+        plugin_id: &PluginId,
         plugin: &ConfiguredPlugin,
     ) -> Result<Prepared, ConsentError> {
         let path = config.component_path(plugin);
-        let bytes = Self::plugin_bytes(config, id, plugin)?;
+        let bytes = Self::plugin_bytes(config, plugin_id, plugin)?;
         let settings = plugin.settings();
         let prepared = builder
             .prepare(
-                PluginId::from(id),
+                plugin_id.clone(),
                 &bytes,
                 PluginConfig {
                     settings: Some(settings),
@@ -865,17 +885,21 @@ impl AgentBuilder {
             )
             .await
             .map_err(|source| ConsentError::LoadPlugin {
-                plugin: id.to_owned(),
+                plugin: plugin_id.as_str().to_owned(),
                 path: path.clone(),
                 source: Box::new(source),
             })?;
         let exported_interfaces = prepared.inspection().exported_interfaces();
-        Self::validate_supported_role(id, &path, exported_interfaces)?;
-        Self::validate_role_config(id, plugin, exported_interfaces)?;
+        Self::validate_supported_role(plugin_id, &path, exported_interfaces)?;
+        Self::validate_role_config(plugin_id, plugin, exported_interfaces)?;
         Ok(prepared)
     }
 
-    fn consent_refusal(id: &str, path: &Path, required: ConsentRequired) -> PluginRefusal {
+    fn consent_refusal(
+        plugin_id: &PluginId,
+        path: &Path,
+        required: ConsentRequired,
+    ) -> PluginRefusal {
         let reason = match required {
             ConsentRequired::FirstRun { .. } => PluginRefusalReason::ApprovalRequired,
             ConsentRequired::Drift { drift, .. } => {
@@ -883,14 +907,14 @@ impl AgentBuilder {
             }
         };
         PluginRefusal {
-            instance_id: id.to_owned(),
+            instance_id: plugin_id.as_str().to_owned(),
             source_path: path.to_path_buf(),
             reason,
         }
     }
 
     fn plugin_refusal(
-        id: &str,
+        plugin_id: &PluginId,
         path: &Path,
         error: ConsentError,
     ) -> Result<PluginRefusal, StartError> {
@@ -914,14 +938,14 @@ impl AgentBuilder {
             error => return Err(StartError::Consent(error)),
         };
         Ok(PluginRefusal {
-            instance_id: id.to_owned(),
+            instance_id: plugin_id.as_str().to_owned(),
             source_path: path.to_path_buf(),
             reason,
         })
     }
 
     fn validate_supported_role(
-        id: &str,
+        plugin_id: &PluginId,
         path: &Path,
         exported_interfaces: &[String],
     ) -> Result<(), ConsentError> {
@@ -929,7 +953,7 @@ impl AgentBuilder {
             return Ok(());
         }
         Err(ConsentError::UnsupportedRole {
-            plugin: id.to_owned(),
+            plugin: plugin_id.as_str().to_owned(),
             path: path.to_path_buf(),
             role: role_package(<bindings::provider::Role as Role>::INTERFACE),
             exported_interfaces: exported_interfaces.to_vec(),
@@ -937,7 +961,7 @@ impl AgentBuilder {
     }
 
     fn validate_role_config(
-        id: &str,
+        plugin_id: &PluginId,
         plugin: &ConfiguredPlugin,
         exported_interfaces: &[String],
     ) -> Result<(), ConsentError> {
@@ -946,7 +970,7 @@ impl AgentBuilder {
                 && !exports_interface_named(role.interface, exported_interfaces)
             {
                 return Err(ConsentError::RoleConfigInvalid {
-                    plugin: id.to_owned(),
+                    plugin: plugin_id.as_str().to_owned(),
                     role: role.interface.to_owned(),
                 });
             }
@@ -956,12 +980,12 @@ impl AgentBuilder {
 
     fn plugin_bytes(
         config: &Config,
-        id: &str,
+        plugin_id: &PluginId,
         plugin: &ConfiguredPlugin,
     ) -> Result<Vec<u8>, ConsentError> {
         let path = config.component_path(plugin);
         fs::read(&path).map_err(|source| ConsentError::ReadPlugin {
-            plugin: id.to_owned(),
+            plugin: plugin_id.as_str().to_owned(),
             path,
             source,
         })
@@ -1020,7 +1044,7 @@ impl Agent {
         if !self
             .inner
             .plugins
-            .get(&options.provider)
+            .get(&PluginId::from(options.provider.as_str()))
             .is_some_and(|plugin| plugin.has_role(&chap_wit::PROVIDER))
         {
             return Err(SessionError::ProviderNotConfigured {

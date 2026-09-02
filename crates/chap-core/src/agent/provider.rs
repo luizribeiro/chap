@@ -40,7 +40,7 @@ impl AgentInner {
     ) -> Result<ProviderCompletion, ProviderError> {
         let plugin = self
             .plugins
-            .get(provider)
+            .get(&lockgate::PluginId::from(provider))
             .filter(|plugin| plugin.has_role(&chap_wit::PROVIDER))
             .ok_or_else(|| ProviderError::NotConfigured {
                 provider: provider.to_owned(),
