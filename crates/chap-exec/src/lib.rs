@@ -30,6 +30,11 @@ pub mod exec {
         type Err = ScopeError;
 
         fn from_str(value: &str) -> Result<Self, Self::Err> {
+            if value.chars().any(|character| character.is_ascii_control()) {
+                return Err(ScopeError::unknown(format!(
+                    "{value:?}: command prefixes must not contain ASCII control characters"
+                )));
+            }
             let tokens = value
                 .split_whitespace()
                 .map(String::from)
@@ -138,6 +143,18 @@ mod tests {
                 "accepted {invalid:?}"
             );
         }
+    }
+
+    #[test]
+    fn parsing_rejects_ascii_control_characters() {
+        let error = CommandPrefix::from_str("git\0").unwrap_err();
+        assert_eq!(
+            error,
+            ScopeError::unknown(format!(
+                "{value:?}: command prefixes must not contain ASCII control characters",
+                value = "git\0"
+            ))
+        );
     }
 
     #[test]
