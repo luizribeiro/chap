@@ -407,10 +407,28 @@ impl AgentBuilder {
 
     pub async fn approve_plugin(&self, id: &str) -> Result<ConsentRecord, ConsentError> {
         let consent = self.consent_store()?;
-        let (prepared, resources) = self.prepare_configured_plugin(id).await?;
+        self.configured_plugin(id)?;
+        let mut resources = StartResources::new(ToolRegistry::new(), host_builder(&self.config)?);
+        let result = self
+            .approve_configured_plugin(
+                resources.builder.as_mut().expect("uninitialized host"),
+                &consent,
+                id,
+            )
+            .await;
+        Self::finish_consent_operation(result, resources).await
+    }
+
+    async fn approve_configured_plugin(
+        &self,
+        builder: &mut HostBuilder<()>,
+        consent: &ConsentStore,
+        id: &str,
+    ) -> Result<ConsentRecord, ConsentError> {
+        let prepared = self.prepare_configured_plugin(builder, id).await?;
         let record = prepared.approve(now_rfc3339());
         let save_result = consent.save(record.clone());
-        let cleanup_result = Self::cleanup_prepared_plugin(id, prepared, resources).await;
+        let cleanup_result = Self::cleanup_prepared_plugin(id, prepared).await;
 
         save_result?;
         cleanup_result?;
@@ -427,8 +445,50 @@ impl AgentBuilder {
     }
 
     pub async fn review_plugin(&self, id: &str) -> Result<PluginConsentReview, ConsentError> {
+        let mut reviews = self.review_plugins(&[id]).await?;
+        Ok(reviews.pop().expect("one plugin was reviewed"))
+    }
+
+    /// Reviews several configured plugins against one shared host builder.
+    pub async fn review_plugins(
+        &self,
+        ids: &[&str],
+    ) -> Result<Vec<PluginConsentReview>, ConsentError> {
         let consent = self.consent_store()?;
-        let (prepared, resources) = self.prepare_configured_plugin(id).await?;
+        for id in ids {
+            self.configured_plugin(id)?;
+        }
+        let mut resources = StartResources::new(ToolRegistry::new(), host_builder(&self.config)?);
+        let result = self
+            .review_configured_plugins(
+                resources.builder.as_mut().expect("uninitialized host"),
+                &consent,
+                ids,
+            )
+            .await;
+        Self::finish_consent_operation(result, resources).await
+    }
+
+    async fn review_configured_plugins(
+        &self,
+        builder: &mut HostBuilder<()>,
+        consent: &ConsentStore,
+        ids: &[&str],
+    ) -> Result<Vec<PluginConsentReview>, ConsentError> {
+        let mut reviews = Vec::with_capacity(ids.len());
+        for id in ids {
+            reviews.push(self.review_configured_plugin(builder, consent, id).await?);
+        }
+        Ok(reviews)
+    }
+
+    async fn review_configured_plugin(
+        &self,
+        builder: &mut HostBuilder<()>,
+        consent: &ConsentStore,
+        id: &str,
+    ) -> Result<PluginConsentReview, ConsentError> {
+        let prepared = self.prepare_configured_plugin(builder, id).await?;
         let manifest = prepared.review();
         let prior = consent.load(id);
         let drift = prior
@@ -443,60 +503,49 @@ impl AgentBuilder {
             prior,
             drift,
         };
-        Self::cleanup_prepared_plugin(id, prepared, resources).await?;
+        Self::cleanup_prepared_plugin(id, prepared).await?;
         Ok(review)
     }
 
     async fn prepare_configured_plugin(
         &self,
+        builder: &mut HostBuilder<()>,
         id: &str,
-    ) -> Result<(Prepared, StartResources), ConsentError> {
-        let plugin = self
-            .config
+    ) -> Result<Prepared, ConsentError> {
+        let plugin = self.configured_plugin(id)?;
+        Self::prepare_plugin(builder, &self.config, id, plugin).await
+    }
+
+    fn configured_plugin(&self, id: &str) -> Result<&ConfiguredPlugin, ConsentError> {
+        self.config
             .plugin(id)
             .ok_or_else(|| ConsentError::PluginNotConfigured {
                 plugin: id.to_owned(),
-            })?;
-        let builder = host_builder(&self.config)?;
-        let mut resources = StartResources::new(ToolRegistry::new(), builder);
-        let prepared = match Self::prepare_plugin(
-            resources.builder.as_mut().expect("uninitialized host"),
-            &self.config,
-            id,
-            plugin,
-        )
-        .await
-        {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                return match resources.cleanup().await {
-                    Ok(()) => Err(error),
-                    Err(cleanup) => Err(ConsentError::OperationAndCleanup {
-                        source: Box::new(error),
-                        cleanup: Box::new(cleanup),
-                    }),
-                };
-            }
-        };
-        Ok((prepared, resources))
+            })
     }
 
-    async fn cleanup_prepared_plugin(
-        id: &str,
-        prepared: Prepared,
-        resources: StartResources,
-    ) -> Result<(), ConsentError> {
-        let prepared_cleanup = tokio::task::spawn_blocking(move || drop(prepared))
+    async fn cleanup_prepared_plugin(id: &str, prepared: Prepared) -> Result<(), ConsentError> {
+        tokio::task::spawn_blocking(move || drop(prepared))
             .await
             .map_err(|source| ConsentError::PreparedPluginCleanup {
                 plugin: id.to_owned(),
                 source,
-            });
-        let resource_cleanup = resources.cleanup().await;
+            })
+    }
 
-        prepared_cleanup?;
-        resource_cleanup?;
-        Ok(())
+    async fn finish_consent_operation<T>(
+        operation: Result<T, ConsentError>,
+        resources: StartResources,
+    ) -> Result<T, ConsentError> {
+        match (operation, resources.cleanup().await) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Ok(_), Err(cleanup)) => Err(cleanup),
+            (Err(error), Ok(())) => Err(error),
+            (Err(error), Err(cleanup)) => Err(ConsentError::OperationAndCleanup {
+                source: Box::new(error),
+                cleanup: Box::new(cleanup),
+            }),
+        }
     }
 
     /// Starts the agent, admitting every configured plugin.

@@ -1,6 +1,7 @@
 use super::{
     super::{
-        AgentBuilder, PLUGIN_ADMISSION_DEADLINE, PLUGIN_FUEL_PER_CALL, plugin_admission_context,
+        AgentBuilder, PLUGIN_ADMISSION_DEADLINE, PLUGIN_FUEL_PER_CALL, host_builder,
+        plugin_admission_context,
         provider::{CompletionBackend, PluginBackend},
         runtime_limits,
     },
@@ -315,6 +316,43 @@ fn write_exec_plugin_config(directory: &Path, allowed_commands: &[&str]) {
         serde_json::to_vec_pretty(&config).unwrap(),
     )
     .unwrap();
+}
+
+#[tokio::test]
+async fn reviews_multiple_plugins_with_one_caller_owned_host() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component("example.provider"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.json");
+    fs::write(
+        &config_path,
+        r#"{
+            "plugins": {
+                "alpha": { "component": "provider.wasm" },
+                "bravo": { "component": "provider.wasm" }
+            }
+        }"#,
+    )
+    .unwrap();
+    let builder = load_test_builder(&config_path);
+    let consent = builder.consent_store().unwrap();
+    let mut host = host_builder(&builder.config).unwrap();
+
+    let reviews = builder
+        .review_configured_plugins(&mut host, &consent, &["alpha", "bravo"])
+        .await
+        .unwrap();
+
+    assert_eq!(reviews.len(), 2);
+    assert_eq!(reviews[0].manifest.instance_id, "alpha");
+    assert_eq!(reviews[1].manifest.instance_id, "bravo");
+    tokio::task::spawn_blocking(move || drop(host))
+        .await
+        .unwrap();
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[tokio::test]

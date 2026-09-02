@@ -26,16 +26,16 @@ pub(super) async fn grants_review(
     output.push_str(
         "Concrete scopes come from chap.json; approval grants this exact resolved manifest.\n",
     );
-    for (index, id) in ids.iter().enumerate() {
+    let review_ids = ids.iter().map(String::as_str).collect::<Vec<_>>();
+    let reviews = builder
+        .review_plugins(&review_ids)
+        .await
+        .map_err(render_consent_error)?;
+    for (index, review) in reviews.iter().enumerate() {
         if index > 0 {
             output.push('\n');
         }
-        output.push_str(&render_grant_review(
-            &builder
-                .review_plugin(id)
-                .await
-                .map_err(render_consent_error)?,
-        ));
+        output.push_str(&render_grant_review(review));
     }
     Ok(output)
 }
