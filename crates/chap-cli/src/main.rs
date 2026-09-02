@@ -13,7 +13,7 @@ use std::{env, path::Path, process::ExitCode};
 fn main() -> ExitCode {
     let tracing = telemetry::TracingRouter::new();
     telemetry::install(tracing.clone());
-    install_crypto_provider();
+    chap_core::install_crypto_provider();
     async_main(tracing)
 }
 
@@ -26,10 +26,6 @@ async fn async_main(tracing: telemetry::TracingRouter) -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-fn install_crypto_provider() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 async fn run(cli: Cli, tracing: &telemetry::TracingRouter) -> Result<(), String> {
@@ -55,17 +51,4 @@ async fn run(cli: Cli, tracing: &telemetry::TracingRouter) -> Result<(), String>
         Some(command) => command.run(builder).await?,
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn installs_the_crypto_provider_idempotently() {
-        install_crypto_provider();
-        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
-
-        install_crypto_provider();
-    }
 }

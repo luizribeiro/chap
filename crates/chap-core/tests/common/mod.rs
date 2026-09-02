@@ -1,14 +1,26 @@
+#![allow(
+    dead_code,
+    reason = "each integration test uses a different harness subset"
+)]
+
 use chap_core::{SessionEvent, SessionEventKind, ToolError};
+use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair, KeyUsagePurpose};
+use rustls::{RootCertStore, ServerConfig, pki_types::PrivatePkcs8KeyDer};
 use serde_json::{Value, json};
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::Command,
-    sync::mpsc::{self, Receiver},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver},
+    },
     thread::JoinHandle,
     time::Duration,
 };
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio_rustls::TlsAcceptor;
 
 pub const SERVER_TIMEOUT: Duration = Duration::from_secs(60);
 pub const INVOCATION_TIMEOUT: Duration = Duration::from_secs(20);
@@ -64,6 +76,96 @@ impl MockServer {
             .expect("mock server failed while serving requests");
         self.thread.join().expect("mock server thread panicked");
         requests
+    }
+}
+
+pub struct HttpsMockServer {
+    pub origin: String,
+    pub roots: RootCertStore,
+    received: Receiver<Result<ReceivedRequest, String>>,
+    thread: JoinHandle<()>,
+}
+
+impl HttpsMockServer {
+    pub fn start() -> Self {
+        let mut ca_params = CertificateParams::new(Vec::new()).unwrap();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.key_usages = vec![
+            KeyUsagePurpose::DigitalSignature,
+            KeyUsagePurpose::KeyCertSign,
+            KeyUsagePurpose::CrlSign,
+        ];
+        let ca_key = KeyPair::generate().unwrap();
+        let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+        let issuer = Issuer::new(ca_params, ca_key);
+
+        let leaf_params = CertificateParams::new(vec!["127.0.0.1".to_owned()]).unwrap();
+        let leaf_key = KeyPair::generate().unwrap();
+        let leaf_cert = leaf_params.signed_by(&leaf_key, &issuer).unwrap();
+        let private_key = PrivatePkcs8KeyDer::from(leaf_key.serialize_der()).into();
+        let server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![leaf_cert.der().clone()], private_key)
+            .unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind local HTTPS mock server");
+        listener
+            .set_nonblocking(true)
+            .expect("make HTTPS mock listener nonblocking");
+        let origin = format!("https://{}", listener.local_addr().unwrap());
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+        let response = final_response();
+        let (sender, received) = mpsc::sync_channel(1);
+        let thread = std::thread::spawn(move || {
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| format!("failed to start HTTPS mock runtime: {error}"))
+                .and_then(|runtime| {
+                    runtime.block_on(async move {
+                        let listener = tokio::net::TcpListener::from_std(listener)
+                            .map_err(|error| format!("failed to adopt HTTPS listener: {error}"))?;
+                        let (stream, _) = listener
+                            .accept()
+                            .await
+                            .map_err(|error| format!("HTTPS mock accept failed: {error}"))?;
+                        match tokio::time::timeout(SERVER_TIMEOUT, async move {
+                            let mut stream = acceptor
+                                .accept(stream)
+                                .await
+                                .map_err(|error| format!("HTTPS mock handshake failed: {error}"))?;
+                            serve_tls(&mut stream, &response).await
+                        })
+                        .await
+                        {
+                            Ok(result) => result,
+                            Err(_) => Err("HTTPS mock server timed out".to_owned()),
+                        }
+                    })
+                });
+            let _ = sender.send(result);
+        });
+
+        let mut roots = RootCertStore::empty();
+        roots.add(ca_cert.der().clone()).unwrap();
+        Self {
+            origin,
+            roots,
+            received,
+            thread,
+        }
+    }
+
+    pub fn finish(self) -> ReceivedRequest {
+        let request = self
+            .received
+            .recv_timeout(SERVER_TIMEOUT)
+            .expect("HTTPS mock server did not report its request")
+            .expect("HTTPS mock server failed while serving its request");
+        self.thread
+            .join()
+            .expect("HTTPS mock server thread panicked");
+        request
     }
 }
 
@@ -272,6 +374,170 @@ pub fn serve(mut stream: TcpStream, response_body: &str) -> Result<ReceivedReque
         .map_err(|error| format!("failed to write mock response: {error}"))?;
 
     Ok(ReceivedRequest { body })
+}
+
+async fn serve_tls<S>(stream: &mut S, response_body: &str) -> Result<ReceivedRequest, String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let mut request = Vec::new();
+    let head_end = loop {
+        let Some(head_end) = request.windows(4).position(|window| window == b"\r\n\r\n") else {
+            read_more_tls(
+                stream,
+                &mut request,
+                "client closed before sending complete HTTPS headers",
+            )
+            .await?;
+            continue;
+        };
+        break head_end;
+    };
+
+    let body_start = head_end + 4;
+    let head = std::str::from_utf8(&request[..head_end])
+        .map_err(|error| format!("HTTPS mock request headers were not UTF-8: {error}"))?;
+    let content_length = header_values(head, "content-length")
+        .next()
+        .map(|value| {
+            value
+                .parse::<usize>()
+                .map_err(|error| format!("invalid HTTPS mock request Content-Length: {error}"))
+        })
+        .transpose()?;
+    let is_chunked = header_values(head, "transfer-encoding")
+        .flat_map(|value| value.split(','))
+        .any(|encoding| encoding.trim().eq_ignore_ascii_case("chunked"));
+    let body = if is_chunked {
+        read_chunked_body_tls(stream, &mut request, body_start).await?
+    } else if let Some(content_length) = content_length {
+        while request.len() < body_start + content_length {
+            read_more_tls(
+                stream,
+                &mut request,
+                "client closed before sending the complete HTTPS request body",
+            )
+            .await?;
+        }
+        request[body_start..body_start + content_length].to_vec()
+    } else {
+        return Err("HTTPS mock request used unsupported HTTP body framing".to_owned());
+    };
+
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+        response_body.len(),
+        response_body
+    );
+    stream
+        .write_all(response.as_bytes())
+        .await
+        .map_err(|error| format!("failed to write HTTPS mock response: {error}"))?;
+    stream
+        .shutdown()
+        .await
+        .map_err(|error| format!("failed to close HTTPS mock response: {error}"))?;
+
+    Ok(ReceivedRequest { body })
+}
+
+async fn read_chunked_body_tls<S>(
+    stream: &mut S,
+    request: &mut Vec<u8>,
+    mut cursor: usize,
+) -> Result<Vec<u8>, String>
+where
+    S: tokio::io::AsyncRead + Unpin,
+{
+    let mut body = Vec::new();
+    loop {
+        let line_end = loop {
+            if let Some(offset) = request[cursor..]
+                .windows(2)
+                .position(|window| window == b"\r\n")
+            {
+                break cursor + offset;
+            }
+            read_more_tls(
+                stream,
+                request,
+                "client closed before sending a complete HTTPS chunk header",
+            )
+            .await?;
+        };
+        let size = std::str::from_utf8(&request[cursor..line_end])
+            .map_err(|error| format!("HTTPS mock request chunk size was not UTF-8: {error}"))?
+            .split(';')
+            .next()
+            .unwrap()
+            .trim();
+        let size = usize::from_str_radix(size, 16)
+            .map_err(|error| format!("invalid HTTPS mock request chunk size: {error}"))?;
+        cursor = line_end + 2;
+
+        if size == 0 {
+            while request.len() < cursor + 2 {
+                read_more_tls(
+                    stream,
+                    request,
+                    "client closed before terminating the HTTPS chunked request body",
+                )
+                .await?;
+            }
+            if request[cursor..].starts_with(b"\r\n") {
+                return Ok(body);
+            }
+            loop {
+                if request[cursor..]
+                    .windows(4)
+                    .any(|window| window == b"\r\n\r\n")
+                {
+                    return Ok(body);
+                }
+                read_more_tls(
+                    stream,
+                    request,
+                    "client closed before sending complete HTTPS chunked trailers",
+                )
+                .await?;
+            }
+        }
+
+        while request.len() < cursor + size + 2 {
+            read_more_tls(
+                stream,
+                request,
+                "client closed before sending complete HTTPS chunk data",
+            )
+            .await?;
+        }
+        body.extend_from_slice(&request[cursor..cursor + size]);
+        cursor += size;
+        if request[cursor..cursor + 2] != *b"\r\n" {
+            return Err("HTTPS mock request chunk omitted its terminating CRLF".to_owned());
+        }
+        cursor += 2;
+    }
+}
+
+async fn read_more_tls<S>(
+    stream: &mut S,
+    request: &mut Vec<u8>,
+    closed_message: &str,
+) -> Result<(), String>
+where
+    S: tokio::io::AsyncRead + Unpin,
+{
+    let mut chunk = [0; 4096];
+    let read = stream
+        .read(&mut chunk)
+        .await
+        .map_err(|error| format!("failed to read HTTPS mock request: {error}"))?;
+    if read == 0 {
+        return Err(closed_message.to_owned());
+    }
+    request.extend_from_slice(&chunk[..read]);
+    Ok(())
 }
 
 pub fn header_values<'a>(head: &'a str, name: &'a str) -> impl Iterator<Item = &'a str> {

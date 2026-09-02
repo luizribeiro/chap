@@ -312,6 +312,7 @@ async fn reviews_multiple_plugins_with_one_caller_owned_host() {
         &builder.config,
         builder.budgets,
         builder.compiled_cache_path(),
+        builder.tls_roots.clone(),
     )
     .await
     .unwrap();

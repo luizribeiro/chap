@@ -15,6 +15,7 @@ use lockgate::{
 };
 use plugin_tool::PluginTool;
 use provider::PluginBackend;
+use rustls::RootCertStore;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -165,16 +166,18 @@ async fn host_builder(
     config: &Config,
     budgets: PluginBudgets,
     compiled_cache: Option<PathBuf>,
+    tls_roots: Option<RootCertStore>,
 ) -> Result<HostBuilder<()>, ConsentError> {
-    configured_host_builder(config, false, budgets, compiled_cache).await
+    configured_host_builder(config, false, budgets, compiled_cache, tls_roots).await
 }
 
 async fn preflight_host_builder(
     config: &Config,
     budgets: PluginBudgets,
     compiled_cache: Option<PathBuf>,
+    tls_roots: Option<RootCertStore>,
 ) -> Result<HostBuilder<()>, ConsentError> {
-    configured_host_builder(config, true, budgets, compiled_cache).await
+    configured_host_builder(config, true, budgets, compiled_cache, tls_roots).await
 }
 
 async fn configured_host_builder(
@@ -182,6 +185,7 @@ async fn configured_host_builder(
     _preflight: bool,
     budgets: PluginBudgets,
     compiled_cache: Option<PathBuf>,
+    tls_roots: Option<RootCertStore>,
 ) -> Result<HostBuilder<()>, ConsentError> {
     #[cfg(feature = "vm")]
     let vm = if _preflight {
@@ -199,6 +203,10 @@ async fn configured_host_builder(
     };
     let builder =
         HostBuilder::new(imports).map_err(|source| ConsentError::HostConstruction { source })?;
+    let builder = match tls_roots {
+        Some(roots) => builder.tls_roots(roots),
+        None => builder,
+    };
     let builder = match compiled_cache {
         Some(path) => match fs::create_dir_all(&path) {
             Ok(()) => builder.compiled_cache(path),
@@ -296,6 +304,7 @@ impl ActivePlugin {
 pub struct AgentBuilder {
     config: Config,
     state_dir: Option<PathBuf>,
+    tls_roots: Option<RootCertStore>,
     tools: ToolRegistry,
     budgets: PluginBudgets,
 }
@@ -327,6 +336,7 @@ impl AgentBuilder {
         Ok(Self {
             config,
             state_dir: None,
+            tls_roots: None,
             tools: ToolRegistry::new(),
             budgets,
         })
@@ -334,6 +344,14 @@ impl AgentBuilder {
 
     pub fn state_dir(mut self, state_dir: impl Into<PathBuf>) -> Self {
         self.state_dir = Some(state_dir.into());
+        self
+    }
+
+    /// Adds private TLS trust anchors for plugin HTTPS requests.
+    ///
+    /// These anchors extend the public WebPKI roots rather than replacing them.
+    pub fn tls_roots(mut self, roots: RootCertStore) -> Self {
+        self.tls_roots = Some(roots);
         self
     }
 
@@ -399,10 +417,14 @@ impl AgentBuilder {
     /// Required environment variables are reported with their current presence,
     /// but an unset variable does not make the coherence check fail.
     pub async fn check_plugins(&self) -> Result<Vec<PluginCheck>, StartError> {
-        let builder =
-            preflight_host_builder(&self.config, self.budgets, self.compiled_cache_path())
-                .await
-                .map_err(StartError::Consent)?;
+        let builder = preflight_host_builder(
+            &self.config,
+            self.budgets,
+            self.compiled_cache_path(),
+            self.tls_roots.clone(),
+        )
+        .await
+        .map_err(StartError::Consent)?;
         let mut resources = StartResources::new(ToolRegistry::new(), builder);
         let result = Self::preflight_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
@@ -477,7 +499,13 @@ impl AgentBuilder {
         self.configured_plugin(id)?;
         let mut resources = StartResources::new(
             ToolRegistry::new(),
-            host_builder(&self.config, self.budgets, self.compiled_cache_path()).await?,
+            host_builder(
+                &self.config,
+                self.budgets,
+                self.compiled_cache_path(),
+                self.tls_roots.clone(),
+            )
+            .await?,
         );
         let result = self
             .approve_configured_plugin(
@@ -530,7 +558,13 @@ impl AgentBuilder {
         }
         let mut resources = StartResources::new(
             ToolRegistry::new(),
-            host_builder(&self.config, self.budgets, self.compiled_cache_path()).await?,
+            host_builder(
+                &self.config,
+                self.budgets,
+                self.compiled_cache_path(),
+                self.tls_roots.clone(),
+            )
+            .await?,
         );
         let result = self
             .review_configured_plugins(
@@ -630,10 +664,11 @@ impl AgentBuilder {
         let Self {
             config,
             state_dir: _,
+            tls_roots,
             tools,
             budgets,
         } = self;
-        let builder = host_builder(&config, budgets, compiled_cache)
+        let builder = host_builder(&config, budgets, compiled_cache, tls_roots)
             .await
             .map_err(StartError::Consent)?;
         let mut resources = StartResources::new(tools, builder);
