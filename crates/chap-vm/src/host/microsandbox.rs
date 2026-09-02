@@ -41,7 +41,7 @@ impl MicrosandboxBackend {
     async fn handle(vm: &VmRef) -> Result<SandboxHandle, VmError> {
         Sandbox::get(&sandbox_name(vm.physical_label()))
             .await
-            .map_err(map_sdk_error)
+            .map_err(|error| map_sdk_error("VM lookup", error))
     }
 
     async fn sandbox(vm: &VmRef) -> Result<Sandbox, VmError> {
@@ -49,7 +49,7 @@ impl MicrosandboxBackend {
             .await?
             .connect()
             .await
-            .map_err(map_sdk_error)
+            .map_err(|error| map_sdk_error("VM connection", error))
     }
 }
 
@@ -59,7 +59,7 @@ impl VmBackend for MicrosandboxBackend {
         sandbox_builder(id, cfg)?
             .create()
             .await
-            .map_err(map_sdk_error)?;
+            .map_err(|error| map_sdk_error("VM creation", error))?;
         Ok(VmRef { physical_label })
     }
 
@@ -68,7 +68,7 @@ impl VmBackend for MicrosandboxBackend {
         match Sandbox::get(&sandbox_name(&physical_label)).await {
             Ok(_) => Ok(Some(VmRef { physical_label })),
             Err(MicrosandboxError::SandboxNotFound(_)) => Ok(None),
-            Err(error) => Err(map_sdk_error(error)),
+            Err(error) => Err(map_sdk_error("VM lookup", error)),
         }
     }
 
@@ -82,13 +82,13 @@ impl VmBackend for MicrosandboxBackend {
                     Err(MicrosandboxError::SandboxAlreadyExists(_)) => {
                         let handle = Sandbox::get(&sandbox_name(&physical_label))
                             .await
-                            .map_err(map_sdk_error)?;
+                            .map_err(|error| map_sdk_error("VM lookup", error))?;
                         connect_existing_if_config_matches(handle, cfg).await?;
                     }
-                    Err(error) => return Err(map_sdk_error(error)),
+                    Err(error) => return Err(map_sdk_error("VM creation", error)),
                 }
             }
-            Err(error) => return Err(map_sdk_error(error)),
+            Err(error) => return Err(map_sdk_error("VM lookup", error)),
         }
         Ok(VmRef { physical_label })
     }
@@ -120,7 +120,7 @@ impl VmBackend for MicrosandboxBackend {
                 options
             })
             .await
-            .map_err(map_sdk_error)?;
+            .map_err(|error| map_sdk_error("VM command execution", error))?;
 
         match tokio::time::timeout(
             timeout,
@@ -147,9 +147,13 @@ impl VmBackend for MicrosandboxBackend {
             .fs()
             .read_stream(path)
             .await
-            .map_err(map_sdk_error)?;
+            .map_err(|error| map_sdk_error("VM file read", error))?;
         let mut bytes = Vec::new();
-        while let Some(chunk) = stream.recv().await.map_err(map_sdk_error)? {
+        while let Some(chunk) = stream
+            .recv()
+            .await
+            .map_err(|error| map_sdk_error("VM file read", error))?
+        {
             let chunk_len = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
             let current_len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
             if chunk_len > max_bytes.saturating_sub(current_len) {
@@ -168,7 +172,7 @@ impl VmBackend for MicrosandboxBackend {
             .fs()
             .write(path, bytes)
             .await
-            .map_err(map_sdk_error)
+            .map_err(|error| map_sdk_error("VM file write", error))
     }
 
     async fn destroy(&self, vm: &VmRef) -> Result<(), VmError> {
@@ -181,7 +185,9 @@ impl VmBackend for MicrosandboxBackend {
             Err(VmError::NoSuchVm) => return Ok(None),
             Err(error) => return Err(error),
         };
-        let config = handle.config().map_err(map_sdk_error)?;
+        let config = handle
+            .config()
+            .map_err(|error| map_sdk_error("VM metadata read", error))?;
         Ok(config
             .spec
             .labels
@@ -203,7 +209,9 @@ async fn connect_existing_if_config_matches(
     handle: SandboxHandle,
     cfg: &VmConfig,
 ) -> Result<(), VmError> {
-    let config = handle.config().map_err(map_sdk_error)?;
+    let config = handle
+        .config()
+        .map_err(|error| map_sdk_error("VM metadata read", error))?;
     connect_if_config_matches(
         config.spec.labels.get(CONFIG_LABEL).map(String::as_str),
         &cfg.config_hash,
@@ -211,7 +219,7 @@ async fn connect_existing_if_config_matches(
             handle
                 .connect_or_start_detached()
                 .await
-                .map_err(map_sdk_error)
+                .map_err(|error| map_sdk_error("VM connection", error))
         },
     )
     .await?;
@@ -248,7 +256,7 @@ async fn destroy_installation_vms(
             }
         })
         .await
-        .map_err(map_sdk_error)?;
+        .map_err(|error| map_sdk_error("VM listing", error))?;
         handles.extend(page.sandboxes);
         cursor = page.next_cursor;
         if cursor.is_none() {
@@ -257,7 +265,9 @@ async fn destroy_installation_vms(
     }
 
     for handle in handles {
-        let config = handle.config().map_err(map_sdk_error)?;
+        let config = handle
+            .config()
+            .map_err(|error| map_sdk_error("VM metadata read", error))?;
         let epoch = config
             .spec
             .labels
@@ -334,9 +344,10 @@ fn network_policy(egress: &[Egress]) -> Result<NetworkPolicy, VmError> {
             }
         });
     }
-    let policy = policy
-        .build()
-        .map_err(|error| VmError::Failed(error.to_string()))?;
+    let policy = policy.build().map_err(|error| {
+        tracing::warn!(operation = "VM network policy", error = %error, "microsandbox operation failed");
+        VmError::Failed("VM network policy configuration failed".into())
+    })?;
     Ok(policy)
 }
 
@@ -347,8 +358,14 @@ fn enables_gateway_dns(destination: &Egress) -> bool {
 }
 
 async fn destroy_handle(handle: SandboxHandle) -> Result<(), VmError> {
-    handle.stop().await.map_err(map_sdk_error)?;
-    handle.remove().await.map_err(map_sdk_error)
+    handle
+        .stop()
+        .await
+        .map_err(|error| map_sdk_error("VM stop", error))?;
+    handle
+        .remove()
+        .await
+        .map_err(|error| map_sdk_error("VM removal", error))
 }
 
 async fn collect_exec(
@@ -378,7 +395,10 @@ async fn collect_exec(
                 });
             }
             ExecEvent::Failed(error) => {
-                return Err(map_sdk_error(MicrosandboxError::ExecFailed(error)));
+                return Err(map_sdk_error(
+                    "VM command execution",
+                    MicrosandboxError::ExecFailed(error),
+                ));
             }
             ExecEvent::StdinError(_) => {}
         }
@@ -423,15 +443,18 @@ fn host_prefix_len(addr: IpAddr) -> u8 {
     }
 }
 
-fn map_sdk_error(error: MicrosandboxError) -> VmError {
+fn map_sdk_error(operation: &'static str, error: MicrosandboxError) -> VmError {
+    tracing::warn!(operation, error = %error, "microsandbox operation failed");
     match error {
         MicrosandboxError::SandboxAlreadyExists(_) => VmError::AlreadyExists,
         MicrosandboxError::SandboxNotFound(_) => VmError::NoSuchVm,
         MicrosandboxError::ExecTimeout(_) => VmError::TimedOut,
-        error @ (MicrosandboxError::LibkrunfwNotFound(_)
+        MicrosandboxError::LibkrunfwNotFound(_)
         | MicrosandboxError::BootStart { .. }
-        | MicrosandboxError::Unsupported { .. }) => VmError::Unavailable(error.to_string()),
-        error => VmError::Failed(error.to_string()),
+        | MicrosandboxError::Unsupported { .. } => {
+            VmError::Unavailable(format!("{operation} is unavailable"))
+        }
+        _ => VmError::Failed(format!("{operation} failed")),
     }
 }
 
@@ -478,24 +501,43 @@ mod tests {
     #[test]
     fn sdk_errors_map_to_stable_vm_error_categories() {
         assert_eq!(
-            map_sdk_error(MicrosandboxError::SandboxAlreadyExists("taken".into())),
+            map_sdk_error(
+                "VM creation",
+                MicrosandboxError::SandboxAlreadyExists("taken".into())
+            ),
             VmError::AlreadyExists
         );
         assert_eq!(
-            map_sdk_error(MicrosandboxError::SandboxNotFound("missing".into())),
+            map_sdk_error(
+                "VM lookup",
+                MicrosandboxError::SandboxNotFound("missing".into())
+            ),
             VmError::NoSuchVm
         );
         assert_eq!(
-            map_sdk_error(MicrosandboxError::ExecTimeout(Duration::from_secs(1))),
+            map_sdk_error(
+                "VM command execution",
+                MicrosandboxError::ExecTimeout(Duration::from_secs(1))
+            ),
             VmError::TimedOut
         );
         assert!(matches!(
-            map_sdk_error(MicrosandboxError::LibkrunfwNotFound("gone".into())),
-            VmError::Unavailable(message) if message.contains("gone")
+            map_sdk_error(
+                "VM creation",
+                MicrosandboxError::LibkrunfwNotFound(
+                    "/Users/alice/.microsandbox/lib/libkrunfw.dylib".into()
+                )
+            ),
+            VmError::Unavailable(message) if message == "VM creation is unavailable"
         ));
         assert!(matches!(
-            map_sdk_error(MicrosandboxError::InvalidConfig("bad".into())),
-            VmError::Failed(message) if message.contains("bad")
+            map_sdk_error(
+                "VM creation",
+                MicrosandboxError::InvalidConfig(
+                    "invalid path /Users/alice/.microsandbox/state".into()
+                )
+            ),
+            VmError::Failed(message) if message == "VM creation failed"
         ));
     }
 
