@@ -184,7 +184,7 @@ async fn start_agent(
 
     let builder = super::load_test_builder(&config_path);
     for id in plugins.keys() {
-        builder.approve_plugin(id).await.unwrap();
+        builder.approve_plugin(&id.as_str().into()).await.unwrap();
     }
     (builder.start().await.unwrap(), directory)
 }

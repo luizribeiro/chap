@@ -2,23 +2,24 @@ use super::super::NO_PLUGINS_CONFIGURED;
 use crate::render::{render_consent_error, render_load_error};
 use chap_core::{
     AgentBuilder, DriftChange, DriftKind, ExportDrift, ExportDriftKind, PluginConsentReview,
+    PluginId,
 };
 use std::collections::BTreeSet;
 
 pub(super) async fn grants_review(
     builder: &AgentBuilder,
-    instance_id: Option<&str>,
+    plugin_id: Option<&str>,
 ) -> Result<String, String> {
     let consent_path = builder.consent_path().map_err(render_load_error)?;
     let mut output = format!("Consent store: {}\n", consent_path.display());
-    let ids = match instance_id {
-        Some(id) => vec![id.to_owned()],
+    let plugin_ids = match plugin_id {
+        Some(plugin_id) => vec![PluginId::from(plugin_id)],
         None => builder
             .plugins()
-            .map(|(id, _)| id.to_string())
+            .map(|(plugin_id, _)| plugin_id)
             .collect::<Vec<_>>(),
     };
-    if ids.is_empty() {
+    if plugin_ids.is_empty() {
         output.push_str(NO_PLUGINS_CONFIGURED);
         return Ok(output);
     }
@@ -26,9 +27,8 @@ pub(super) async fn grants_review(
     output.push_str(
         "Concrete scopes come from chap.json; approval grants this exact resolved manifest.\n",
     );
-    let review_ids = ids.iter().map(String::as_str).collect::<Vec<_>>();
     let reviews = builder
-        .review_plugins(&review_ids)
+        .review_plugins(&plugin_ids)
         .await
         .map_err(render_consent_error)?;
     for (index, review) in reviews.iter().enumerate() {

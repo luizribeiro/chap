@@ -40,7 +40,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
         .unwrap()
         .state_dir(config_directory.path());
     assert_eq!(
-        chap_builder.plugin_roles("sdk-multi-role").unwrap(),
+        chap_builder.plugin_roles(&"sdk-multi-role".into()).unwrap(),
         ["provider", "tool", "context"]
     );
     let mut builder = host_builder();
@@ -240,7 +240,10 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
     let builder = AgentBuilder::load(&config_path)
         .unwrap()
         .state_dir(config_directory.path());
-    builder.approve_plugin("sdk-multi-role").await.unwrap();
+    builder
+        .approve_plugin(&"sdk-multi-role".into())
+        .await
+        .unwrap();
 
     // Generous outer bound: start() also wasmtime-compiles the component,
     // which loaded runners stretch far past the 1s deadline under test. A
@@ -296,7 +299,10 @@ async fn preserves_a_tool_plugin_definitions_error_at_the_host_boundary() {
     let builder = AgentBuilder::load(&config_path)
         .unwrap()
         .state_dir(config_directory.path());
-    builder.approve_plugin("sdk-multi-role").await.unwrap();
+    builder
+        .approve_plugin(&"sdk-multi-role".into())
+        .await
+        .unwrap();
 
     let error = builder
         .start()

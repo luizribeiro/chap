@@ -88,14 +88,14 @@ async fn run_scenario(
     let builder = AgentBuilder::load(&config_path)
         .unwrap()
         .state_dir(directory.path());
-    let sandbox_approval = builder.approve_plugin("sandbox").await.unwrap();
+    let sandbox_approval = builder.approve_plugin(&"sandbox".into()).await.unwrap();
     let mount_grant = sandbox_approval
         .grants
         .iter()
         .find(|grant| grant.capability == "vm" && grant.permission == "mount")
         .expect("the sandbox approval must include vm.mount");
     assert_eq!(mount_grant.scopes, [expected_mount_grant]);
-    builder.approve_plugin("openai").await.unwrap();
+    builder.approve_plugin(&"openai".into()).await.unwrap();
     let agent = builder.start().await.unwrap();
     let session = agent.session(SessionOptions::new("openai")).await.unwrap();
     let mut events = session.subscribe();

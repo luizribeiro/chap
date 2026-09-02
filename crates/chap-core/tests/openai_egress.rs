@@ -173,14 +173,14 @@ async fn refuses_an_expanded_egress_manifest_until_reapproved() {
     write_openai_config(&config_path, &component, "http://127.0.0.1:41001");
 
     load_builder(&config_path)
-        .approve_plugin("openai")
+        .approve_plugin(&"openai".into())
         .await
         .unwrap();
     let consent_path = directory.path().join("consent.json");
     let stored_before = std::fs::read(&consent_path).unwrap();
     write_openai_config(&config_path, &component, "http://127.0.0.1:41002");
     let builder = load_builder(&config_path);
-    let review = builder.review_plugin("openai").await.unwrap();
+    let review = builder.review_plugin(&"openai".into()).await.unwrap();
     let drift = review.drift.as_ref().expect("expanded manifest must drift");
     assert!(drift.blocks_admission);
     assert!(
@@ -213,7 +213,7 @@ async fn admission_after_narrowed_egress_refreshes_the_stored_record() {
     write_openai_config(&config_path, &component, origin);
 
     let approved = load_builder(&config_path)
-        .approve_plugin("openai")
+        .approve_plugin(&"openai".into())
         .await
         .unwrap();
     let consent = ConsentStore::new(directory.path().join("consent.json"), &config_path);
@@ -251,7 +251,7 @@ async fn admission_with_a_matching_digest_does_not_rewrite_the_store() {
     write_openai_config(&config_path, &component, "http://127.0.0.1:41001");
 
     let approved = load_builder(&config_path)
-        .approve_plugin("openai")
+        .approve_plugin(&"openai".into())
         .await
         .unwrap();
     let consent_path = directory.path().join("consent.json");
@@ -274,7 +274,7 @@ struct HostCompletion {
 
 async fn complete_through_the_host(mock: MockServer, config_path: &Path) -> HostCompletion {
     let builder = load_builder(config_path);
-    builder.approve_plugin("openai").await.unwrap();
+    builder.approve_plugin(&"openai".into()).await.unwrap();
     let agent = builder.start().await.unwrap();
     let session = agent.session(SessionOptions::new("openai")).await.unwrap();
     let mut events = session.subscribe();

@@ -34,7 +34,7 @@ async fn completes_a_provider_round_trip_over_tls() {
         .unwrap()
         .state_dir(directory.path())
         .tls_roots(mock.roots.clone());
-    builder.approve_plugin("openai").await.unwrap();
+    builder.approve_plugin(&"openai".into()).await.unwrap();
     let agent = builder.start().await.unwrap();
     let session = agent.session(SessionOptions::new("openai")).await.unwrap();
     let completion = tokio::time::timeout(INVOCATION_TIMEOUT, session.send("hello over TLS"))

@@ -361,7 +361,7 @@ mod tests {
         let builder = AgentBuilder::load(&config_path)
             .unwrap()
             .state_dir(directory.path());
-        let error = builder.review_plugin("broken").await.unwrap_err();
+        let error = builder.review_plugin(&"broken".into()).await.unwrap_err();
 
         assert!(matches!(
             &error,

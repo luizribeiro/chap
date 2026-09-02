@@ -180,7 +180,7 @@ async fn rejects_exec_needs_when_the_capability_is_not_registered() {
     let (directory, config_path) = exec_plugin_config(&["cargo", "git commit"]);
     let builder = load_test_builder(&config_path);
 
-    let error = builder.review_plugin("example").await.unwrap_err();
+    let error = builder.review_plugin(&"example".into()).await.unwrap_err();
 
     assert!(matches!(
         error,
@@ -195,7 +195,11 @@ async fn resolves_exec_setting_arrays_into_canonical_review_scopes() {
     let (directory, config_path) = exec_plugin_config(&["cargo", "git commit"]);
     let builder = load_test_builder(&config_path);
 
-    let manifest = builder.review_plugin("example").await.unwrap().manifest;
+    let manifest = builder
+        .review_plugin(&"example".into())
+        .await
+        .unwrap()
+        .manifest;
     let grant = manifest
         .grants
         .iter()
@@ -214,13 +218,13 @@ async fn resolves_exec_setting_arrays_into_canonical_review_scopes() {
 async fn expanded_exec_settings_drift_and_block_readmission() {
     let (directory, config_path) = exec_plugin_config(&["cargo", "git commit"]);
     load_test_builder(&config_path)
-        .approve_plugin("example")
+        .approve_plugin(&"example".into())
         .await
         .unwrap();
     write_exec_plugin_config(&directory, &["cargo", "git commit", "rg"]);
     let builder = load_test_builder(&config_path);
 
-    let review = builder.review_plugin("example").await.unwrap();
+    let review = builder.review_plugin(&"example".into()).await.unwrap();
     let drift = review.drift.expect("the added command should cause drift");
     assert!(drift.blocks_admission);
     assert!(drift.changes.iter().any(|change| {
@@ -248,7 +252,7 @@ async fn rejects_an_empty_required_exec_setting_array() {
     let (directory, config_path) = exec_plugin_config(&[]);
     let builder = load_test_builder(&config_path);
 
-    let error = builder.review_plugin("example").await.unwrap_err();
+    let error = builder.review_plugin(&"example".into()).await.unwrap_err();
 
     assert!(matches!(
         error,
@@ -363,10 +367,13 @@ async fn approved_matching_manifest_admits_a_configured_provider() {
 
     assert_eq!(builder.plugins().count(), 1);
     assert_eq!(
-        builder.plugin_roles("example.provider").unwrap(),
+        builder.plugin_roles(&"example.provider".into()).unwrap(),
         ["provider"]
     );
-    let record = builder.approve_plugin("example.provider").await.unwrap();
+    let record = builder
+        .approve_plugin(&"example.provider".into())
+        .await
+        .unwrap();
     assert_eq!(
         fs::read(directory.join("config-path")).unwrap(),
         fs::canonicalize(&config_path)
@@ -407,7 +414,7 @@ async fn classifies_a_trapping_provider_as_a_plugin_failure() {
     )
     .unwrap();
     let builder = load_test_builder(&config_path);
-    builder.approve_plugin("example").await.unwrap();
+    builder.approve_plugin(&"example".into()).await.unwrap();
     let agent = builder.start().await.unwrap();
     let backend = PluginBackend::new(&agent.inner, "example");
 
@@ -450,7 +457,7 @@ async fn configured_provider_budget_reaches_the_host_builder() {
     )
     .unwrap();
     let builder = load_test_builder(&config_path);
-    builder.approve_plugin("example").await.unwrap();
+    builder.approve_plugin(&"example".into()).await.unwrap();
     let agent = builder.start().await.unwrap();
     let backend = PluginBackend::new(&agent.inner, "example");
 
@@ -510,8 +517,14 @@ async fn fast_provider_and_tool_plugins_succeed_with_deadlines() {
     )
     .unwrap();
     let builder = load_test_builder(&config_path);
-    builder.approve_plugin("example.provider").await.unwrap();
-    builder.approve_plugin("example.tools").await.unwrap();
+    builder
+        .approve_plugin(&"example.provider".into())
+        .await
+        .unwrap();
+    builder
+        .approve_plugin(&"example.tools".into())
+        .await
+        .unwrap();
     let agent = builder.start().await.unwrap();
     let backend = PluginBackend::new(&agent.inner, "example.provider");
 
@@ -558,7 +571,7 @@ async fn start_refuses_and_names_every_unapproved_plugin() {
     .unwrap();
 
     let builder = load_test_builder(&config_path);
-    builder.approve_plugin("approved").await.unwrap();
+    builder.approve_plugin(&"approved".into()).await.unwrap();
     let error = builder.start().await.err().unwrap();
 
     let refusals = refused_plugins(error);
@@ -738,23 +751,23 @@ async fn approving_then_denying_toggles_plugin_admission() {
     let builder = load_test_builder(&config_path);
     assert!(
         builder
-            .review_plugin("example")
+            .review_plugin(&"example".into())
             .await
             .unwrap()
             .prior
             .is_none()
     );
-    builder.approve_plugin("example").await.unwrap();
+    builder.approve_plugin(&"example".into()).await.unwrap();
     let agent = builder.start().await.unwrap();
     tokio::task::spawn_blocking(move || drop(agent))
         .await
         .unwrap();
 
     let builder = load_test_builder(&config_path);
-    builder.deny_plugin("example").unwrap();
+    builder.deny_plugin(&"example".into()).unwrap();
     assert!(
         builder
-            .review_plugin("example")
+            .review_plugin(&"example".into())
             .await
             .unwrap()
             .prior
@@ -774,7 +787,7 @@ async fn approving_then_denying_toggles_plugin_admission() {
 async fn start_refuses_a_plugin_that_gains_a_role_after_approval() {
     let (directory, component, builder) =
         role_change_plugin_builder(provider_component("example.plugin"));
-    builder.approve_plugin("example").await.unwrap();
+    builder.approve_plugin(&"example".into()).await.unwrap();
     fs::write(&component, provider_and_tool_component("example.plugin")).unwrap();
 
     let error = builder.start().await.err().unwrap();
@@ -797,10 +810,10 @@ async fn start_refuses_a_plugin_that_gains_a_role_after_approval() {
 async fn losing_a_role_admits_and_refreshes_the_consent_record() {
     let (directory, component, builder) =
         role_change_plugin_builder(provider_and_tool_component("example.plugin"));
-    builder.approve_plugin("example").await.unwrap();
+    builder.approve_plugin(&"example".into()).await.unwrap();
     fs::write(&component, provider_component("example.plugin")).unwrap();
     let narrowed_exports = builder
-        .review_plugin("example")
+        .review_plugin(&"example".into())
         .await
         .unwrap()
         .manifest
@@ -837,7 +850,7 @@ async fn compiled_components_are_cached_and_reused_under_the_state_directory() {
     let builder = AgentBuilder::load(&config_path).unwrap().state_dir(&state);
     assert!(!cache.exists());
 
-    builder.review_plugin("example").await.unwrap();
+    builder.review_plugin(&"example".into()).await.unwrap();
 
     let entries = compiled_cache_entries(&cache);
     assert_eq!(entries.len(), 1, "{entries:?}");
@@ -845,7 +858,7 @@ async fn compiled_components_are_cached_and_reused_under_the_state_directory() {
     let first_modified = fs::metadata(entry).unwrap().modified().unwrap();
 
     tokio::time::sleep(Duration::from_secs(1)).await;
-    builder.review_plugin("example").await.unwrap();
+    builder.review_plugin(&"example".into()).await.unwrap();
 
     assert_eq!(compiled_cache_entries(&cache), entries);
     assert_eq!(
@@ -872,10 +885,10 @@ fn compiled_cache_entries(directory: &Path) -> Vec<PathBuf> {
 async fn review_surfaces_a_gained_export_after_a_role_change() {
     let (directory, component, builder) =
         role_change_plugin_builder(provider_component("example.plugin"));
-    builder.approve_plugin("example").await.unwrap();
+    builder.approve_plugin(&"example".into()).await.unwrap();
     fs::write(&component, provider_and_tool_component("example.plugin")).unwrap();
 
-    let review = builder.review_plugin("example").await.unwrap();
+    let review = builder.review_plugin(&"example".into()).await.unwrap();
     let drift = review.drift.expect("the gained role should be reported");
 
     assert!(drift.export_changes.iter().any(|change| {
@@ -902,7 +915,11 @@ async fn nonblocking_drift_errors_are_reported_without_panicking() {
     )
     .unwrap();
     let builder = load_test_builder(&config_path);
-    let manifest = builder.review_plugin("example").await.unwrap().manifest;
+    let manifest = builder
+        .review_plugin(&"example".into())
+        .await
+        .unwrap()
+        .manifest;
 
     let refusal = AgentBuilder::consent_refusal(
         &"example".into(),
@@ -1063,7 +1080,10 @@ fn discovers_a_configured_tool_plugin() {
 
     let builder = load_test_builder(&config_path);
 
-    assert_eq!(builder.plugin_roles("example.tools").unwrap(), ["tool"]);
+    assert_eq!(
+        builder.plugin_roles(&"example.tools".into()).unwrap(),
+        ["tool"]
+    );
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -1089,7 +1109,10 @@ async fn loads_definitions_from_an_admitted_tool_plugin() {
     .unwrap();
 
     let builder = load_test_builder(&config_path);
-    builder.approve_plugin("example.tools").await.unwrap();
+    builder
+        .approve_plugin(&"example.tools".into())
+        .await
+        .unwrap();
     let agent = builder.start().await.unwrap();
 
     assert_eq!(agent.tool_definitions()[0].name, "fixture-tool");
@@ -1119,7 +1142,10 @@ async fn preserves_plugin_tool_registration_failures() {
     let builder = load_test_builder(&config_path)
         .tool(NamedTool("fixture-tool"))
         .unwrap();
-    builder.approve_plugin("example.tools").await.unwrap();
+    builder
+        .approve_plugin(&"example.tools".into())
+        .await
+        .unwrap();
 
     let error = builder
         .start()
@@ -1166,7 +1192,10 @@ async fn times_out_a_hanging_tool_plugin() {
     .unwrap();
 
     let builder = load_test_builder(&config_path);
-    builder.approve_plugin("example.tools").await.unwrap();
+    builder
+        .approve_plugin(&"example.tools".into())
+        .await
+        .unwrap();
     let agent = builder.start().await.unwrap();
 
     let error = tokio::time::timeout(
@@ -1210,7 +1239,10 @@ async fn loads_execution_modes_declared_by_an_admitted_tool_plugin() {
     .unwrap();
 
     let builder = load_test_builder(&config_path);
-    builder.approve_plugin("example.tools").await.unwrap();
+    builder
+        .approve_plugin(&"example.tools".into())
+        .await
+        .unwrap();
     let agent = builder.start().await.unwrap();
 
     assert_eq!(
@@ -1254,7 +1286,10 @@ async fn plugin_execution_override_makes_loaded_tools_sequential() {
     .unwrap();
 
     let builder = load_test_builder(&config_path);
-    builder.approve_plugin("example.tools").await.unwrap();
+    builder
+        .approve_plugin(&"example.tools".into())
+        .await
+        .unwrap();
     let agent = builder.start().await.unwrap();
 
     assert_eq!(
@@ -1354,7 +1389,7 @@ async fn accepts_an_instance_id_that_differs_from_plugin_metadata() {
     .unwrap();
 
     let builder = load_test_builder(&config_path);
-    builder.approve_plugin("config-id").await.unwrap();
+    builder.approve_plugin(&"config-id".into()).await.unwrap();
     builder.start().await.unwrap();
     fs::remove_dir_all(directory).unwrap();
 }
@@ -1387,7 +1422,7 @@ async fn drops_partial_start_resources_on_a_blocking_thread() {
     let builder = load_test_builder(&config_path)
         .tool(DropProbe { dropped })
         .unwrap();
-    builder.approve_plugin("a-provider").await.unwrap();
+    builder.approve_plugin(&"a-provider".into()).await.unwrap();
 
     let error = match builder.start().await {
         Ok(_) => panic!("the missing second plugin should fail admission"),
@@ -1431,7 +1466,7 @@ async fn reports_the_component_path_for_an_unsupported_plugin_role() {
 async fn reviewing_rejects_a_plugin_without_a_supported_role() {
     let (directory, component, builder) = unsupported_plugin_builder();
 
-    let error = match builder.review_plugin("example").await {
+    let error = match builder.review_plugin(&"example".into()).await {
         Ok(_) => panic!("reviewing a plugin without a supported role should fail"),
         Err(error) => error,
     };
@@ -1454,7 +1489,7 @@ async fn reviewing_rejects_a_plugin_without_a_supported_role() {
 async fn approving_rejects_a_plugin_without_a_supported_role() {
     let (directory, component, builder) = unsupported_plugin_builder();
 
-    let error = match builder.approve_plugin("example").await {
+    let error = match builder.approve_plugin(&"example".into()).await {
         Ok(_) => panic!("approving a plugin without a supported role should fail"),
         Err(error) => error,
     };

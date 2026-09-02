@@ -388,15 +388,14 @@ impl AgentBuilder {
             .map(|(id, plugin)| (id, plugin.component()))
     }
 
-    pub fn plugin_roles(&self, plugin_id: &str) -> Result<Vec<&'static str>, ConsentError> {
-        let plugin_id = PluginId::from(plugin_id);
+    pub fn plugin_roles(&self, plugin_id: &PluginId) -> Result<Vec<&'static str>, ConsentError> {
         let plugin =
             self.config
-                .plugin(&plugin_id)
+                .plugin(plugin_id)
                 .ok_or_else(|| ConsentError::PluginNotConfigured {
                     plugin: plugin_id.as_str().to_owned(),
                 })?;
-        let bytes = Self::plugin_bytes(&self.config, &plugin_id, plugin)?;
+        let bytes = Self::plugin_bytes(&self.config, plugin_id, plugin)?;
         let inspection =
             lockgate::inspect(&bytes).map_err(|source| ConsentError::InspectPlugin {
                 plugin: plugin_id.as_str().to_owned(),
@@ -495,10 +494,12 @@ impl AgentBuilder {
         }
     }
 
-    pub async fn approve_plugin(&self, plugin_id: &str) -> Result<ConsentRecord, ConsentError> {
-        let plugin_id = PluginId::from(plugin_id);
+    pub async fn approve_plugin(
+        &self,
+        plugin_id: &PluginId,
+    ) -> Result<ConsentRecord, ConsentError> {
         let consent = self.consent_store()?;
-        self.configured_plugin(&plugin_id)?;
+        self.configured_plugin(plugin_id)?;
         let mut resources = StartResources::new(
             ToolRegistry::new(),
             host_builder(
@@ -513,7 +514,7 @@ impl AgentBuilder {
             .approve_configured_plugin(
                 resources.builder.as_mut().expect("uninitialized host"),
                 &consent,
-                &plugin_id,
+                plugin_id,
             )
             .await;
         Self::finish_consent_operation(result, resources).await
@@ -535,35 +536,32 @@ impl AgentBuilder {
         Ok(record)
     }
 
-    pub fn deny_plugin(&self, plugin_id: &str) -> Result<(), ConsentError> {
-        let plugin_id = PluginId::from(plugin_id);
-        if self.config.plugin(&plugin_id).is_none() {
+    pub fn deny_plugin(&self, plugin_id: &PluginId) -> Result<(), ConsentError> {
+        if self.config.plugin(plugin_id).is_none() {
             return Err(ConsentError::PluginNotConfigured {
                 plugin: plugin_id.as_str().to_owned(),
             });
         }
-        self.consent_store()?.remove(&plugin_id)
+        self.consent_store()?.remove(plugin_id)
     }
 
     pub async fn review_plugin(
         &self,
-        plugin_id: &str,
+        plugin_id: &PluginId,
     ) -> Result<PluginConsentReview, ConsentError> {
-        let mut reviews = self.review_plugins(&[plugin_id]).await?;
+        let mut reviews = self
+            .review_plugins(core::slice::from_ref(plugin_id))
+            .await?;
         Ok(reviews.pop().expect("one plugin was reviewed"))
     }
 
     /// Reviews several configured plugins against one shared host builder.
     pub async fn review_plugins(
         &self,
-        plugin_ids: &[&str],
+        plugin_ids: &[PluginId],
     ) -> Result<Vec<PluginConsentReview>, ConsentError> {
         let consent = self.consent_store()?;
-        let plugin_ids = plugin_ids
-            .iter()
-            .map(|plugin_id| PluginId::from(*plugin_id))
-            .collect::<Vec<_>>();
-        for plugin_id in &plugin_ids {
+        for plugin_id in plugin_ids {
             self.configured_plugin(plugin_id)?;
         }
         let mut resources = StartResources::new(
@@ -580,7 +578,7 @@ impl AgentBuilder {
             .review_configured_plugins(
                 resources.builder.as_mut().expect("uninitialized host"),
                 &consent,
-                &plugin_ids,
+                plugin_ids,
             )
             .await;
         Self::finish_consent_operation(result, resources).await
