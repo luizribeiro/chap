@@ -164,21 +164,24 @@ type StartDropResources = (
 async fn host_builder(
     config: &Config,
     budgets: PluginBudgets,
+    compiled_cache: Option<PathBuf>,
 ) -> Result<HostBuilder<()>, ConsentError> {
-    configured_host_builder(config, false, budgets).await
+    configured_host_builder(config, false, budgets, compiled_cache).await
 }
 
 async fn preflight_host_builder(
     config: &Config,
     budgets: PluginBudgets,
+    compiled_cache: Option<PathBuf>,
 ) -> Result<HostBuilder<()>, ConsentError> {
-    configured_host_builder(config, true, budgets).await
+    configured_host_builder(config, true, budgets, compiled_cache).await
 }
 
 async fn configured_host_builder(
     _config: &Config,
     _preflight: bool,
     budgets: PluginBudgets,
+    compiled_cache: Option<PathBuf>,
 ) -> Result<HostBuilder<()>, ConsentError> {
     #[cfg(feature = "vm")]
     let vm = if _preflight {
@@ -194,8 +197,23 @@ async fn configured_host_builder(
         #[cfg(feature = "vm")]
         vm,
     };
-    let builder = HostBuilder::new(imports)
-        .map_err(|source| ConsentError::HostConstruction { source })?
+    let builder =
+        HostBuilder::new(imports).map_err(|source| ConsentError::HostConstruction { source })?;
+    let builder = match compiled_cache {
+        Some(path) => match fs::create_dir_all(&path) {
+            Ok(()) => builder.compiled_cache(path),
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "compiled component cache is unavailable; continuing without it"
+                );
+                builder
+            }
+        },
+        None => builder,
+    };
+    let builder = builder
         .budgets::<bindings::provider::Role>(budgets.provider)
         .map_err(|source| ConsentError::InvalidCallBudget { source })?
         .budgets::<bindings::tools::Role>(budgets.tools)
@@ -333,6 +351,19 @@ impl AgentBuilder {
         ))
     }
 
+    fn compiled_cache_path(&self) -> Option<PathBuf> {
+        match self.consent_path() {
+            Ok(path) => Some(path.with_file_name("compiled")),
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "compiled component cache location is unavailable; continuing without it"
+                );
+                None
+            }
+        }
+    }
+
     pub fn plugins(&self) -> impl Iterator<Item = (&str, &Path)> {
         self.config
             .plugins()
@@ -368,9 +399,10 @@ impl AgentBuilder {
     /// Required environment variables are reported with their current presence,
     /// but an unset variable does not make the coherence check fail.
     pub async fn check_plugins(&self) -> Result<Vec<PluginCheck>, StartError> {
-        let builder = preflight_host_builder(&self.config, self.budgets)
-            .await
-            .map_err(StartError::Consent)?;
+        let builder =
+            preflight_host_builder(&self.config, self.budgets, self.compiled_cache_path())
+                .await
+                .map_err(StartError::Consent)?;
         let mut resources = StartResources::new(ToolRegistry::new(), builder);
         let result = Self::preflight_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
@@ -445,7 +477,7 @@ impl AgentBuilder {
         self.configured_plugin(id)?;
         let mut resources = StartResources::new(
             ToolRegistry::new(),
-            host_builder(&self.config, self.budgets).await?,
+            host_builder(&self.config, self.budgets, self.compiled_cache_path()).await?,
         );
         let result = self
             .approve_configured_plugin(
@@ -498,7 +530,7 @@ impl AgentBuilder {
         }
         let mut resources = StartResources::new(
             ToolRegistry::new(),
-            host_builder(&self.config, self.budgets).await?,
+            host_builder(&self.config, self.budgets, self.compiled_cache_path()).await?,
         );
         let result = self
             .review_configured_plugins(
@@ -594,13 +626,14 @@ impl AgentBuilder {
     /// Refuses to start unless every configured plugin is admitted.
     pub async fn start(self) -> Result<Agent, StartError> {
         let consent = self.consent_store().map_err(StartError::Consent)?;
+        let compiled_cache = self.compiled_cache_path();
         let Self {
             config,
             state_dir: _,
             tools,
             budgets,
         } = self;
-        let builder = host_builder(&config, budgets)
+        let builder = host_builder(&config, budgets, compiled_cache)
             .await
             .map_err(StartError::Consent)?;
         let mut resources = StartResources::new(tools, builder);

@@ -494,7 +494,9 @@ that instance's approval. CHAP stores approvals below `$XDG_STATE_HOME/chap`, or
 `$HOME/.local/state/chap` when `XDG_STATE_HOME` is unset or empty. Named
 configurations use `named/<name>/consent.json`; unnamed configurations use
 `by-path/<sha256-of-absolute-config-path>/consent.json`. Concrete scopes remain
-in `chap.json`. A permission expansion, such as changing `base_url` to point at
+in `chap.json`. Compiled components are cached in the sibling `compiled`
+directory; that cache can be deleted freely and will be rebuilt as needed. A
+permission expansion, such as changing `base_url` to point at
 a different origin, blocks admission until the new manifest is reviewed and
 approved. Narrowing or removing authority is reported as non-blocking drift.
 Approval also binds the component's exported interfaces: a plugin that starts

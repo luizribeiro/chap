@@ -308,9 +308,13 @@ async fn reviews_multiple_plugins_with_one_caller_owned_host() {
     .unwrap();
     let builder = load_test_builder(&config_path);
     let consent = builder.consent_store().unwrap();
-    let mut host = host_builder(&builder.config, builder.budgets)
-        .await
-        .unwrap();
+    let mut host = host_builder(
+        &builder.config,
+        builder.budgets,
+        builder.compiled_cache_path(),
+    )
+    .await
+    .unwrap();
 
     let reviews = builder
         .review_configured_plugins(&mut host, &consent, &["alpha", "bravo"])
@@ -807,6 +811,60 @@ async fn losing_a_role_admits_and_refreshes_the_consent_record() {
         serde_json::from_slice(&fs::read(directory.join("consent.json")).unwrap()).unwrap();
     assert_eq!(records["example"].exported_interfaces, narrowed_exports);
     fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn compiled_components_are_cached_and_reused_under_the_state_directory() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component("example.provider"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.json");
+    fs::write(
+        &config_path,
+        r#"{
+            "plugins": {
+                "example": { "component": "provider.wasm" }
+            }
+        }"#,
+    )
+    .unwrap();
+    let state = directory.join("state");
+    let cache = state.join("compiled");
+    let builder = AgentBuilder::load(&config_path).unwrap().state_dir(&state);
+    assert!(!cache.exists());
+
+    builder.review_plugin("example").await.unwrap();
+
+    let entries = compiled_cache_entries(&cache);
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    let entry = &entries[0];
+    let first_modified = fs::metadata(entry).unwrap().modified().unwrap();
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    builder.review_plugin("example").await.unwrap();
+
+    assert_eq!(compiled_cache_entries(&cache), entries);
+    assert_eq!(
+        fs::metadata(entry).unwrap().modified().unwrap(),
+        first_modified
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+fn compiled_cache_entries(directory: &Path) -> Vec<PathBuf> {
+    let mut entries: Vec<_> = fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "cwasm")
+        })
+        .collect();
+    entries.sort();
+    entries
 }
 
 #[tokio::test]
