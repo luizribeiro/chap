@@ -27,7 +27,9 @@ struct ScenarioResult {
 async fn runs_a_command_in_a_vm_with_a_granted_mount() {
     let result = run_scenario(
         "granted",
-        &["/project"],
+        &["/"],
+        "///////////////////////",
+        "/",
         json!({"command": ["echo", "vm-e2e-ok"]}),
     )
     .await;
@@ -41,7 +43,9 @@ async fn runs_a_command_in_a_vm_with_a_granted_mount() {
 async fn denies_a_mount_outside_the_grant() {
     let result = run_scenario(
         "denied",
-        &["/project", "/etc"],
+        &["/", "/etc"],
+        "/project///////////////",
+        "/project",
         json!({"command": ["echo", "x"]}),
     )
     .await;
@@ -55,7 +59,13 @@ async fn denies_a_mount_outside_the_grant() {
     assert_eq!(result.provider_output, error.as_str());
 }
 
-async fn run_scenario(call_id: &str, allowed_mounts: &[&str], arguments: Value) -> ScenarioResult {
+async fn run_scenario(
+    call_id: &str,
+    allowed_mounts: &[&str],
+    encoded_mount_grant: &str,
+    expected_mount_grant: &str,
+    arguments: Value,
+) -> ScenarioResult {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let components = components(&workspace);
     let mock = MockServer::start(&[ToolRequest {
@@ -65,7 +75,8 @@ async fn run_scenario(call_id: &str, allowed_mounts: &[&str], arguments: Value) 
     }]);
     let directory = tempfile::tempdir().unwrap();
     let config_path = directory.path().join("chap.json");
-    let sandbox = sandbox_with_project_mount_grant(&components.sandbox, directory.path());
+    let sandbox =
+        sandbox_with_mount_grant(&components.sandbox, directory.path(), encoded_mount_grant);
     write_config(
         &config_path,
         &sandbox,
@@ -83,7 +94,7 @@ async fn run_scenario(call_id: &str, allowed_mounts: &[&str], arguments: Value) 
         .iter()
         .find(|grant| grant.capability == "vm" && grant.permission == "mount")
         .expect("the sandbox approval must include vm.mount");
-    assert_eq!(mount_grant.scopes, ["/project"]);
+    assert_eq!(mount_grant.scopes, [expected_mount_grant]);
     builder.approve_plugin("openai").await.unwrap();
     let agent = builder.start().await.unwrap();
     let session = agent.session(SessionOptions::new("openai")).await.unwrap();
@@ -107,13 +118,11 @@ async fn run_scenario(call_id: &str, allowed_mounts: &[&str], arguments: Value) 
     }
 }
 
-fn sandbox_with_project_mount_grant(source: &Path, directory: &Path) -> PathBuf {
+fn sandbox_with_mount_grant(source: &Path, directory: &Path, grant_scope: &str) -> PathBuf {
     const NEEDS_SECTION: &[u8] = b"lockgate:needs";
     const SETTINGS_SCOPE: &[u8] = b"setting:/allowed_mounts";
-    // Repeated slashes canonicalize to `/project` while preserving the encoded section length.
-    const PROJECT_SCOPE: &[u8] = b"/project///////////////";
 
-    assert_eq!(SETTINGS_SCOPE.len(), PROJECT_SCOPE.len());
+    assert_eq!(SETTINGS_SCOPE.len(), grant_scope.len());
     let mut component = std::fs::read(source).unwrap();
     let needs_offset = component
         .windows(NEEDS_SECTION.len())
@@ -124,9 +133,10 @@ fn sandbox_with_project_mount_grant(source: &Path, directory: &Path) -> PathBuf 
         .position(|window| window == SETTINGS_SCOPE)
         .map(|offset| needs_offset + offset)
         .expect("sandbox needs must derive vm.mount from allowed_mounts");
-    component[scope_offset..scope_offset + SETTINGS_SCOPE.len()].copy_from_slice(PROJECT_SCOPE);
+    component[scope_offset..scope_offset + SETTINGS_SCOPE.len()]
+        .copy_from_slice(grant_scope.as_bytes());
 
-    let destination = directory.join("sandbox-project-mount-grant.wasm");
+    let destination = directory.join("sandbox-fixed-mount-grant.wasm");
     std::fs::write(&destination, component).unwrap();
     destination
 }

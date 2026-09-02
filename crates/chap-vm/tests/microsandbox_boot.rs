@@ -38,7 +38,12 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
             digest: None,
         },
         mounts: vec![MountSpec {
-            host: host_dir.path().to_string_lossy().into_owned(),
+            host: host_dir
+                .path()
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
             guest: "/mnt/project".into(),
             readonly: true,
         }],

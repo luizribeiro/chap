@@ -2,7 +2,6 @@ use std::{
     collections::HashSet,
     format,
     net::IpAddr,
-    path::{Path, PathBuf},
     string::{String, ToString},
     time::Duration,
     vec::Vec,
@@ -14,8 +13,8 @@ use microsandbox::{
 };
 
 use super::{
-    Egress, ExecOutcome, MountSpec, ResolvedImage, Subject, VmBackend, VmCommand, VmConfig,
-    VmError, VmIdentity, VmRef, VmSettings,
+    Egress, ExecOutcome, ResolvedImage, Subject, VmBackend, VmCommand, VmConfig, VmError,
+    VmIdentity, VmRef, VmSettings,
 };
 
 const NAME_PREFIX: &str = "chap-";
@@ -234,7 +233,6 @@ fn sandbox_builder(id: &VmIdentity, cfg: &VmConfig) -> Result<SandboxBuilder, Vm
     let memory = u32::try_from(cfg.memory_mb).map_err(|_| {
         VmError::Failed(format!("VM memory size {} MiB exceeds u32", cfg.memory_mb))
     })?;
-    let mounts = canonical_mounts(&cfg.mounts)?;
     let mut builder = Sandbox::builder(sandbox_name(&physical_label))
         .image(image_reference(&cfg.image))
         .cpus(cpus)
@@ -250,9 +248,9 @@ fn sandbox_builder(id: &VmIdentity, cfg: &VmConfig) -> Result<SandboxBuilder, Vm
     for variable in &cfg.env {
         builder = builder.env(&variable.name, &variable.value);
     }
-    for mount in mounts {
-        builder = builder.volume(mount.guest, |volume| {
-            let volume = volume.bind(mount.host);
+    for mount in &cfg.mounts {
+        builder = builder.volume(mount.guest.clone(), |volume| {
+            let volume = volume.bind(&mount.host);
             if mount.readonly {
                 volume.readonly()
             } else {
@@ -380,32 +378,6 @@ fn host_prefix_len(addr: IpAddr) -> u8 {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct CanonicalMount {
-    host: PathBuf,
-    guest: String,
-    readonly: bool,
-}
-
-fn canonical_mounts(mounts: &[MountSpec]) -> Result<Vec<CanonicalMount>, VmError> {
-    mounts
-        .iter()
-        .map(|mount| {
-            let host = std::fs::canonicalize(Path::new(&mount.host)).map_err(|error| {
-                VmError::Failed(format!(
-                    "failed to canonicalize bind root `{}`: {error}",
-                    mount.host
-                ))
-            })?;
-            Ok(CanonicalMount {
-                host,
-                guest: mount.guest.clone(),
-                readonly: mount.readonly,
-            })
-        })
-        .collect()
-}
-
 fn map_sdk_error(error: MicrosandboxError) -> VmError {
     match error {
         MicrosandboxError::SandboxAlreadyExists(_) => VmError::AlreadyExists,
@@ -479,22 +451,6 @@ mod tests {
             map_sdk_error(MicrosandboxError::InvalidConfig("bad".into())),
             VmError::Failed(message) if message.contains("bad")
         ));
-    }
-
-    #[test]
-    fn bind_roots_are_canonicalized_before_building() {
-        let directory = tempfile::tempdir().unwrap();
-        let requested = directory.path().join(".");
-        let mounts = canonical_mounts(&[MountSpec {
-            host: requested.to_string_lossy().into_owned(),
-            guest: "/mnt/project".into(),
-            readonly: true,
-        }])
-        .unwrap();
-
-        assert_eq!(mounts[0].host, directory.path().canonicalize().unwrap());
-        assert_eq!(mounts[0].guest, "/mnt/project");
-        assert!(mounts[0].readonly);
     }
 
     #[test]

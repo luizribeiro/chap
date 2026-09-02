@@ -1,4 +1,4 @@
-use std::{format, str::FromStr, string::ToString, vec, vec::Vec};
+use std::{format, path::Path, str::FromStr, string::ToString, vec, vec::Vec};
 
 use chap_vm::{
     host::{EnvVar, MountSpec, OciReference, RequestedVmConfig, VmSettings},
@@ -64,12 +64,26 @@ pub(super) fn translate_requested_config(
     let mounts = config
         .mounts
         .iter()
-        .map(|mount| MountSpec {
-            host: mount.host.clone(),
-            guest: mount.guest.clone(),
-            readonly: mount.readonly,
+        .map(|mount| {
+            let host = std::fs::canonicalize(Path::new(&mount.host)).map_err(|error| {
+                vm::VmError::Failed(format!(
+                    "failed to resolve VM mount host path `{}`: {error}",
+                    mount.host
+                ))
+            })?;
+            let host = host.into_os_string().into_string().map_err(|_| {
+                vm::VmError::Failed(format!(
+                    "VM mount host path `{}` resolves to a non-UTF-8 path",
+                    mount.host
+                ))
+            })?;
+            Ok::<_, vm::VmError>(MountSpec {
+                host,
+                guest: mount.guest.clone(),
+                readonly: mount.readonly,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     let egress = config
         .egress
         .iter()
@@ -128,21 +142,22 @@ pub(super) fn translate_host_error(error: chap_vm::host::VmError) -> vm::VmError
 
 #[cfg(test)]
 mod tests {
-    use lockgate::ScopeRepr;
+    use lockgate::{Scope, ScopeRepr};
 
     use super::*;
 
     fn config() -> vm::VmConfig {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
         vm::VmConfig {
             image: "ghcr.io/acme/build:1.2".into(),
             mounts: vec![
                 vm::Mount {
-                    host: "/project//src/".into(),
+                    host: format!("{}//", manifest.join("src").display()),
                     guest: "/work//src/".into(),
                     readonly: true,
                 },
                 vm::Mount {
-                    host: "/project/cache".into(),
+                    host: manifest.join("tests").to_string_lossy().into_owned(),
                     guest: "/cache".into(),
                     readonly: false,
                 },
@@ -157,6 +172,9 @@ mod tests {
 
     #[test]
     fn translates_a_realistic_requested_config_and_scope_resources() {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let source = manifest.join("src").canonicalize().unwrap();
+        let tests = manifest.join("tests").canonicalize().unwrap();
         let (requested, mounts, egress) =
             translate_requested_config(&config(), &VmSettings::default()).unwrap();
 
@@ -168,12 +186,12 @@ mod tests {
             requested.mounts,
             [
                 MountSpec {
-                    host: "/project/cache".into(),
+                    host: tests.to_string_lossy().into_owned(),
                     guest: "/cache".into(),
                     readonly: false,
                 },
                 MountSpec {
-                    host: "/project/src".into(),
+                    host: source.to_string_lossy().into_owned(),
                     guest: "/work/src".into(),
                     readonly: true,
                 },
@@ -206,7 +224,10 @@ mod tests {
                 .flat_map(MountResource::scopes)
                 .map(|scope| scope.canonical())
                 .collect::<Vec<_>>(),
-            ["/project/cache", "ro:/project/src"]
+            [
+                tests.to_string_lossy().into_owned(),
+                format!("ro:{}", source.display()),
+            ]
         );
         assert_eq!(
             egress
@@ -244,7 +265,7 @@ mod tests {
     fn rejects_conflicting_mounts() {
         let mut config = config();
         config.mounts.push(vm::Mount {
-            host: "/project/generated".into(),
+            host: env!("CARGO_MANIFEST_DIR").into(),
             guest: "/work/src".into(),
             readonly: false,
         });
@@ -252,6 +273,23 @@ mod tests {
         assert!(matches!(
             translate_requested_config(&config, &VmSettings::default()),
             Err(vm::VmError::Failed(message)) if message.contains("conflicting mounts")
+        ));
+    }
+
+    #[test]
+    fn reports_a_missing_mount_host_path_as_a_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("missing");
+        let mut config = config();
+        config.mounts = vec![vm::Mount {
+            host: missing.to_string_lossy().into_owned(),
+            guest: "/mnt/missing".into(),
+            readonly: true,
+        }];
+
+        assert!(matches!(
+            translate_requested_config(&config, &VmSettings::default()),
+            Err(vm::VmError::Failed(message)) if message.contains("failed to resolve VM mount host path")
         ));
     }
 
@@ -294,5 +332,50 @@ mod tests {
             .scopes(),
             [InstanceScope::CreatedByCaller]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_mount_witness_denies_a_symlink_escape_and_allows_a_real_subdirectory() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let granted = root.path().join("granted");
+        let sibling = root.path().join("sibling");
+        let subdirectory = granted.join("subdirectory");
+        std::fs::create_dir(&granted).unwrap();
+        std::fs::create_dir(&sibling).unwrap();
+        std::fs::create_dir(&subdirectory).unwrap();
+        symlink(&sibling, granted.join("link")).unwrap();
+        let granted = granted.canonicalize().unwrap();
+        let grant = Mount::from_str(granted.to_str().unwrap()).unwrap();
+
+        let mut escaped = config();
+        escaped.mounts = vec![vm::Mount {
+            host: granted.join("link").to_string_lossy().into_owned(),
+            guest: "/mnt/escape".into(),
+            readonly: false,
+        }];
+        escaped.egress.clear();
+        let (escaped, witnesses, _) =
+            translate_requested_config(&escaped, &VmSettings::default()).unwrap();
+
+        assert_eq!(
+            escaped.mounts[0].host,
+            sibling.canonicalize().unwrap().to_string_lossy()
+        );
+        assert!(!grant.contains(&witnesses[0].0), "vm.mount must deny");
+
+        let mut allowed = config();
+        allowed.mounts = vec![vm::Mount {
+            host: subdirectory.to_string_lossy().into_owned(),
+            guest: "/mnt/subdirectory".into(),
+            readonly: false,
+        }];
+        allowed.egress.clear();
+        let (_, witnesses, _) =
+            translate_requested_config(&allowed, &VmSettings::default()).unwrap();
+
+        assert!(grant.contains(&witnesses[0].0));
     }
 }

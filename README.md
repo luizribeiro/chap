@@ -215,7 +215,8 @@ VM authority is split into four permissions:
 - `vm.mount` scopes expose absolute host paths. `/path` permits either access
   mode within that path, while `ro:/path` requires the mount to be read-only.
   Colons elsewhere are legal path characters; only the leading `ro:` is the
-  read-only marker.
+  read-only marker. Grants are matched against the canonical host path: on
+  macOS, for example, grant `/private/tmp/project`, not `/tmp/project`.
 - `vm.egress` scopes contain an IP address or strict CIDR plus a port:
   `addr:port`, `addr/prefix:port`, `[v6]:port`, or `[v6]/prefix:port`. The CIDR
   address must be the network address, and `*` in the port position permits any
@@ -225,9 +226,10 @@ VM authority is split into four permissions:
 
 VM identities include the plugin instance and session. Each plugin can see and
 manage only its own namespace, even when another plugin uses the same logical VM
-name. Before starting a VM, the microsandbox backend canonicalizes every host
-bind root. An empty egress list disables the network interface; otherwise the
-backend installs a default-deny policy for the granted destinations. DNS is
+name. Before checking a mount grant or starting a VM, the host resolves every
+bind root to its canonical path and passes that same path to the backend. An
+empty egress list disables the network interface; otherwise the backend
+installs a default-deny policy for the granted destinations. DNS is
 also explicit: only a whole-family port-53 grant such as `0.0.0.0/0:53` (or
 `[::]/0:53`) enables the gateway resolver. A narrower port-53 grant does not,
 so operations such as Alpine's `apk add` need the whole-family grant as well as
