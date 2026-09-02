@@ -44,13 +44,14 @@ parsed, CHAP reports that error instead of falling through to the personal
 configuration.
 
 The repository includes an OpenAI-compatible Chat Completions provider, Kagi
-web tools, and a persona context contributor. The exec plugin exposes an
-argv-style process tool mediated by command-prefix grants.
+web tools, a persona context contributor, and exec, state, and VM sandbox tools.
+The exec plugin exposes an argv-style host process tool mediated by
+command-prefix grants; the sandbox plugin runs argv commands in a microVM.
 
 Build the configured release components with the system Cargo:
 
 ```console
-cargo build -p chap-openai-compatible -p chap-exec-plugin -p chap-kagi -p chap-persona --release --target wasm32-wasip2
+cargo build -p chap-openai-compatible -p chap-exec-plugin -p chap-state-plugin -p chap-vm-plugin -p chap-kagi -p chap-persona --release --target wasm32-wasip2
 ```
 
 Each plugin is keyed by an operator-assigned instance id and maps directly to
@@ -157,9 +158,11 @@ ahead of a process's `main`, git's `GIT_SSH_COMMAND` and `GIT_CONFIG_*`,
 `NODE_OPTIONS`, and more. Because commands run directly on the host, honoring a
 plugin-supplied environment would turn even a narrowly scoped grant such as
 `git status` into arbitrary code execution, sidestepping the argv-prefix scope
-that consent is built on. A fixed environment is the safe default until command
-execution moves inside a microVM, where the sandbox boundary — not a filter over
-variable names — is what makes a plugin-controlled environment safe.
+that consent is built on. A fixed environment keeps narrowly scoped host
+execution from gaining this ambient channel. Commands that need a
+plugin-controlled environment or stronger isolation belong behind the VM
+capability, where the sandbox boundary — not a filter over variable names —
+contains them.
 
 The entire stack is behind the Cargo `exec` feature, which is off by default:
 
@@ -169,6 +172,153 @@ cargo build -p chap-cli --features exec
 
 A build without the feature refuses an `agent.exec` section at startup and
 refuses any plugin needing `exec.run` at admission.
+
+### VM capability
+
+The optional, host-owned `agent.vm` section sets global microVM limits and the
+OCI registries that plugins may use:
+
+```json
+{
+  "agent": {
+    "vm": {
+      "max_vms_per_plugin": 8,
+      "max_read_bytes": 16777216,
+      "max_exec_ms": 120000,
+      "max_output_bytes": 65536,
+      "registries": [],
+      "default_cpus": 1,
+      "default_memory_mb": 512,
+      "max_duration_ms": 3600000,
+      "idle_timeout_ms": 300000
+    }
+  }
+}
+```
+
+The values shown are the defaults. `max_vms_per_plugin` bounds each plugin
+instance separately. `max_read_bytes` caps one file read; `max_exec_ms` caps one
+command; and `max_output_bytes` caps stdout and stderr together while the host
+streams them. New VMs receive `default_cpus` and `default_memory_mb`, and the
+duration and idle settings bound their lifetime.
+
+`registries` is empty by default, so even a fully qualified image is denied
+until the operator lists its registry. In particular, add `docker.io` to pull
+from Docker Hub. Image references must include a registry and repository plus
+either an explicit tag, such as `docker.io/library/alpine:3.20`, or a
+`sha256` digest. Unqualified names and local paths are rejected, repository
+names are lowercase, and the registry must exactly match an allowed entry.
+
+VM authority is split into four permissions:
+
+- `vm.create` is the flag that permits creation and get-or-create.
+- `vm.mount` scopes expose absolute host paths. `/path` permits either access
+  mode within that path, while `ro:/path` requires the mount to be read-only.
+  Colons elsewhere are legal path characters; only the leading `ro:` is the
+  read-only marker.
+- `vm.egress` scopes contain an IP address or strict CIDR plus a port:
+  `addr:port`, `addr/prefix:port`, `[v6]:port`, or `[v6]/prefix:port`. The CIDR
+  address must be the network address, and `*` in the port position permits any
+  port.
+- `vm.manage` with the `created-by-caller` scope permits get, exec, file reads
+  and writes, and destroy for VMs created by that caller.
+
+VM identities include the plugin instance and session. Each plugin can see and
+manage only its own namespace, even when another plugin uses the same logical VM
+name. Before starting a VM, the microsandbox backend canonicalizes every host
+bind root. An empty egress list disables the network interface; otherwise the
+backend installs a default-deny policy for the granted destinations. DNS is
+also explicit: only a whole-family port-53 grant such as `0.0.0.0/0:53` (or
+`[::]/0:53`) enables the gateway resolver. A narrower port-53 grant does not,
+so operations such as Alpine's `apk add` need the whole-family grant as well as
+the relevant HTTP or HTTPS egress.
+
+The bundled sandbox plugin has one `run` tool. Its `command` argument is an argv
+array executed directly, without a shell. The plugin defaults `image` to
+`docker.io/library/alpine:3.20`; every path in `allowed_mounts` is mounted
+read-only at `/mnt<host path>` on every call, and `allowed_egress` supplies the
+network scopes. It names its VM `workspace` and reuses it across calls within a
+session. Results contain the exit code, stdout, stderr, and a note when the
+host's combined output cap truncated the streams.
+
+The real backend uses microsandbox microVMs on Apple Silicon or Linux with KVM.
+A system Cargo build installs the microsandbox runtime under `~/.microsandbox`
+through the dependency's build script. The flake instead supplies a pinned
+runtime bundle: `nix run .#chap-vm` selects the VM-enabled package, and the
+`mkchap-vm-example` check exercises a declarative VM instance.
+
+For a worked personal configuration, merge the following fragment into a
+configuration that already contains an approved provider and persona. Replace
+the two `/absolute/path/to/...` prefixes with real absolute paths; because this
+is a personal file, component paths relative to the repository would resolve
+from the personal configuration directory. The persona text shown here is the
+complete hint to append to an existing persona:
+
+```json
+{
+  "agent": {
+    "vm": {
+      "registries": ["docker.io"]
+    }
+  },
+  "plugins": {
+    "sandbox": {
+      "component": "/absolute/path/to/chap/target/wasm32-wasip2/release/chap_vm_plugin.wasm",
+      "settings": {
+        "allowed_mounts": ["/absolute/path/to/project"],
+        "allowed_egress": [
+          "0.0.0.0/0:443",
+          "0.0.0.0/0:80",
+          "0.0.0.0/0:53"
+        ]
+      }
+    },
+    "persona": {
+      "component": "/absolute/path/to/chap/target/wasm32-wasip2/release/chap_persona.wasm",
+      "context": {
+        "channel": "system"
+      },
+      "settings": {
+        "persona": "A reusable microVM sandbox is available through the sandbox plugin's run tool. The host project is mounted read-only at /mnt/absolute/path/to/project."
+      }
+    }
+  }
+}
+```
+
+Build the two components from the CHAP checkout, then point every command at the
+personal file explicitly. This matters in the repository because its
+`./chap.json` takes precedence over the default personal path. With Cargo:
+
+```console
+cargo build -p chap-vm-plugin -p chap-persona --release --target wasm32-wasip2
+cargo run -p chap-cli --features vm -- --config "$HOME/.config/chap/chap.json" grants review sandbox
+cargo run -p chap-cli --features vm -- --config "$HOME/.config/chap/chap.json" grants approve sandbox
+cargo run -p chap-cli --features vm -- --config "$HOME/.config/chap/chap.json" plugins check
+cargo run -p chap-cli --features vm -- --config "$HOME/.config/chap/chap.json"
+```
+
+Or use the VM-enabled Nix package after the same component build:
+
+```console
+nix run .#chap-vm -- --config "$HOME/.config/chap/chap.json" grants review sandbox
+nix run .#chap-vm -- --config "$HOME/.config/chap/chap.json" grants approve sandbox
+nix run .#chap-vm -- --config "$HOME/.config/chap/chap.json" plugins check
+nix run .#chap-vm -- --config "$HOME/.config/chap/chap.json"
+```
+
+These paths use the fallback personal location; substitute
+`$XDG_CONFIG_HOME/chap/chap.json` when `XDG_CONFIG_HOME` is set. The entire
+stack must be compiled in with Cargo's `vm` feature or the `chap-vm` Nix
+package. A build without it rejects `agent.vm` at startup and refuses plugins
+that require VM permissions at admission.
+
+The real, booting backend test is opt-in because it needs the host hypervisor
+and network access:
+
+```console
+CHAP_MICROSANDBOX_E2E=1 cargo test -p chap-vm --features host,microsandbox
+```
 
 ### Tool execution
 
@@ -305,8 +455,8 @@ that requires review and re-approval.
 
 Prefix scopes bound entry points, not effects: anything after a matched prefix
 is unconstrained, and allowing `sh`, interpreters, or build tools is arbitrary
-code execution by design. The constructed environment and the future sandbox
-stage are the compensating layers.
+code execution by design. The constructed environment limits ambient host
+authority; use the VM sandbox when a microVM boundary is required.
 
 `grants review` also accepts one instance id. `grants deny <instance-id>` removes
 that instance's approval. CHAP stores approvals below `$XDG_STATE_HOME/chap`, or
@@ -388,7 +538,9 @@ Nix flakes can compose a checked CHAP instance with `mkChap`. The result contain
 `etc/chap.json` and a wrapped `bin/chap` that uses that configuration by default.
 Plugin `settings` merge shallowly over the package's default settings, and the
 top-level `settings` sections are emitted as given: a nested attribute set
-replaces the whole section rather than merging into it.
+replaces the whole section rather than merging into it. Feature-gated plugins
+also need the corresponding host package; for example, set
+`package = chap.packages.${system}.chap-vm` for a VM-enabled instance.
 This downstream flake combines a bundled provider with a third-party component
 built through `buildChapPlugin`:
 
