@@ -9,8 +9,13 @@ use clap::Parser;
 use render::{render_load_error, render_session_error, render_start_error};
 use std::{env, path::Path, process::ExitCode};
 
+fn main() -> ExitCode {
+    install_crypto_provider();
+    async_main()
+}
+
 #[tokio::main]
-async fn main() -> ExitCode {
+async fn async_main() -> ExitCode {
     match run(Cli::parse()).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -18,6 +23,10 @@ async fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 async fn run(cli: Cli) -> Result<(), String> {
@@ -37,4 +46,17 @@ async fn run(cli: Cli) -> Result<(), String> {
         Some(command) => command.run(builder).await?,
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn installs_the_crypto_provider_idempotently() {
+        install_crypto_provider();
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+
+        install_crypto_provider();
+    }
 }

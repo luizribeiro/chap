@@ -17,6 +17,7 @@ vm = ["chap-core/vm", "chap-vm/microsandbox"]
 clap.workspace = true
 iocraft.workspace = true
 pulldown-cmark.workspace = true
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 chap-core = { path = "../chap-core" }
 chap-vm = { workspace = true, optional = true }
 serde_json.workspace = true

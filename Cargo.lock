@@ -726,6 +726,7 @@ dependencies = [
  "clap",
  "iocraft",
  "pulldown-cmark",
+ "rustls",
  "serde_json",
  "shlex",
  "tempfile",
