@@ -323,8 +323,8 @@ async fn reviews_multiple_plugins_with_one_caller_owned_host() {
         .unwrap();
 
     assert_eq!(reviews.len(), 2);
-    assert_eq!(reviews[0].manifest.instance_id, "alpha");
-    assert_eq!(reviews[1].manifest.instance_id, "bravo");
+    assert_eq!(reviews[0].manifest.plugin_id.as_str(), "alpha");
+    assert_eq!(reviews[1].manifest.plugin_id.as_str(), "bravo");
     tokio::task::spawn_blocking(move || drop(host))
         .await
         .unwrap();

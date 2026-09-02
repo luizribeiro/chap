@@ -11,7 +11,7 @@ use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition, ToolRegistrationError};
 use lockgate::{
     CallBudget, ConsentRecord, ConsentRequired, DriftReport, Host, HostBuilder, PluginConfig,
-    PluginHandle, Prepared, RequiredEnvironmentVariable, Role, RuntimeLimits,
+    PluginHandle, PluginId, Prepared, RequiredEnvironmentVariable, Role, RuntimeLimits,
 };
 use plugin_tool::PluginTool;
 use provider::PluginBackend;
@@ -806,7 +806,7 @@ impl AgentBuilder {
             (prior.request_digest != manifest.request_digest
                 || prior.exported_interfaces != manifest.exported_interfaces)
                 .then(|| ConsentRecord {
-                    instance_id: manifest.instance_id,
+                    instance_id: manifest.plugin_id.as_str().to_owned(),
                     request_digest: manifest.request_digest,
                     component_digest: Some(manifest.component_digest),
                     exported_interfaces: manifest.exported_interfaces,
@@ -856,7 +856,7 @@ impl AgentBuilder {
         let settings = plugin.settings();
         let prepared = builder
             .prepare(
-                id,
+                PluginId::from(id),
                 &bytes,
                 PluginConfig {
                     settings: Some(settings),

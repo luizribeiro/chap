@@ -45,7 +45,7 @@ impl AgentInner {
         &self,
         plugin: &lockgate::PluginHandle,
     ) -> Result<Vec<ContextSegment>, ContextError> {
-        trace_plugin_call(plugin.id(), "context", "segments", async {
+        trace_plugin_call(plugin.id().as_str(), "context", "segments", async {
             self.lockgate
                 .client::<context_bindings::Role>(plugin)
                 .map_err(|source| ContextError::RoleUnavailable { source })?

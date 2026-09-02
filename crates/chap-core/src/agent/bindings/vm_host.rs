@@ -139,7 +139,7 @@ impl<B: VmBackend> VmHost<B> {
         VmIdentity {
             installation_id: self.installation_id.clone(),
             session_epoch: self.session_epoch,
-            principal: subject.plugin_id().to_owned(),
+            principal: subject.plugin_id().as_str().to_owned(),
             logical_name: logical_name.to_owned(),
         }
     }
@@ -392,7 +392,7 @@ impl CapabilityHost {
         name: &str,
     ) -> Result<VmRef, vm::VmError> {
         let id = self.vm.identity(&cx.subject(), name);
-        let subject = Subject(cx.subject().plugin_id().to_owned());
+        let subject = Subject(cx.subject().plugin_id().as_str().to_owned());
         authorize_backend_vm(self.vm.backend.as_ref(), &id, &subject, || {
             self.authorize_manage(cx)
         })
@@ -517,7 +517,9 @@ impl vm::Host for CapabilityHost {
     #[lockgate::no_capability_required(reason = "enforces vm::manage on the caller's own vm")]
     async fn destroy(&mut self, cx: HostCtx<'_, ()>, name: String) -> Result<(), vm::VmError> {
         let vm = self.authorize_owned(&cx, &name).await?;
-        self.vm.destroy(cx.subject().plugin_id(), &vm).await
+        self.vm
+            .destroy(cx.subject().plugin_id().as_str(), &vm)
+            .await
     }
 }
 

@@ -1,5 +1,5 @@
 use chap_core::{AgentBuilder, CallBudget, StartError};
-use lockgate::{HostBuilder, PluginConfig, PluginHandle, RuntimeLimits};
+use lockgate::{HostBuilder, PluginConfig, PluginHandle, PluginId, RuntimeLimits};
 use serde_json::json;
 use std::{
     path::{Path, PathBuf},
@@ -328,7 +328,7 @@ async fn admit(
     let bytes = std::fs::read(component).unwrap();
     let prepared = builder
         .prepare(
-            id,
+            PluginId::from(id),
             &bytes,
             PluginConfig {
                 settings: Some(json!({ "prefix": prefix })),
@@ -348,7 +348,7 @@ async fn admit_context(builder: &mut HostBuilder<()>, component: &Path) -> Plugi
     let bytes = std::fs::read(component).unwrap();
     let prepared = builder
         .prepare(
-            "sdk-context-fixture",
+            PluginId::from("sdk-context-fixture"),
             &bytes,
             PluginConfig {
                 settings: Some(json!({

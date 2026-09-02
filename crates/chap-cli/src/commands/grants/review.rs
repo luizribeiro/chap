@@ -43,7 +43,7 @@ pub(super) async fn grants_review(
 fn render_grant_review(review: &PluginConsentReview) -> String {
     let mut output = format!(
         "Instance: {}\nPlugin: {}\n",
-        review.manifest.instance_id, review.manifest.plugin_label
+        review.manifest.plugin_id, review.manifest.plugin_label
     );
     match (&review.prior, &review.drift) {
         (None, _) => output.push_str("Status: NEEDS APPROVAL (first run)\n"),
@@ -200,7 +200,7 @@ mod tests {
     fn manifest(scopes: &[&str], digest_byte: char) -> ConsentManifest {
         let fingerprint = consent_record("example", digest_byte).request_digest;
         ConsentManifest {
-            instance_id: "example".to_owned(),
+            plugin_id: "example".into(),
             plugin_label: "Example provider".to_owned(),
             request_digest: fingerprint,
             component_digest: format!("sha256:{}", digest_byte.to_string().repeat(64)),
