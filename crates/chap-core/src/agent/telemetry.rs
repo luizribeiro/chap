@@ -2,7 +2,7 @@ use std::future::Future;
 use tracing::{Instrument, debug, info_span};
 
 pub(super) async fn trace_plugin_call<F, T, E>(
-    plugin: &str,
+    plugin_id: &str,
     role: &'static str,
     function: &'static str,
     call: F,
@@ -10,7 +10,7 @@ pub(super) async fn trace_plugin_call<F, T, E>(
 where
     F: Future<Output = Result<T, E>>,
 {
-    let span = info_span!("plugin_call", plugin = %plugin, role = %role, function = %function);
+    let span = info_span!("plugin_call", plugin = %plugin_id, role = %role, function = %function);
     let started = std::time::Instant::now();
     let result = call.instrument(span.clone()).await;
     debug!(
