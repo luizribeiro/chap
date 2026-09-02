@@ -1,5 +1,6 @@
 use std::{
     format,
+    future::Future,
     net::IpAddr,
     string::{String, ToString},
     time::Duration,
@@ -73,19 +74,21 @@ impl VmBackend for MicrosandboxBackend {
 
     async fn get_or_create(&self, id: &VmIdentity, cfg: &VmConfig) -> Result<VmRef, VmError> {
         let physical_label = id.physical_label();
-        let sandbox = sandbox_builder(id, cfg)?
-            .connect_or_create()
-            .await
-            .map_err(map_sdk_error)?;
-        if sandbox
-            .config()
-            .spec
-            .labels
-            .get(CONFIG_LABEL)
-            .map(String::as_str)
-            != Some(cfg.config_hash.as_str())
-        {
-            return Err(VmError::ConfigMismatch);
+        match Sandbox::get(&sandbox_name(&physical_label)).await {
+            Ok(handle) => connect_existing_if_config_matches(handle, cfg).await?,
+            Err(MicrosandboxError::SandboxNotFound(_)) => {
+                match sandbox_builder(id, cfg)?.create().await {
+                    Ok(_) => {}
+                    Err(MicrosandboxError::SandboxAlreadyExists(_)) => {
+                        let handle = Sandbox::get(&sandbox_name(&physical_label))
+                            .await
+                            .map_err(map_sdk_error)?;
+                        connect_existing_if_config_matches(handle, cfg).await?;
+                    }
+                    Err(error) => return Err(map_sdk_error(error)),
+                }
+            }
+            Err(error) => return Err(map_sdk_error(error)),
         }
         Ok(VmRef { physical_label })
     }
@@ -194,6 +197,36 @@ impl VmBackend for MicrosandboxBackend {
     async fn shutdown(&self, installation_id: &str, session_epoch: u64) -> Result<(), VmError> {
         destroy_installation_vms(installation_id, |epoch| epoch == Some(session_epoch)).await
     }
+}
+
+async fn connect_existing_if_config_matches(
+    handle: SandboxHandle,
+    cfg: &VmConfig,
+) -> Result<(), VmError> {
+    let config = handle.config().map_err(map_sdk_error)?;
+    connect_if_config_matches(
+        config.spec.labels.get(CONFIG_LABEL).map(String::as_str),
+        &cfg.config_hash,
+        async {
+            handle
+                .connect_or_start_detached()
+                .await
+                .map_err(map_sdk_error)
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+async fn connect_if_config_matches<T>(
+    actual: Option<&str>,
+    expected: &str,
+    connect: impl Future<Output = Result<T, VmError>>,
+) -> Result<T, VmError> {
+    if actual != Some(expected) {
+        return Err(VmError::ConfigMismatch);
+    }
+    connect.await
 }
 
 async fn destroy_installation_vms(
@@ -406,6 +439,7 @@ fn map_sdk_error(error: MicrosandboxError) -> VmError {
 mod tests {
     use super::*;
     use serde_json::{Value, json};
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     fn image(tag: Option<&str>, digest: Option<&str>) -> ResolvedImage {
         ResolvedImage {
@@ -463,6 +497,20 @@ mod tests {
             map_sdk_error(MicrosandboxError::InvalidConfig("bad".into())),
             VmError::Failed(message) if message.contains("bad")
         ));
+    }
+
+    #[tokio::test]
+    async fn a_config_mismatch_is_rejected_before_connecting_or_restarting() {
+        let connected = AtomicBool::new(false);
+
+        let result = connect_if_config_matches(Some("old"), "new", async {
+            connected.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+        .await;
+
+        assert_eq!(result, Err(VmError::ConfigMismatch));
+        assert!(!connected.load(Ordering::SeqCst));
     }
 
     #[test]
