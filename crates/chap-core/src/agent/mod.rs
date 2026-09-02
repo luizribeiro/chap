@@ -393,12 +393,12 @@ impl AgentBuilder {
             self.config
                 .plugin(plugin_id)
                 .ok_or_else(|| ConsentError::PluginNotConfigured {
-                    plugin: plugin_id.as_str().to_owned(),
+                    plugin_id: plugin_id.clone(),
                 })?;
         let bytes = Self::plugin_bytes(&self.config, plugin_id, plugin)?;
         let inspection =
             lockgate::inspect(&bytes).map_err(|source| ConsentError::InspectPlugin {
-                plugin: plugin_id.as_str().to_owned(),
+                plugin_id: plugin_id.clone(),
                 source: Box::new(source),
             })?;
         Ok(supported_roles(inspection.exported_interfaces()))
@@ -478,7 +478,7 @@ impl AgentBuilder {
                 required_environment_variables: preflight.required_environment_variables,
             })
             .map_err(|source| ConsentError::LoadPlugin {
-                plugin: plugin_id.as_str().to_owned(),
+                plugin_id: plugin_id.clone(),
                 path,
                 source: Box::new(source),
             });
@@ -539,7 +539,7 @@ impl AgentBuilder {
     pub fn deny_plugin(&self, plugin_id: &PluginId) -> Result<(), ConsentError> {
         if self.config.plugin(plugin_id).is_none() {
             return Err(ConsentError::PluginNotConfigured {
-                plugin: plugin_id.as_str().to_owned(),
+                plugin_id: plugin_id.clone(),
             });
         }
         self.consent_store()?.remove(plugin_id)
@@ -638,7 +638,7 @@ impl AgentBuilder {
         self.config
             .plugin(plugin_id)
             .ok_or_else(|| ConsentError::PluginNotConfigured {
-                plugin: plugin_id.as_str().to_owned(),
+                plugin_id: plugin_id.clone(),
             })
     }
 
@@ -649,7 +649,7 @@ impl AgentBuilder {
         tokio::task::spawn_blocking(move || drop(prepared))
             .await
             .map_err(|source| ConsentError::PreparedPluginCleanup {
-                plugin: plugin_id.as_str().to_owned(),
+                plugin_id: plugin_id.clone(),
                 source,
             })
     }
@@ -802,7 +802,7 @@ impl AgentBuilder {
                         plugin_id,
                         &path,
                         ConsentError::LoadPlugin {
-                            plugin: plugin_id.as_str().to_owned(),
+                            plugin_id: plugin_id.clone(),
                             path: path.clone(),
                             source: Box::new(source),
                         },
@@ -841,7 +841,7 @@ impl AgentBuilder {
             .admit(prepared, acceptance, runtime_limits())
             .await
             .map_err(|source| ConsentError::LoadPlugin {
-                plugin: plugin_id.as_str().to_owned(),
+                plugin_id: plugin_id.clone(),
                 path: path.clone(),
                 source: Box::new(source),
             });
@@ -883,7 +883,7 @@ impl AgentBuilder {
             )
             .await
             .map_err(|source| ConsentError::LoadPlugin {
-                plugin: plugin_id.as_str().to_owned(),
+                plugin_id: plugin_id.clone(),
                 path: path.clone(),
                 source: Box::new(source),
             })?;
@@ -951,7 +951,7 @@ impl AgentBuilder {
             return Ok(());
         }
         Err(ConsentError::UnsupportedRole {
-            plugin: plugin_id.as_str().to_owned(),
+            plugin_id: plugin_id.clone(),
             path: path.to_path_buf(),
             role: role_package(<bindings::provider::Role as Role>::INTERFACE),
             exported_interfaces: exported_interfaces.to_vec(),
@@ -968,7 +968,7 @@ impl AgentBuilder {
                 && !exports_interface_named(role.interface, exported_interfaces)
             {
                 return Err(ConsentError::RoleConfigInvalid {
-                    plugin: plugin_id.as_str().to_owned(),
+                    plugin_id: plugin_id.clone(),
                     role: role.interface.to_owned(),
                 });
             }
@@ -983,7 +983,7 @@ impl AgentBuilder {
     ) -> Result<Vec<u8>, ConsentError> {
         let path = config.component_path(plugin);
         fs::read(&path).map_err(|source| ConsentError::ReadPlugin {
-            plugin: plugin_id.as_str().to_owned(),
+            plugin_id: plugin_id.clone(),
             path,
             source,
         })

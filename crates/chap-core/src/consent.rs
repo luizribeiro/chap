@@ -12,42 +12,42 @@ use thiserror::Error;
 pub enum ConsentError {
     #[error("{0}")]
     StateLocation(#[source] LoadError),
-    #[error("plugin `{plugin}` is not configured")]
-    PluginNotConfigured { plugin: String },
-    #[error("failed to read plugin `{plugin}` from `{}`: {source}", path.display())]
+    #[error("plugin `{plugin_id}` is not configured")]
+    PluginNotConfigured { plugin_id: PluginId },
+    #[error("failed to read plugin `{plugin_id}` from `{}`: {source}", path.display())]
     ReadPlugin {
-        plugin: String,
+        plugin_id: PluginId,
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("failed to inspect plugin `{plugin}`: {source}")]
+    #[error("failed to inspect plugin `{plugin_id}`: {source}")]
     InspectPlugin {
-        plugin: String,
+        plugin_id: PluginId,
         #[source]
         source: Box<lockgate::InspectError>,
     },
-    #[error("failed to load plugin `{plugin}` from `{}`: {source}", path.display())]
+    #[error("failed to load plugin `{plugin_id}` from `{}`: {source}", path.display())]
     LoadPlugin {
-        plugin: String,
+        plugin_id: PluginId,
         path: PathBuf,
         #[source]
         source: Box<lockgate::AdmissionError>,
     },
     #[error(
-        "plugin `{plugin}` from `{}` does not implement a supported role from `{role}`",
+        "plugin `{plugin_id}` from `{}` does not implement a supported role from `{role}`",
         path.display()
     )]
     UnsupportedRole {
-        plugin: String,
+        plugin_id: PluginId,
         path: PathBuf,
         role: String,
         exported_interfaces: Vec<String>,
     },
     #[error(
-        "plugin `{plugin}` configures a `{role}` section, but its component does not export the {role} interface"
+        "plugin `{plugin_id}` configures a `{role}` section, but its component does not export the {role} interface"
     )]
-    RoleConfigInvalid { plugin: String, role: String },
+    RoleConfigInvalid { plugin_id: PluginId, role: String },
     #[error("failed to determine current working directory: {source}")]
     CurrentDirectoryUnavailable {
         #[source]
@@ -82,9 +82,9 @@ pub enum ConsentError {
         #[source]
         source: tokio::task::JoinError,
     },
-    #[error("failed to clean up prepared plugin `{plugin}`: {source}")]
+    #[error("failed to clean up prepared plugin `{plugin_id}`: {source}")]
     PreparedPluginCleanup {
-        plugin: String,
+        plugin_id: PluginId,
         #[source]
         source: tokio::task::JoinError,
     },

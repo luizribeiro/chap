@@ -89,11 +89,11 @@ pub(crate) fn render_consent_error(error: ConsentError) -> String {
             render_load_error(source)
         }
         ConsentError::UnsupportedRole {
-            plugin,
+            plugin_id,
             path,
             role,
             exported_interfaces,
-        } => render_unsupported_role(&plugin, &path, &role, &exported_interfaces),
+        } => render_unsupported_role(plugin_id.as_str(), &path, &role, &exported_interfaces),
         error => error.to_string(),
     }
 }
@@ -324,7 +324,7 @@ mod tests {
             "plugins/missing.wasm",
             PluginRefusalReason::ComponentLoad {
                 source: Box::new(ConsentError::ReadPlugin {
-                    plugin: "missing".to_owned(),
+                    plugin_id: "missing".into(),
                     path: PathBuf::from("plugins/missing.wasm"),
                     source: std::io::Error::new(std::io::ErrorKind::NotFound, "component missing"),
                 }),
@@ -365,8 +365,8 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ConsentError::LoadPlugin { plugin, path, .. }
-                if plugin == "broken" && path == &component
+            ConsentError::LoadPlugin { plugin_id, path, .. }
+                if plugin_id.as_str() == "broken" && path == &component
         ));
         let refusal = PluginRefusal {
             instance_id: "broken".to_owned(),
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn renders_consent_errors_with_export_details() {
         let error = ConsentError::UnsupportedRole {
-            plugin: "example".to_owned(),
+            plugin_id: "example".into(),
             path: PathBuf::from("plugins/example.wasm"),
             role: "chap:agent@0.3.0".to_owned(),
             exported_interfaces: Vec::new(),

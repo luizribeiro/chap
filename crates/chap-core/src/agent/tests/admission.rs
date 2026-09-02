@@ -184,7 +184,7 @@ async fn rejects_exec_needs_when_the_capability_is_not_registered() {
 
     assert!(matches!(
         error,
-        ConsentError::LoadPlugin { ref plugin, .. } if plugin == "example"
+        ConsentError::LoadPlugin { ref plugin_id, .. } if plugin_id.as_str() == "example"
     ));
     fs::remove_dir_all(directory).unwrap();
 }
@@ -256,7 +256,7 @@ async fn rejects_an_empty_required_exec_setting_array() {
 
     assert!(matches!(
         error,
-        ConsentError::LoadPlugin { ref plugin, .. } if plugin == "example"
+        ConsentError::LoadPlugin { ref plugin_id, .. } if plugin_id.as_str() == "example"
     ));
     fs::remove_dir_all(directory).unwrap();
 }
@@ -1474,11 +1474,11 @@ async fn reviewing_rejects_a_plugin_without_a_supported_role() {
     assert!(matches!(
         error,
         ConsentError::UnsupportedRole {
-            ref plugin,
+            ref plugin_id,
             ref path,
             ref exported_interfaces,
             ..
-        } if plugin == "example"
+        } if plugin_id.as_str() == "example"
             && path == &component
             && exported_interfaces == &["lockgate:config/schema".to_owned()]
     ));
@@ -1497,11 +1497,11 @@ async fn approving_rejects_a_plugin_without_a_supported_role() {
     assert!(matches!(
         error,
         ConsentError::UnsupportedRole {
-            ref plugin,
+            ref plugin_id,
             ref path,
             ref exported_interfaces,
             ..
-        } if plugin == "example"
+        } if plugin_id.as_str() == "example"
             && path == &component
             && exported_interfaces == &["lockgate:config/schema".to_owned()]
     ));
