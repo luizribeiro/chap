@@ -1,7 +1,7 @@
 use std::format;
 use std::io;
 use std::os::unix::process::ExitStatusExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::string::String;
 use std::time::Duration;
@@ -26,6 +26,7 @@ impl Drop for ProcessGroup {
 
 pub(super) async fn run(
     mut command: Command,
+    granted_program: &str,
     project_root: &Path,
     timeout: Duration,
 ) -> Result<ExecOutcome, ExecError> {
@@ -36,13 +37,16 @@ pub(super) async fn run(
         .stderr(Stdio::piped())
         .process_group(0);
 
-    let program = command
-        .as_std()
-        .get_program()
-        .to_string_lossy()
-        .into_owned();
+    let resolved_program = PathBuf::from(command.as_std().get_program());
     let mut child = command.spawn().map_err(|error| {
-        ExecError::Failed(format!("could not spawn program {program:?}: {error}"))
+        tracing::warn!(
+            program = %resolved_program.display(),
+            error = %error,
+            "could not spawn resolved exec program"
+        );
+        ExecError::Failed(format!(
+            "could not spawn program {granted_program:?}: {error}"
+        ))
     })?;
     let process_group = ProcessGroup(
         child
@@ -50,26 +54,32 @@ pub(super) async fn run(
             .and_then(|pid| Pid::from_raw(pid as i32))
             .ok_or_else(|| {
                 ExecError::Failed(format!(
-                    "could not supervise program {program:?}: its process ID was unavailable"
+                    "could not supervise program {granted_program:?}: its process ID was unavailable"
                 ))
             })?,
     );
     let stdout = child.stdout.take().ok_or_else(|| {
-        ExecError::Failed(format!("could not capture stdout from program {program:?}"))
+        ExecError::Failed(format!(
+            "could not capture stdout from program {granted_program:?}"
+        ))
     })?;
     let stderr = child.stderr.take().ok_or_else(|| {
-        ExecError::Failed(format!("could not capture stderr from program {program:?}"))
+        ExecError::Failed(format!(
+            "could not capture stderr from program {granted_program:?}"
+        ))
     })?;
     let mut readers = ReaderTasks::new(stdout, stderr);
     let mut process_group = Some(process_group);
 
     let completed = tokio::time::timeout(timeout, async {
         let status = child.wait().await.map_err(|error| {
-            ExecError::Failed(format!("could not wait for program {program:?}: {error}"))
+            ExecError::Failed(format!(
+                "could not wait for program {granted_program:?}: {error}"
+            ))
         })?;
         drop(process_group.take());
 
-        let (stdout, stderr) = readers.capture(&program).await?;
+        let (stdout, stderr) = readers.capture(granted_program).await?;
         Ok(ExecOutcome {
             exit_code: exit_code(status),
             stdout: String::from_utf8_lossy(&stdout.bytes).into_owned(),
@@ -222,7 +232,7 @@ mod tests {
         args: &[&str],
         timeout: Duration,
     ) -> Result<crate::host::ExecOutcome, ExecError> {
-        run(command(name, args), project, timeout).await
+        run(command(name, args), name, project, timeout).await
     }
 
     async fn wait_for_group_exit(pgid: Pid) {
@@ -351,7 +361,7 @@ mod tests {
         let pid = {
             let invocation = tokio::time::timeout(
                 Duration::from_millis(750),
-                run(shell, project.path(), Duration::from_secs(60)),
+                run(shell, "sh", project.path(), Duration::from_secs(60)),
             );
             tokio::pin!(invocation);
 
@@ -389,7 +399,7 @@ mod tests {
 
         let outcome = tokio::time::timeout(
             Duration::from_secs(5),
-            run(shell, project.path(), Duration::from_secs(60)),
+            run(shell, "sh", project.path(), Duration::from_secs(60)),
         )
         .await
         .expect("exec call did not complete within 5 seconds")
@@ -416,6 +426,26 @@ mod tests {
         assert_eq!(outcome.exit_code, 0, "stderr: {:?}", outcome.stderr);
         assert_eq!(outcome.stdout, "");
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn spawn_errors_name_the_granted_program_not_its_resolved_path() {
+        let project = TempDir::new().unwrap();
+        let resolved_program = resolved("sh");
+        let mut shell = Command::new(&resolved_program);
+        shell.arg("argument\0with-nul");
+
+        let error = run(shell, "sh", project.path(), Duration::from_secs(2))
+            .await
+            .unwrap_err();
+        let ExecError::Failed(message) = error else {
+            panic!("expected spawn failure, got {error:?}");
+        };
+        assert!(message.contains("program \"sh\""), "{message}");
+        assert!(
+            !message.contains(resolved_program.to_string_lossy().as_ref()),
+            "resolved path leaked in {message:?}"
+        );
     }
 
     #[tokio::test]

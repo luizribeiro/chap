@@ -124,7 +124,13 @@ impl Executor {
                 ExecError::Failed(format!("could not reserve an exec process slot: {error}"))
             })?;
 
-        spawn::run(command, &self.project_root, effective_timeout).await
+        spawn::run(
+            command,
+            &target.program,
+            &self.project_root,
+            effective_timeout,
+        )
+        .await
     }
 }
 
