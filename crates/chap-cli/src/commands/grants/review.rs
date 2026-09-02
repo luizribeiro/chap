@@ -77,6 +77,11 @@ fn render_grant_review(review: &PluginConsentReview) -> String {
             if grant.optional { "yes" } else { "no" },
             grant.reason.as_deref().unwrap_or("(none)")
         ));
+        if grant.capability == "exec" && grant.permission == "run" {
+            output.push_str(
+                "    warning: command prefixes bound entry points, not effects; run-helper programs grant arbitrary execution as the CHAP operator\n",
+            );
+        }
     }
     if let Some(drift) = &review.drift {
         output.push_str(if drift.blocks_admission {
@@ -254,6 +259,26 @@ mod tests {
         assert!(output.contains("optional: no"), "{output}");
         assert!(
             output.contains("reason: Call the configured API"),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn warns_that_exec_prefixes_can_grant_arbitrary_execution() {
+        let mut manifest = manifest(&["cargo", "git commit"], '1');
+        manifest.grants[0].capability = "exec".to_owned();
+        manifest.grants[0].permission = "run".to_owned();
+
+        let output = render_grant_review(&PluginConsentReview {
+            manifest,
+            prior: None,
+            drift: None,
+        });
+
+        assert!(
+            output.contains(
+                "warning: command prefixes bound entry points, not effects; run-helper programs grant arbitrary execution as the CHAP operator"
+            ),
             "{output}"
         );
     }

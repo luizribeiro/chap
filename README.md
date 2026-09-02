@@ -146,7 +146,10 @@ the hard timeout ceiling:
 entries are ignored, and relative entries are made absolute against CHAP's
 startup directory. When `path` is omitted, CHAP applies those rules while
 snapshotting its startup `PATH`. `timeout_ceiling_ms` caps every
-plugin-requested deadline and defaults to 120 seconds.
+plugin-requested deadline and defaults to 120 seconds. The effective timeout is
+the minimum of the plugin's request, this ceiling, and the tools call deadline.
+The tools deadline defaults to 30 seconds, so the 120-second ceiling is not
+reached unless `agent.budgets.tools.deadline_ms` is also raised.
 `max_concurrent_processes` limits simultaneous exec spawns from each plugin,
 must be at least 1, and defaults to 4.
 
@@ -154,7 +157,9 @@ Spawned processes receive a constructed environment, never CHAP's inherited
 environment: CHAP supplies the pinned `PATH` and copies `HOME`, `TERM`, `LANG`,
 and `TMPDIR` when present, and nothing else. Provider API keys are therefore not
 visible to spawned processes. Commands run from the directory where CHAP was
-invoked.
+invoked. `HOME` and `TMPDIR` are the real host values, so `~/.gitconfig`,
+`~/.cargo/config.toml`, repo-local `.cargo/config.toml`, and `.git/hooks` all
+apply. The startup `PATH` snapshot may include user-writable directories.
 
 There is deliberately no way to forward host variables or let a plugin set its
 own. Environment variables are a program-independent execution channel: many
@@ -475,7 +480,7 @@ settings:
     "exec": {
       "component": "./target/wasm32-wasip2/release/chap_exec_plugin.wasm",
       "settings": {
-        "allowed_commands": ["cargo", "git commit", "rg"]
+        "allowed_commands": ["git status --short", "git commit"]
       }
     }
   }
@@ -489,10 +494,15 @@ is denied. Fail-to-match is fail-safe. The resolved prefixes are digest-bound,
 appear in `chap grants review`, and changing `allowed_commands` is scope drift
 that requires review and re-approval.
 
-Prefix scopes bound entry points, not effects: anything after a matched prefix
-is unconstrained, and allowing `sh`, interpreters, or build tools is arbitrary
-code execution by design. The constructed environment limits ambient host
-authority; use the VM sandbox when a microVM boundary is required.
+A prefix bounds only the initial argv tokens: it does not bound later flags,
+paths, subprocesses, or side effects. Treat any program with a run-helper
+interface—including `sh`, `cargo`, `make`, `npm`, bare `git`, `rg --pre`,
+`find -exec`, `xargs`, `env`, `nix`, `docker`, `ssh`, `awk`, GNU `sed`, and
+editors or pagers—as arbitrary execution with the operator's authority.
+`git commit` can read any host file through `-F` or `--pathspec-from-file`.
+Even apparently read-only commands can read any path accepted by their later
+arguments, and host or repository configuration can change what they execute.
+Use the VM sandbox when a microVM boundary is required.
 
 `grants review` also accepts one instance id. `grants deny <instance-id>` removes
 that instance's approval. CHAP stores approvals below `$XDG_STATE_HOME/chap`, or
