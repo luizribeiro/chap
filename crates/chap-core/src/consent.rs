@@ -185,8 +185,8 @@ impl ConsentStore {
 
     pub fn load(&self, plugin_id: &PluginId) -> Option<ConsentRecord> {
         self.records()
-            .and_then(|records| records.get(plugin_id.as_str()).cloned())
-            .filter(|record| record.plugin_id.as_str() == plugin_id.as_str())
+            .and_then(|records| records.get(plugin_id).cloned())
+            .filter(|record| record.plugin_id == *plugin_id)
     }
 
     pub fn save(&self, record: ConsentRecord) -> Result<(), ConsentError> {
@@ -202,7 +202,7 @@ impl ConsentStore {
                 BTreeMap::new()
             }
         };
-        records.insert(record.plugin_id.as_str().to_owned(), record);
+        records.insert(record.plugin_id.clone(), record);
         self.write(&records)
     }
 
@@ -210,7 +210,7 @@ impl ConsentStore {
         let Some(mut records) = self.records() else {
             return Ok(());
         };
-        if records.remove(plugin_id.as_str()).is_none() {
+        if records.remove(plugin_id).is_none() {
             return Ok(());
         }
         if records.is_empty() {
@@ -226,11 +226,11 @@ impl ConsentStore {
         self.write(&records)
     }
 
-    fn records(&self) -> Option<BTreeMap<String, ConsentRecord>> {
+    fn records(&self) -> Option<BTreeMap<PluginId, ConsentRecord>> {
         self.read_records().ok().flatten()
     }
 
-    fn read_records(&self) -> Result<Option<BTreeMap<String, ConsentRecord>>, ConsentError> {
+    fn read_records(&self) -> Result<Option<BTreeMap<PluginId, ConsentRecord>>, ConsentError> {
         let bytes = match fs::read(&self.path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -272,7 +272,7 @@ impl ConsentStore {
         Ok(preserved)
     }
 
-    fn write(&self, records: &BTreeMap<String, ConsentRecord>) -> Result<(), ConsentError> {
+    fn write(&self, records: &BTreeMap<PluginId, ConsentRecord>) -> Result<(), ConsentError> {
         let bytes =
             serde_json::to_vec_pretty(records).map_err(|source| ConsentError::EncodeStore {
                 path: self.path.clone(),
@@ -326,9 +326,9 @@ mod tests {
         ConsentStore::new(directory.join("consent.json"), directory.join("chap.json"))
     }
 
-    fn record(instance_id: &str, digest_byte: char) -> ConsentRecord {
+    fn record(plugin_id: &str, digest_byte: char) -> ConsentRecord {
         serde_json::from_value(serde_json::json!({
-            "instance_id": instance_id,
+            "instance_id": plugin_id,
             "fingerprint": format!("sha256:{}", digest_byte.to_string().repeat(64)),
             "grants": [{
                 "capability": "net",

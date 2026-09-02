@@ -1374,7 +1374,7 @@ async fn rejects_context_config_for_a_provider_only_plugin() {
 }
 
 #[tokio::test]
-async fn accepts_an_instance_id_that_differs_from_plugin_metadata() {
+async fn accepts_a_plugin_id_that_differs_from_plugin_metadata() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
     fs::write(&component, provider_component("embedded.id")).unwrap();
