@@ -385,7 +385,7 @@ impl AgentBuilder {
     pub fn plugins(&self) -> impl Iterator<Item = (PluginId, &Path)> {
         self.config
             .plugins()
-            .map(|(id, plugin)| (id, plugin.component()))
+            .map(|(id, plugin)| (id.clone(), plugin.component()))
     }
 
     pub fn plugin_roles(&self, plugin_id: &PluginId) -> Result<Vec<&'static str>, ConsentError> {
@@ -450,9 +450,9 @@ impl AgentBuilder {
         let mut refusals = Vec::new();
         for (plugin_id, plugin) in config.plugins() {
             let path = config.component_path(plugin);
-            match Self::preflight_plugin(builder, config, &plugin_id, plugin).await {
+            match Self::preflight_plugin(builder, config, plugin_id, plugin).await {
                 Ok(check) => checks.push(check),
-                Err(error) => refusals.push(Self::plugin_refusal(&plugin_id, &path, error)?),
+                Err(error) => refusals.push(Self::plugin_refusal(plugin_id, &path, error)?),
             }
         }
         if refusals.is_empty() {
@@ -757,9 +757,9 @@ impl AgentBuilder {
         let mut refusals = Vec::new();
 
         for (plugin_id, plugin) in config.plugins() {
-            match Self::load_plugin(builder, config, consent, &plugin_id, plugin).await? {
+            match Self::load_plugin(builder, config, consent, plugin_id, plugin).await? {
                 PluginLoad::Admitted(admitted) => {
-                    plugins.insert(plugin_id, admitted);
+                    plugins.insert(plugin_id.clone(), admitted);
                 }
                 PluginLoad::Refused(error) => {
                     tracing::warn!(plugin = %plugin_id, error = %error, "plugin admission failed");

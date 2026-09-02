@@ -69,7 +69,7 @@ pub enum LoadError {
 pub(crate) struct Config {
     name: Option<String>,
     #[serde(default)]
-    plugins: BTreeMap<String, ConfiguredPlugin>,
+    plugins: BTreeMap<PluginId, ConfiguredPlugin>,
     #[serde(default)]
     agent: AgentSettings,
     #[serde(skip)]
@@ -135,14 +135,12 @@ impl Config {
         self.name.as_deref()
     }
 
-    pub(crate) fn plugins(&self) -> impl Iterator<Item = (PluginId, &ConfiguredPlugin)> {
-        self.plugins
-            .iter()
-            .map(|(id, plugin)| (PluginId::from(id.clone()), plugin))
+    pub(crate) fn plugins(&self) -> impl Iterator<Item = (&PluginId, &ConfiguredPlugin)> {
+        self.plugins.iter()
     }
 
     pub(crate) fn plugin(&self, plugin_id: &PluginId) -> Option<&ConfiguredPlugin> {
-        self.plugins.get(plugin_id.as_str())
+        self.plugins.get(plugin_id)
     }
 
     pub(crate) fn component_path(&self, plugin: &ConfiguredPlugin) -> PathBuf {
@@ -395,7 +393,7 @@ mod tests {
         .unwrap();
 
         let (id, plugin) = config.plugins().next().unwrap();
-        assert_eq!(id, PluginId::from("openai"));
+        assert_eq!(id, &PluginId::from("openai"));
         assert_eq!(
             plugin.component(),
             Path::new("./plugins/openai-compatible.wasm")
