@@ -141,8 +141,10 @@ the hard timeout ceiling:
 }
 ```
 
-`path` is a list of directories used to resolve bare program names; when it is
-omitted, CHAP snapshots its startup `PATH`. `timeout_ceiling_ms` caps every
+`path` is a list of directories used to resolve bare program names; empty
+entries are ignored, and relative entries are made absolute against CHAP's
+startup directory. When `path` is omitted, CHAP applies those rules while
+snapshotting its startup `PATH`. `timeout_ceiling_ms` caps every
 plugin-requested deadline and defaults to 120 seconds.
 
 Spawned processes receive a constructed environment, never CHAP's inherited

@@ -14,6 +14,7 @@ pub(super) fn pinned_search_path(configured: Option<Vec<PathBuf>>) -> Vec<PathBu
                 .unwrap_or_default()
         })
         .into_iter()
+        .filter(|directory| !directory.as_os_str().is_empty())
         .map(|directory| std::path::absolute(&directory).unwrap_or(directory))
         .collect()
 }
@@ -45,9 +46,11 @@ pub(super) fn program(program: &str, path: &[PathBuf]) -> Result<PathBuf, ExecEr
 
 #[cfg(test)]
 mod tests {
+    use std::env;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
+    use std::process::Command;
     use std::vec;
 
     use tempfile::TempDir;
@@ -131,5 +134,38 @@ mod tests {
     #[test]
     fn pinned_search_path_makes_relative_entries_absolute() {
         assert!(pinned_search_path(Some(vec!["relative".into()]))[0].is_absolute());
+    }
+
+    #[test]
+    fn pinned_search_path_ignores_empty_entries() {
+        assert!(pinned_search_path(Some(vec!["".into()])).is_empty());
+    }
+
+    #[test]
+    fn trailing_ambient_path_entry_does_not_resolve_from_the_project_root() {
+        const HELPER: &str = "CHAP_EXEC_EMPTY_PATH_TEST_HELPER";
+        if env::var_os(HELPER).is_some() {
+            let project_program = env::current_dir().unwrap().join("git");
+            let path = pinned_search_path(None);
+            assert_eq!(path.len(), 1);
+            assert_eq!(path[0], Path::new("/usr/bin"));
+            if let Ok(resolved) = program("git", &path) {
+                assert_ne!(resolved, project_program);
+            }
+            return;
+        }
+
+        let project = TempDir::new().unwrap();
+        write_executable(project.path(), "git");
+        let status = Command::new(env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("host::resolve::tests::trailing_ambient_path_entry_does_not_resolve_from_the_project_root")
+            .env(HELPER, "1")
+            .env("PATH", "/usr/bin:")
+            .current_dir(project.path())
+            .status()
+            .unwrap();
+
+        assert!(status.success());
     }
 }
