@@ -135,7 +135,8 @@ the hard timeout ceiling:
   "agent": {
     "exec": {
       "path": ["/usr/local/bin", "/usr/bin", "/bin"],
-      "timeout_ceiling_ms": 120000
+      "timeout_ceiling_ms": 120000,
+      "max_concurrent_processes": 4
     }
   }
 }
@@ -146,6 +147,8 @@ entries are ignored, and relative entries are made absolute against CHAP's
 startup directory. When `path` is omitted, CHAP applies those rules while
 snapshotting its startup `PATH`. `timeout_ceiling_ms` caps every
 plugin-requested deadline and defaults to 120 seconds.
+`max_concurrent_processes` limits simultaneous exec spawns from each plugin,
+must be at least 1, and defaults to 4.
 
 Spawned processes receive a constructed environment, never CHAP's inherited
 environment: CHAP supplies the pinned `PATH` and copies `HOME`, `TERM`, `LANG`,

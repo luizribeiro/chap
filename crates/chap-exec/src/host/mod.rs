@@ -4,14 +4,19 @@ mod resource;
 mod sandbox;
 mod spawn;
 
+use std::collections::HashMap;
 use std::fmt;
+use std::format;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::string::String;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::vec::Vec;
 
 use serde::Deserialize;
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 
 pub use resource::CommandTarget;
 
@@ -22,6 +27,7 @@ const DEFAULT_TIMEOUT_CEILING_MS: u64 = 120_000;
 pub struct ExecSettings {
     pub path: Option<Vec<PathBuf>>,
     pub timeout_ceiling_ms: u64,
+    pub max_concurrent_processes: NonZeroUsize,
 }
 
 impl Default for ExecSettings {
@@ -29,6 +35,8 @@ impl Default for ExecSettings {
         Self {
             path: None,
             timeout_ceiling_ms: DEFAULT_TIMEOUT_CEILING_MS,
+            max_concurrent_processes: NonZeroUsize::new(4)
+                .expect("the default process limit is nonzero"),
         }
     }
 }
@@ -64,6 +72,8 @@ pub struct Executor {
     timeout_ceiling: Duration,
     project_root: PathBuf,
     sandbox: sandbox::Sandbox,
+    max_concurrent_processes: usize,
+    spawn_slots: Mutex<HashMap<String, Arc<Semaphore>>>,
 }
 
 impl Executor {
@@ -74,11 +84,26 @@ impl Executor {
             timeout_ceiling: Duration::from_millis(settings.timeout_ceiling_ms),
             project_root: std::path::absolute(&project_root).unwrap_or(project_root),
             sandbox: sandbox::Sandbox::None,
+            max_concurrent_processes: settings.max_concurrent_processes.get(),
+            spawn_slots: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn spawn_slots_for(&self, plugin_id: &str) -> Arc<Semaphore> {
+        let mut slots = self
+            .spawn_slots
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(
+            slots
+                .entry(String::from(plugin_id))
+                .or_insert_with(|| Arc::new(Semaphore::new(self.max_concurrent_processes))),
+        )
     }
 
     pub async fn execute(
         &self,
+        plugin_id: &str,
         target: &CommandTarget,
         timeout: Option<Duration>,
     ) -> Result<ExecOutcome, ExecError> {
@@ -91,6 +116,13 @@ impl Executor {
         let effective_timeout = timeout
             .unwrap_or(self.timeout_ceiling)
             .min(self.timeout_ceiling);
+        let _permit = self
+            .spawn_slots_for(plugin_id)
+            .acquire_owned()
+            .await
+            .map_err(|error| {
+                ExecError::Failed(format!("could not reserve an exec process slot: {error}"))
+            })?;
 
         spawn::run(command, &self.project_root, effective_timeout).await
     }
@@ -98,7 +130,10 @@ impl Executor {
 
 #[cfg(test)]
 mod host_tests {
+    use std::fs;
+    use std::num::NonZeroUsize;
     use std::string::String;
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     use tempfile::TempDir;
@@ -118,7 +153,7 @@ mod host_tests {
         let executor = Executor::new(ExecSettings::default(), project.path());
 
         let outcome = executor
-            .execute(&target("echo", &["executor-ok"]), None)
+            .execute("plugin", &target("echo", &["executor-ok"]), None)
             .await
             .unwrap();
 
@@ -142,6 +177,7 @@ mod host_tests {
 
         let error = executor
             .execute(
+                "plugin",
                 &target("sh", &["-c", "sleep 30"]),
                 Some(Duration::from_secs(10)),
             )
@@ -150,5 +186,108 @@ mod host_tests {
 
         assert_eq!(error, ExecError::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn executor_serializes_spawns_at_the_configured_limit() {
+        let project = TempDir::new().unwrap();
+        let executor = Arc::new(Executor::new(
+            ExecSettings {
+                max_concurrent_processes: NonZeroUsize::new(1).unwrap(),
+                ..ExecSettings::default()
+            },
+            project.path(),
+        ));
+
+        let first_executor = Arc::clone(&executor);
+        let first = tokio::spawn(async move {
+            first_executor
+                .execute(
+                    "plugin",
+                    &target(
+                        "sh",
+                        &[
+                            "-c",
+                            "touch first-started; sleep 0.3; test ! -e second-started; touch first-finished",
+                        ],
+                    ),
+                    None,
+                )
+                .await
+        });
+
+        let first_started = project.path().join("first-started");
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !first_started.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("first process did not start");
+
+        let second_target = target(
+            "sh",
+            &["-c", "touch second-started; test -e first-finished"],
+        );
+        let second = executor.execute("plugin", &second_target, None);
+        let (first, second) = tokio::join!(first, second);
+
+        assert_eq!(first.unwrap().unwrap().exit_code, 0);
+        assert_eq!(second.unwrap().exit_code, 0);
+        assert!(fs::exists(project.path().join("first-finished")).unwrap());
+        assert!(fs::exists(project.path().join("second-started")).unwrap());
+    }
+
+    #[tokio::test]
+    async fn spawn_limit_is_counted_per_plugin() {
+        let project = TempDir::new().unwrap();
+        let executor = Arc::new(Executor::new(
+            ExecSettings {
+                max_concurrent_processes: NonZeroUsize::new(1).unwrap(),
+                ..ExecSettings::default()
+            },
+            project.path(),
+        ));
+
+        let first_executor = Arc::clone(&executor);
+        let first = tokio::spawn(async move {
+            first_executor
+                .execute(
+                    "holder",
+                    &target(
+                        "sh",
+                        &[
+                            "-c",
+                            "touch holder-started; sleep 0.3; touch holder-finished",
+                        ],
+                    ),
+                    None,
+                )
+                .await
+        });
+
+        let holder_started = project.path().join("holder-started");
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !holder_started.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("holder process did not start");
+
+        let other = executor
+            .execute(
+                "other",
+                &target("sh", &["-c", "test ! -e holder-finished"]),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            other.exit_code, 0,
+            "the other plugin waited for the holder's slot"
+        );
+        assert_eq!(first.await.unwrap().unwrap().exit_code, 0);
     }
 }

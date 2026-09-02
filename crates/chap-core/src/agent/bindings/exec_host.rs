@@ -36,12 +36,16 @@ impl exec::Host for CapabilityHost {
     #[lockgate::requires(permission = chap_exec::exec::RUN, target = command, wire_type = exec::Command)]
     async fn run(
         &mut self,
-        _cx: HostCtx<'_, ()>,
+        cx: HostCtx<'_, ()>,
         command: CommandTarget,
         timeout_ms: Option<u64>,
     ) -> Result<exec::ExecResult, exec::ExecError> {
         self.executor
-            .execute(&command, timeout_ms.map(Duration::from_millis))
+            .execute(
+                cx.subject().plugin_id(),
+                &command,
+                timeout_ms.map(Duration::from_millis),
+            )
             .await
             .map(Into::into)
             .map_err(Into::into)

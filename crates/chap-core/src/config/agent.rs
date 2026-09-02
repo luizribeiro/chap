@@ -466,7 +466,8 @@ mod tests {
                 "agent": {
                     "exec": {
                         "path": ["/bin", "/usr/bin"],
-                        "timeout_ceiling_ms": 1000
+                        "timeout_ceiling_ms": 1000,
+                        "max_concurrent_processes": 2
                     }
                 }
             }"#,
@@ -482,6 +483,7 @@ mod tests {
             ]
         );
         assert_eq!(exec.timeout_ceiling_ms, 1000);
+        assert_eq!(exec.max_concurrent_processes.get(), 2);
     }
 
     #[cfg(feature = "exec")]
@@ -492,6 +494,30 @@ mod tests {
 
         assert!(exec.path.is_none());
         assert_eq!(exec.timeout_ceiling_ms, 120_000);
+        assert_eq!(exec.max_concurrent_processes.get(), 4);
+    }
+
+    #[cfg(feature = "exec")]
+    #[test]
+    fn rejects_a_zero_exec_process_limit() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "exec": { "max_concurrent_processes": 0 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let error = config.validate_agent_settings().unwrap_err();
+        let LoadError::InvalidAgentConfigSection {
+            section: "agent.exec",
+            source,
+        } = error
+        else {
+            panic!("expected invalid exec config");
+        };
+        assert!(source.to_string().contains("nonzero"));
     }
 
     #[cfg(feature = "exec")]
