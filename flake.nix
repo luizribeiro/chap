@@ -357,11 +357,6 @@
                 fi
               ''
             ) pluginIds;
-            approvals = pkgs.lib.concatMapStringsSep "\n" (
-              id: ''
-                ${pkgs.lib.escapeShellArg chapBinary} --config ${pkgs.lib.escapeShellArg configFile} grants approve ${pkgs.lib.escapeShellArg id}
-              ''
-            ) pluginIds;
           in
           assert pkgs.lib.assertMsg (!(settings ? name)) "mkChap: `settings` must not define `name`; use the top-level `name` argument";
           assert pkgs.lib.assertMsg (!(settings ? plugins)) "mkChap: `settings` must not define `plugins`; use the top-level `plugins` argument";
@@ -379,8 +374,6 @@
               expected_wit_version=${pkgs.lib.escapeShellArg witVersion}
               ${witChecks}
 
-              export XDG_STATE_HOME="$TMPDIR/state"
-              ${approvals}
               ${pkgs.lib.escapeShellArg chapBinary} --config ${pkgs.lib.escapeShellArg configFile} plugins check
 
               runHook postBuild
@@ -399,30 +392,26 @@
 
             meta.mainProgram = "chap";
           };
-        mkChapExample =
-          (mkChap {
-            name = "example";
-            plugins = {
-              openai = {
-                plugin = pluginOpenaiCompatible;
-                settings = {
-                  base_url = "http://127.0.0.1:8080/v1";
-                  model = "example-model";
-                };
-              };
-              kagi = {
-                plugin = pluginKagi;
-                settings.api_key_env = "KAGI_API_KEY";
-              };
-              persona = {
-                plugin = pluginPersona;
-                settings.persona = "Be concise and practical.";
+        mkChapExample = mkChap {
+          name = "example";
+          plugins = {
+            openai = {
+              plugin = pluginOpenaiCompatible;
+              settings = {
+                base_url = "http://127.0.0.1:8080/v1";
+                model = "example-model";
               };
             };
-          }).overrideAttrs {
-            # Admission injects a required env grant, but does not use its value.
-            KAGI_API_KEY = "admission-check-placeholder";
+            kagi = {
+              plugin = pluginKagi;
+              settings.api_key_env = "KAGI_API_KEY";
+            };
+            persona = {
+              plugin = pluginPersona;
+              settings.persona = "Be concise and practical.";
+            };
           };
+        };
         mkChapExecExample = mkChap {
           name = "example-exec";
           package = chap.override { withExec = true; };
@@ -452,21 +441,16 @@
             };
           };
         };
-        mkChapFormsExample =
-          (mkChap {
-            name = "example-forms";
-            plugins = {
-              kagi = pluginKagi;
-              persona = {
-                component = "${pluginPersona}/lib/chap_persona.wasm";
-                settings.persona = "Be concise and practical.";
-              };
+        mkChapFormsExample = mkChap {
+          name = "example-forms";
+          plugins = {
+            kagi = pluginKagi;
+            persona = {
+              component = "${pluginPersona}/lib/chap_persona.wasm";
+              settings.persona = "Be concise and practical.";
             };
-          }).overrideAttrs
-            {
-              # Admission injects a required env grant, but does not use its value.
-              KAGI_API_KEY = "admission-check-placeholder";
-            };
+          };
+        };
         mkChapEvalGuards =
           let
             rejects = args: !(builtins.tryEval (mkChap args).drvPath).success;
@@ -629,6 +613,8 @@
           plugin-state = pluginState;
           plugin-vm = pluginVm;
           plugin-persona = pluginPersona;
+          mkchap-vm-example = mkChapVmExample;
+          mkchap-forms-example = mkChapFormsExample;
         };
 
         checks = {
