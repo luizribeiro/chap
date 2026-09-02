@@ -76,6 +76,17 @@ fn main() -> ExitCode {
             ],
         ),
         (
+            &workspace,
+            &[
+                "test",
+                "-p",
+                "chap-vm",
+                "--features",
+                "host,microsandbox",
+                "--locked",
+            ],
+        ),
+        (
             &workspace.join("plugins/openai-compatible"),
             &["test", "--locked"],
         ),

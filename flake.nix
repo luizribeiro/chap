@@ -493,6 +493,13 @@
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
             };
+            microsandbox-vm-clippy = {
+              enable = true;
+              name = "cargo clippy (microsandbox vm backend)";
+              entry = "${rust}/bin/cargo clippy -p chap-vm --features host,microsandbox --all-targets --locked -- -D warnings";
+              files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
+              pass_filenames = false;
+            };
             all-capabilities-clippy = {
               enable = true;
               name = "cargo clippy (all capabilities)";
@@ -504,6 +511,14 @@
               enable = true;
               name = "cargo test";
               entry = "${rust}/bin/cargo test --workspace --all-targets --locked --exclude chap-openai-compatible --exclude chap-exec-plugin --exclude chap-state-plugin --exclude chap-vm-plugin --exclude chap-kagi";
+              files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
+              pass_filenames = false;
+              stages = [ "pre-push" ];
+            };
+            microsandbox-vm-test = {
+              enable = true;
+              name = "cargo test (microsandbox vm backend)";
+              entry = "${rust}/bin/cargo test -p chap-vm --features host,microsandbox --locked";
               files = "(^|/)(Cargo\\.toml|\\.cargo/config\\.toml|.*\\.rs)$";
               pass_filenames = false;
               stages = [ "pre-push" ];

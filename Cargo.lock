@@ -722,6 +722,7 @@ name = "chap-cli"
 version = "0.1.0"
 dependencies = [
  "chap-core",
+ "chap-vm",
  "clap",
  "iocraft",
  "pulldown-cmark",

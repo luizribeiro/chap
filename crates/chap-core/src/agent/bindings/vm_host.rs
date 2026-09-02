@@ -27,11 +27,12 @@ pub(crate) struct VmHost {
 pub(in crate::agent) fn new(config: &Config) -> Result<VmHost, ConsentError> {
     let project_root = std::env::current_dir()
         .map_err(|source| ConsentError::CurrentDirectoryUnavailable { source })?;
+    let settings = config
+        .vm_settings()
+        .map_err(ConsentError::HostConfiguration)?;
     Ok(VmHost {
-        backend: Arc::new(Backend::new()),
-        settings: config
-            .vm_settings()
-            .map_err(ConsentError::HostConfiguration)?,
+        backend: Arc::new(Backend::new(&settings)),
+        settings,
         installation_id: project_root.to_string_lossy().into_owned(),
         session_epoch: SystemTime::now()
             .duration_since(UNIX_EPOCH)
