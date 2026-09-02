@@ -8,7 +8,7 @@ use iocraft::prelude::*;
 #[component]
 pub fn Chap(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let session = hooks.use_context::<TuiContext>().session.clone();
-    let provider = session.provider().to_owned();
+    let provider = session.provider().to_string();
     let mut system = hooks.use_context_mut::<SystemContext>();
     let mut transcript = hooks.use_state(TranscriptModel::default);
     let mut busy = hooks.use_state(|| false);

@@ -54,7 +54,7 @@ async fn real_context_plugins_use_configured_channels_without_reaching_history()
     ])
     .await;
     let session = agent
-        .session(SessionOptions::new("fixture-provider"))
+        .session(SessionOptions::new("fixture-provider".into()))
         .await
         .unwrap();
 
@@ -81,7 +81,7 @@ async fn hanging_real_context_plugin_fails_session_creation_at_the_deadline() {
 
     let error = tokio::time::timeout(
         context_deadline + Duration::from_secs(5),
-        agent.session(SessionOptions::new("fixture-provider")),
+        agent.session(SessionOptions::new("fixture-provider".into())),
     )
     .await
     .expect("context call did not respect its assembly deadline")
@@ -124,7 +124,7 @@ async fn preserves_a_context_plugin_wire_error_at_the_host_boundary() {
         start_agent([context_plugin("failing-context", json!({ "error": true }))]).await;
 
     let error = agent
-        .session(SessionOptions::new("fixture-provider"))
+        .session(SessionOptions::new("fixture-provider".into()))
         .await
         .err()
         .expect("the failing context plugin unexpectedly created a session");
@@ -145,14 +145,15 @@ async fn session_creation_reports_an_unconfigured_provider() {
     let (agent, _directory) = start_agent([]).await;
 
     let error = agent
-        .session(SessionOptions::new("missing-provider"))
+        .session(SessionOptions::new("missing-provider".into()))
         .await
         .err()
         .expect("an unconfigured provider should fail session creation");
 
     assert!(matches!(
         error,
-        SessionError::ProviderNotConfigured { provider } if provider == "missing-provider"
+        SessionError::ProviderNotConfigured { provider }
+            if provider.as_str() == "missing-provider"
     ));
 }
 

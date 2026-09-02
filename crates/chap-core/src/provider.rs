@@ -1,3 +1,4 @@
+use lockgate::PluginId;
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 
@@ -27,24 +28,24 @@ pub enum ProviderError {
     #[error("{0}")]
     Refused(String),
     #[error("provider plugin `{provider}` is not configured")]
-    NotConfigured { provider: String },
+    NotConfigured { provider: PluginId },
     #[error("provider plugin `{provider}` failed: {source}")]
     RoleUnavailable {
-        provider: String,
+        provider: PluginId,
         #[source]
         source: lockgate::RoleError,
     },
     /// Chap's wall-clock deadline expired before the provider plugin completed.
     #[error("provider plugin `{provider}` timed out after {deadline:?}")]
     TimedOut {
-        provider: String,
+        provider: PluginId,
         deadline: Duration,
         #[source]
         source: Arc<lockgate::CallError>,
     },
     #[error("provider plugin `{provider}` failed: {source}")]
     CallFailed {
-        provider: String,
+        provider: PluginId,
         #[source]
         source: Arc<lockgate::CallError>,
     },

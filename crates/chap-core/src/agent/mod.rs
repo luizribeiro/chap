@@ -1041,7 +1041,7 @@ impl Agent {
         if !self
             .inner
             .plugins
-            .get(&PluginId::from(options.provider.as_str()))
+            .get(&options.provider)
             .is_some_and(|plugin| plugin.has_role(&chap_wit::PROVIDER))
         {
             return Err(SessionError::ProviderNotConfigured {

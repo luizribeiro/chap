@@ -29,7 +29,7 @@ pub async fn run(
     }
 
     let session = agent
-        .session(SessionOptions::new(PROVIDER))
+        .session(SessionOptions::new(PROVIDER.into()))
         .await
         .map_err(crate::render_session_error)?;
     let session_id = session.id();

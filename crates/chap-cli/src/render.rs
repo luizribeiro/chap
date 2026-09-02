@@ -211,7 +211,7 @@ mod tests {
         );
         assert_eq!(
             render_session_error(SessionError::ProviderNotConfigured {
-                provider: "missing".to_owned(),
+                provider: "missing".into(),
             }),
             "provider plugin `missing` is not configured"
         );

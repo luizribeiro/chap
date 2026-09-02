@@ -212,7 +212,7 @@ pub enum SessionError {
     #[error("a session provider is required")]
     ProviderRequired,
     #[error("provider plugin `{provider}` is not configured")]
-    ProviderNotConfigured { provider: String },
+    ProviderNotConfigured { provider: PluginId },
     #[error("{} context plugin(s) failed", .0.len())]
     Context(Vec<ContextFailure>),
 }
@@ -343,14 +343,12 @@ impl SessionEvents {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionOptions {
-    pub provider: String,
+    pub provider: PluginId,
 }
 
 impl SessionOptions {
-    pub fn new(provider: impl Into<String>) -> Self {
-        Self {
-            provider: provider.into(),
-        }
+    pub fn new(provider: PluginId) -> Self {
+        Self { provider }
     }
 }
 
@@ -369,7 +367,7 @@ impl Session {
         self.state.id
     }
 
-    pub fn provider(&self) -> &str {
+    pub fn provider(&self) -> &PluginId {
         &self.state.provider
     }
 
@@ -428,7 +426,7 @@ impl SessionManager {
         options: SessionOptions,
         assembled_context: AssembledContext,
     ) -> Result<Arc<SessionState>, SessionError> {
-        if options.provider.trim().is_empty() {
+        if options.provider.as_str().trim().is_empty() {
             return Err(SessionError::ProviderRequired);
         }
         let id = SessionId(Uuid::now_v7());
@@ -461,7 +459,7 @@ impl SessionManager {
 
 pub(crate) struct SessionState {
     id: SessionId,
-    provider: String,
+    provider: PluginId,
     pub(crate) assembled_context: AssembledContext,
     pub(crate) turn_lock: AsyncMutex<()>,
     run: Mutex<RunState>,
@@ -695,7 +693,10 @@ mod tests {
 
     fn session_state(manager: &SessionManager) -> Arc<SessionState> {
         manager
-            .create(SessionOptions::new("provider"), AssembledContext::default())
+            .create(
+                SessionOptions::new("provider".into()),
+                AssembledContext::default(),
+            )
             .unwrap()
     }
 
@@ -735,7 +736,7 @@ mod tests {
     #[test]
     fn sessions_require_a_provider() {
         let error = SessionManager::new()
-            .create(SessionOptions::new(""), AssembledContext::default())
+            .create(SessionOptions::new("".into()), AssembledContext::default())
             .err()
             .expect("an empty provider should fail");
 

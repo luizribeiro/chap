@@ -176,7 +176,10 @@ async fn run_scenario(
     builder.approve_plugin(&"exec".into()).await.unwrap();
     builder.approve_plugin(&"openai".into()).await.unwrap();
     let agent = builder.start().await.unwrap();
-    let session = agent.session(SessionOptions::new("openai")).await.unwrap();
+    let session = agent
+        .session(SessionOptions::new("openai".into()))
+        .await
+        .unwrap();
     let mut events = session.subscribe();
     let started = Instant::now();
     let completion = tokio::time::timeout(INVOCATION_TIMEOUT, session.send("run the command"))

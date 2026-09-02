@@ -5,7 +5,7 @@ use crate::{
 };
 use bindings::provider as provider_bindings;
 use bindings::types as provider_types;
-use lockgate::CallError;
+use lockgate::{CallError, PluginId};
 use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
 pub(super) type CompletionFuture<'a> =
@@ -17,11 +17,11 @@ pub(super) trait CompletionBackend: Sync {
 
 pub(super) struct PluginBackend<'a> {
     runtime: &'a AgentInner,
-    provider: &'a str,
+    provider: &'a PluginId,
 }
 
 impl<'a> PluginBackend<'a> {
-    pub(super) fn new(runtime: &'a AgentInner, provider: &'a str) -> Self {
+    pub(super) fn new(runtime: &'a AgentInner, provider: &'a PluginId) -> Self {
         Self { runtime, provider }
     }
 }
@@ -35,21 +35,21 @@ impl CompletionBackend for PluginBackend<'_> {
 impl AgentInner {
     async fn request_completion(
         &self,
-        provider: &str,
+        provider: &PluginId,
         messages: Vec<Message>,
     ) -> Result<ProviderCompletion, ProviderError> {
         let plugin = self
             .plugins
-            .get(&lockgate::PluginId::from(provider))
+            .get(provider)
             .filter(|plugin| plugin.has_role(&chap_wit::PROVIDER))
             .ok_or_else(|| ProviderError::NotConfigured {
-                provider: provider.to_owned(),
+                provider: provider.clone(),
             })?;
-        trace_plugin_call(provider, "provider", "complete", async {
+        trace_plugin_call(provider.as_str(), "provider", "complete", async {
             self.lockgate
                 .client::<provider_bindings::Role>(&plugin.handle)
                 .map_err(|source| ProviderError::RoleUnavailable {
-                    provider: provider.to_owned(),
+                    provider: provider.clone(),
                     source,
                 })?
                 .complete(provider_types::CompletionRequest {
@@ -70,25 +70,25 @@ impl AgentInner {
     }
 }
 
-fn map_plugin_call_error(provider: &str, error: CallError) -> ProviderError {
+fn map_plugin_call_error(provider: &PluginId, error: CallError) -> ProviderError {
     match error {
         source @ CallError::DeadlineExceeded { deadline } => ProviderError::TimedOut {
-            provider: provider.to_owned(),
+            provider: provider.clone(),
             deadline,
             source: Arc::new(source),
         },
         source @ CallError::HostPanic { .. } => ProviderError::CallFailed {
-            provider: provider.to_owned(),
+            provider: provider.clone(),
             source: Arc::new(source),
         },
         source => ProviderError::CallFailed {
-            provider: provider.to_owned(),
+            provider: provider.clone(),
             source: Arc::new(source),
         },
     }
 }
 
-fn map_provider_error(provider: &str, error: provider_types::ProviderError) -> ProviderError {
+fn map_provider_error(provider: &PluginId, error: provider_types::ProviderError) -> ProviderError {
     match error {
         provider_types::ProviderError::RateLimited(error) => ProviderError::RateLimited {
             retry_after: error.retry_after.map(Duration::from_secs),
@@ -112,7 +112,7 @@ fn map_provider_error(provider: &str, error: provider_types::ProviderError) -> P
     }
 }
 
-fn provider_message(provider: &str, message: String) -> String {
+fn provider_message(provider: &PluginId, message: String) -> String {
     format!("provider plugin `{provider}`: {message}")
 }
 
@@ -221,6 +221,7 @@ mod tests {
 
     #[test]
     fn maps_each_provider_error() {
+        let provider = PluginId::from("example");
         let errors = [
             (
                 provider_types::ProviderError::RateLimited(provider_types::RateLimit {
@@ -274,7 +275,7 @@ mod tests {
         ];
 
         for (wire_error, expected, display) in errors {
-            let error = map_provider_error("example", wire_error);
+            let error = map_provider_error(&provider, wire_error);
             assert_eq!(error.to_string(), display);
             assert_eq!(error, expected);
         }
@@ -283,7 +284,7 @@ mod tests {
     #[test]
     fn provider_role_failures_preserve_the_source() {
         let error = ProviderError::RoleUnavailable {
-            provider: "example".to_owned(),
+            provider: "example".into(),
             source: lockgate::RoleError::WrongHost,
         };
 
@@ -301,7 +302,7 @@ mod tests {
     #[test]
     fn provider_call_failures_preserve_the_source() {
         let error = map_plugin_call_error(
-            "example",
+            &"example".into(),
             CallError::Trap {
                 detail: "guest panicked".to_owned(),
             },
@@ -321,7 +322,7 @@ mod tests {
     #[test]
     fn provider_host_panics_name_the_import() {
         let error = map_plugin_call_error(
-            "example",
+            &"example".into(),
             CallError::HostPanic {
                 import: "chap:state/state.recall".to_owned(),
                 message: "host invariant failed".to_owned(),
@@ -346,7 +347,7 @@ mod tests {
     #[test]
     fn provider_deadlines_preserve_the_call_source() {
         let error = map_plugin_call_error(
-            "example",
+            &"example".into(),
             CallError::DeadlineExceeded {
                 deadline: Duration::from_secs(12),
             },

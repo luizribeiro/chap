@@ -276,7 +276,10 @@ async fn complete_through_the_host(mock: MockServer, config_path: &Path) -> Host
     let builder = load_builder(config_path);
     builder.approve_plugin(&"openai".into()).await.unwrap();
     let agent = builder.start().await.unwrap();
-    let session = agent.session(SessionOptions::new("openai")).await.unwrap();
+    let session = agent
+        .session(SessionOptions::new("openai".into()))
+        .await
+        .unwrap();
     let mut events = session.subscribe();
     let completion = tokio::time::timeout(INVOCATION_TIMEOUT, session.send("hello"))
         .await

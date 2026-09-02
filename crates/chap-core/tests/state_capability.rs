@@ -44,7 +44,10 @@ async fn state_persists_across_sequential_tool_calls() {
     builder.approve_plugin(&"memory".into()).await.unwrap();
     builder.approve_plugin(&"openai".into()).await.unwrap();
     let agent = builder.start().await.unwrap();
-    let session = agent.session(SessionOptions::new("openai")).await.unwrap();
+    let session = agent
+        .session(SessionOptions::new("openai".into()))
+        .await
+        .unwrap();
     let mut events = session.subscribe();
     let completion = tokio::time::timeout(
         INVOCATION_TIMEOUT,

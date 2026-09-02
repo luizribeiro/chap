@@ -18,7 +18,7 @@ use crate::{
     PluginRefusal, PluginRefusalReason, ProviderError, StartError, Tool, ToolDefinition, ToolError,
     ToolRegistrationError,
 };
-use lockgate::{ConsentRequired, DriftReport, Role, RuntimeLimits};
+use lockgate::{ConsentRequired, DriftReport, PluginId, Role, RuntimeLimits};
 use std::{
     fs,
     io::{self, Write},
@@ -416,14 +416,15 @@ async fn classifies_a_trapping_provider_as_a_plugin_failure() {
     let builder = load_test_builder(&config_path);
     builder.approve_plugin(&"example".into()).await.unwrap();
     let agent = builder.start().await.unwrap();
-    let backend = PluginBackend::new(&agent.inner, "example");
+    let provider = PluginId::from("example");
+    let backend = PluginBackend::new(&agent.inner, &provider);
 
     let error = backend.complete(Vec::new()).await.unwrap_err();
 
     let ProviderError::CallFailed { provider, source } = error else {
         panic!("a trapping provider should be a plugin failure");
     };
-    assert_eq!(provider, "example");
+    assert_eq!(provider.as_str(), "example");
     assert!(matches!(
         source.as_ref(),
         lockgate::CallError::Trap { detail } if !detail.is_empty()
@@ -459,7 +460,8 @@ async fn configured_provider_budget_reaches_the_host_builder() {
     let builder = load_test_builder(&config_path);
     builder.approve_plugin(&"example".into()).await.unwrap();
     let agent = builder.start().await.unwrap();
-    let backend = PluginBackend::new(&agent.inner, "example");
+    let provider = PluginId::from("example");
+    let backend = PluginBackend::new(&agent.inner, &provider);
 
     let error = tokio::time::timeout(Duration::from_secs(5), backend.complete(Vec::new()))
         .await
@@ -474,7 +476,7 @@ async fn configured_provider_budget_reaches_the_host_builder() {
     else {
         panic!("a provider deadline must remain a timed-out failure")
     };
-    assert_eq!(provider, "example");
+    assert_eq!(provider.as_str(), "example");
     assert_eq!(*deadline, Duration::from_secs(1));
     assert!(matches!(
         source.as_ref(),
@@ -526,7 +528,8 @@ async fn fast_provider_and_tool_plugins_succeed_with_deadlines() {
         .await
         .unwrap();
     let agent = builder.start().await.unwrap();
-    let backend = PluginBackend::new(&agent.inner, "example.provider");
+    let provider = PluginId::from("example.provider");
+    let backend = PluginBackend::new(&agent.inner, &provider);
 
     let completion = backend.complete(Vec::new()).await.unwrap();
     let tool_output = agent

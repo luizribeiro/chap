@@ -97,7 +97,10 @@ async fn run_scenario(
     assert_eq!(mount_grant.scopes, [expected_mount_grant]);
     builder.approve_plugin(&"openai".into()).await.unwrap();
     let agent = builder.start().await.unwrap();
-    let session = agent.session(SessionOptions::new("openai")).await.unwrap();
+    let session = agent
+        .session(SessionOptions::new("openai".into()))
+        .await
+        .unwrap();
     let mut events = session.subscribe();
     let completion = tokio::time::timeout(INVOCATION_TIMEOUT, session.send("run the command"))
         .await
