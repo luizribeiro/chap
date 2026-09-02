@@ -24,8 +24,11 @@ jobs:
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
-            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" /usr/lib/jvm \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /usr/share/swift
+          sudo apt-get clean
           sudo docker image prune --all --force >/dev/null
+          df -h /
 
       # The lockgate git dependency is a private repository, so every fetch
       # of it needs the read-only deploy key held in this secret.
@@ -67,6 +70,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+      CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@v6
 
@@ -75,8 +82,11 @@ jobs:
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
-            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" /usr/lib/jvm \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /usr/share/swift
+          sudo apt-get clean
           sudo docker image prune --all --force >/dev/null
+          df -h /
 
       - name: Grant access to the lockgate repository
         env:
