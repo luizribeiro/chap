@@ -9,7 +9,7 @@ use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition, ToolRegistrationError};
 use lockgate::{
     ConsentRecord, ConsentRequired, DriftReport, Host, HostBuilder, InvocationCtx, PluginConfig,
-    PluginHandle, Prepared, Role, RuntimeLimits,
+    PluginHandle, Prepared, RequiredEnvironmentVariable, Role, RuntimeLimits,
 };
 use plugin_tool::PluginTool;
 use provider::PluginBackend;
@@ -235,14 +235,31 @@ type StartDropResources = (
     Option<HostBuilder<()>>,
 );
 
-async fn host_builder(_config: &Config) -> Result<HostBuilder<()>, ConsentError> {
+async fn host_builder(config: &Config) -> Result<HostBuilder<()>, ConsentError> {
+    configured_host_builder(config, false).await
+}
+
+async fn preflight_host_builder(config: &Config) -> Result<HostBuilder<()>, ConsentError> {
+    configured_host_builder(config, true).await
+}
+
+async fn configured_host_builder(
+    _config: &Config,
+    _preflight: bool,
+) -> Result<HostBuilder<()>, ConsentError> {
+    #[cfg(feature = "vm")]
+    let vm = if _preflight {
+        bindings::vm_host::preflight(_config)?
+    } else {
+        bindings::vm_host::new(_config).await?
+    };
     let imports: HostImports = bindings::CapabilityHost {
         #[cfg(feature = "exec")]
         executor: bindings::exec_host::new(_config)?,
         #[cfg(feature = "state")]
         store: bindings::state_host::new(_config)?,
         #[cfg(feature = "vm")]
-        vm: bindings::vm_host::new(_config).await?,
+        vm,
     };
     let builder =
         HostBuilder::new(imports).map_err(|source| ConsentError::HostConstruction { source })?;
@@ -322,6 +339,13 @@ pub struct AgentBuilder {
     state_dir: Option<PathBuf>,
     tools: ToolRegistry,
     call_budgets: CallBudgets,
+}
+
+/// The consent-free coherence result for one configured plugin.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginCheck {
+    pub instance_id: String,
+    pub required_environment_variables: Vec<RequiredEnvironmentVariable>,
 }
 
 pub struct Agent {
@@ -404,6 +428,83 @@ impl AgentBuilder {
     {
         self.tools.register(tool)?;
         Ok(self)
+    }
+
+    /// Checks every configured plugin through smoke instantiation without consent.
+    ///
+    /// Required environment variables are reported with their current presence,
+    /// but an unset variable does not make the coherence check fail.
+    pub async fn check_plugins(&self) -> Result<Vec<PluginCheck>, StartError> {
+        let builder = preflight_host_builder(&self.config)
+            .await
+            .map_err(StartError::Consent)?;
+        let mut resources = StartResources::new(ToolRegistry::new(), builder);
+        let result = Self::preflight_plugins(
+            resources.builder.as_mut().expect("uninitialized host"),
+            &self.config,
+        )
+        .await;
+        match (result, resources.cleanup().await) {
+            (Ok(checks), Ok(())) => Ok(checks),
+            (Ok(_), Err(cleanup)) => Err(StartError::Consent(cleanup)),
+            (Err(error), Ok(())) => Err(error),
+            (Err(error), Err(cleanup)) => Err(StartError::OperationAndCleanup {
+                source: Box::new(error),
+                cleanup: Box::new(cleanup),
+            }),
+        }
+    }
+
+    async fn preflight_plugins(
+        builder: &mut HostBuilder<()>,
+        config: &Config,
+    ) -> Result<Vec<PluginCheck>, StartError> {
+        let mut checks = Vec::new();
+        let mut refusals = Vec::new();
+        for (id, plugin) in config.plugins() {
+            let path = config.component_path(plugin);
+            match Self::preflight_plugin(builder, config, id, plugin).await {
+                Ok(check) => checks.push(check),
+                Err(error) => refusals.push(Self::plugin_refusal(id, &path, error)?),
+            }
+        }
+        if refusals.is_empty() {
+            Ok(checks)
+        } else {
+            Err(StartError::AdmissionRefused(refusals))
+        }
+    }
+
+    async fn preflight_plugin(
+        builder: &mut HostBuilder<()>,
+        config: &Config,
+        id: &str,
+        plugin: &ConfiguredPlugin,
+    ) -> Result<PluginCheck, ConsentError> {
+        let path = config.component_path(plugin);
+        let prepared = Self::prepare_plugin(builder, config, id, plugin).await?;
+        let operation = builder
+            .preflight(&prepared, &runtime_limits(), plugin_admission_context())
+            .await
+            .map(|preflight| PluginCheck {
+                instance_id: id.to_owned(),
+                required_environment_variables: preflight.required_environment_variables,
+            })
+            .map_err(|source| ConsentError::LoadPlugin {
+                plugin: id.to_owned(),
+                path,
+                source: Box::new(source),
+            });
+        let cleanup = Self::cleanup_prepared_plugin(id, prepared).await;
+        match (operation, cleanup) {
+            (Ok(check), Ok(())) => Ok(check),
+            (Ok(_), Err(cleanup)) => Err(cleanup),
+            (Err(error), Ok(())) => Err(error),
+            (Err(error), Err(cleanup)) => Err(ConsentError::OperationAndCleanup {
+                source: Box::new(error),
+                cleanup: Box::new(cleanup),
+            }),
+        }
     }
 
     pub async fn approve_plugin(&self, id: &str) -> Result<ConsentRecord, ConsentError> {
@@ -676,7 +777,21 @@ impl AgentBuilder {
         let acceptance = match prepared.accept_reviewed(record.as_ref()) {
             Ok(acceptance) => acceptance,
             Err(required) => {
-                let refusal = Self::consent_refusal(id, &path, required);
+                let refusal = match builder
+                    .preflight(&prepared, &runtime_limits(), plugin_admission_context())
+                    .await
+                {
+                    Ok(_) => Self::consent_refusal(id, &path, required),
+                    Err(source) => Self::plugin_refusal(
+                        id,
+                        &path,
+                        ConsentError::LoadPlugin {
+                            plugin: id.to_owned(),
+                            path: path.clone(),
+                            source: Box::new(source),
+                        },
+                    )?,
+                };
                 tokio::task::spawn_blocking(move || drop(prepared))
                     .await
                     .map_err(|source| StartError::RefusedPluginCleanup {

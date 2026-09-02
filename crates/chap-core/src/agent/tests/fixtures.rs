@@ -54,6 +54,16 @@ pub(super) fn provider_component_requiring_exec(id: &str) -> Vec<u8> {
     )
 }
 
+pub(super) fn provider_component_requiring_env(id: &str) -> Vec<u8> {
+    plugin_component_with_needs(
+        id,
+        &[&PROVIDER],
+        Some(permissive_schema()),
+        RoleCall::Trap,
+        br#"{"format":1,"optional":{},"reasons":{},"required":{"env.read":["setting:/api_key_env"]}}"#,
+    )
+}
+
 pub(super) fn tool_component(id: &str) -> Vec<u8> {
     plugin_component(id, &[&TOOLS], Some(permissive_schema()), RoleCall::Trap)
 }

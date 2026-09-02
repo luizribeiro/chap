@@ -427,15 +427,15 @@ other servers may leave it absent, while Anthropic-style providers can report it
 ### Permission grants
 
 Lockgate v2 admits a component only after its exact resolved permission
-manifest has been approved. Review all configured instances, approve each one,
-then check that the components can be admitted:
+manifest has been approved. Check that the configured components are coherent,
+then review and approve each instance before starting CHAP:
 
 ```console
+cargo run -- plugins check
 cargo run -- grants review
 cargo run -- grants approve openai
 cargo run -- grants approve kagi
 cargo run -- grants approve persona
-cargo run -- plugins check
 ```
 
 With an exec-enabled build, configure the exec plugin's command scopes in its
@@ -480,7 +480,10 @@ dropping a role or changing only an interface version is non-blocking.
 
 `plugins check` verifies that every configured component exists, has matching
 embedded plugin metadata, implements a supported role, publishes a schema that
-accepts its settings, and has sufficient consent for admission. Use
+accepts its settings, wires its imports, and smoke-instantiates. The check does
+not require consent or enforce environment-variable presence; required variables
+are reported per plugin as set or unset. Readiness remains the responsibility of
+agent startup, which requires both consent and required environment variables. Use
 `--config /path/to/chap.json` with either `grants` or `plugins` to select another
 configuration.
 
@@ -533,7 +536,7 @@ cannot bypass the plugin's declared settings contract:
 failed to load plugin `openai`: plugin settings do not satisfy the schema
 ```
 
-`cargo run -- plugins check` exercises this preparation and admission path. The
+`cargo run -- plugins check` exercises this consent-free preflight path. The
 old `settings-host` and `outbound-http` application interfaces are gone: v2
 injects typed settings through the framework contract and links HTTP only from
 the plugin's declared `net::EGRESS` grants. See [the WIT

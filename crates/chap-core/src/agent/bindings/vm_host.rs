@@ -57,6 +57,20 @@ pub(in crate::agent) async fn new(config: &Config) -> Result<VmHost, ConsentErro
     })
 }
 
+pub(in crate::agent) fn preflight(config: &Config) -> Result<VmHost, ConsentError> {
+    let project_root = std::env::current_dir()
+        .map_err(|source| ConsentError::CurrentDirectoryUnavailable { source })?;
+    let settings = config
+        .vm_settings()
+        .map_err(ConsentError::HostConfiguration)?;
+    Ok(VmHost::without_lifecycle(
+        Arc::new(Backend::new(&settings)),
+        settings,
+        project_root.to_string_lossy().into_owned(),
+        session_epoch(),
+    ))
+}
+
 impl<B: VmBackend> VmHost<B> {
     async fn with_backend(
         backend: Arc<B>,
@@ -79,6 +93,7 @@ impl<B: VmBackend> VmHost<B> {
                 installation_id: installation_id.clone(),
                 session_epoch,
                 timeout: Duration::from_millis(settings.max_exec_ms),
+                shutdown_on_drop: true,
             }),
             backend,
             settings,
@@ -86,6 +101,28 @@ impl<B: VmBackend> VmHost<B> {
             session_epoch,
             vm_counts: Arc::default(),
         })
+    }
+
+    fn without_lifecycle(
+        backend: Arc<B>,
+        settings: VmSettings,
+        installation_id: String,
+        session_epoch: u64,
+    ) -> Self {
+        Self {
+            cleanup: Arc::new(VmCleanup {
+                backend: Arc::clone(&backend),
+                installation_id: installation_id.clone(),
+                session_epoch,
+                timeout: Duration::from_millis(settings.max_exec_ms),
+                shutdown_on_drop: false,
+            }),
+            backend,
+            settings,
+            installation_id,
+            session_epoch,
+            vm_counts: Arc::default(),
+        }
     }
 
     pub(crate) fn identity(&self, subject: &PluginSubject<'_>, logical_name: &str) -> VmIdentity {
@@ -245,10 +282,14 @@ struct VmCleanup<B: VmBackend> {
     installation_id: String,
     session_epoch: u64,
     timeout: Duration,
+    shutdown_on_drop: bool,
 }
 
 impl<B: VmBackend> Drop for VmCleanup<B> {
     fn drop(&mut self) {
+        if !self.shutdown_on_drop {
+            return;
+        }
         let backend = Arc::clone(&self.backend);
         let installation_id = self.installation_id.clone();
         let session_epoch = self.session_epoch;

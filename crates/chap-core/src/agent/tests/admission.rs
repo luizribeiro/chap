@@ -8,9 +8,9 @@ use super::{
     fixtures::{
         fast_provider_component, fast_tool_component, hanging_provider_component,
         hanging_tool_component, provider_and_tool_component, provider_component,
-        provider_component_requiring_exec, provider_component_with_schema,
-        provider_component_with_trapping_schema, test_directory, tool_component,
-        tool_component_with_schema, unsupported_component,
+        provider_component_requiring_env, provider_component_requiring_exec,
+        provider_component_with_schema, provider_component_with_trapping_schema, test_directory,
+        tool_component, tool_component_with_schema, unsupported_component,
     },
     load_test_builder,
 };
@@ -608,6 +608,101 @@ async fn start_refuses_and_names_every_unapproved_plugin() {
         refusals[1].reason,
         PluginRefusalReason::ApprovalRequired
     ));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn coherence_check_accepts_an_unapproved_plugin_without_minting_consent() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component("example"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.json");
+    fs::write(
+        &config_path,
+        r#"{"plugins":{"example":{"component":"provider.wasm"}}}"#,
+    )
+    .unwrap();
+
+    let builder = load_test_builder(&config_path);
+    let checks = builder.check_plugins().await.unwrap();
+
+    assert_eq!(
+        checks,
+        [super::super::PluginCheck {
+            instance_id: "example".to_owned(),
+            required_environment_variables: Vec::new(),
+        }]
+    );
+    assert!(!directory.join("consent.json").exists());
+    let refusal = only_refusal(builder.start().await.err().unwrap());
+    assert!(matches!(
+        refusal.reason,
+        PluginRefusalReason::ApprovalRequired
+    ));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn coherence_check_preserves_settings_schema_error_text() {
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component_with_schema(
+            "example",
+            r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["api_key"]}"#,
+        ),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.json");
+    fs::write(
+        &config_path,
+        r#"{"plugins":{"example":{"component":"provider.wasm"}}}"#,
+    )
+    .unwrap();
+    let builder = load_test_builder(&config_path);
+
+    let check_refusal = only_refusal(builder.check_plugins().await.err().unwrap());
+    let start_refusal = only_refusal(builder.start().await.err().unwrap());
+
+    assert_eq!(check_refusal.to_string(), start_refusal.to_string());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn coherence_check_reports_an_unset_required_environment_variable() {
+    const REQUIRED_ENV: &str = "CHAP_TEST_COHERENCE_REQUIRED_UNSET_67DCD2BD";
+    assert!(std::env::var_os(REQUIRED_ENV).is_none());
+    let directory = test_directory();
+    fs::write(
+        directory.join("provider.wasm"),
+        provider_component_requiring_env("example"),
+    )
+    .unwrap();
+    let config_path = directory.join("chap.json");
+    fs::write(
+        &config_path,
+        format!(
+            r#"{{"plugins":{{"example":{{"component":"provider.wasm","settings":{{"api_key_env":"{REQUIRED_ENV}"}}}}}}}}"#
+        ),
+    )
+    .unwrap();
+
+    let checks = load_test_builder(&config_path)
+        .check_plugins()
+        .await
+        .unwrap();
+
+    assert_eq!(checks.len(), 1);
+    assert_eq!(checks[0].instance_id, "example");
+    assert_eq!(checks[0].required_environment_variables.len(), 1);
+    assert_eq!(
+        checks[0].required_environment_variables[0].name,
+        REQUIRED_ENV
+    );
+    assert!(!checks[0].required_environment_variables[0].present);
     fs::remove_dir_all(directory).unwrap();
 }
 
