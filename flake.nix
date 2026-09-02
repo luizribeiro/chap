@@ -17,6 +17,7 @@
 
   outputs =
     {
+      self,
       nixpkgs,
       flake-utils,
       crane,
@@ -238,6 +239,33 @@
           src = packageSrc;
           cargoArtifacts = pluginCargoArtifacts;
         };
+        # The scaffold intentionally has no lockfile. Give its check the local
+        # workspace lock and SDK without changing the files users receive.
+        templatePluginSrc = pkgs.runCommand "chap-template-plugin-source" { } ''
+          mkdir "$out"
+          cp -R ${./nix/templates/plugin} "$out/plugin"
+          chmod -R u+w "$out"
+          cp ${./Cargo.lock} "$out/plugin/Cargo.lock"
+          ln -s ${packageSrc} "$out/chap"
+          substituteInPlace "$out/plugin/Cargo.toml" \
+            --replace-fail \
+              'chap-plugin = { git = "https://github.com/luizribeiro/chap.git", default-features = false }' \
+              'chap-plugin = { path = "../chap/crates/chap-plugin", default-features = false }'
+        '';
+        templatePlugin = buildChapPlugin {
+          pname = "my-plugin";
+          src = templatePluginSrc;
+          cargoToml = "${templatePluginSrc}/plugin/Cargo.toml";
+          sourceRoot = "chap-template-plugin-source/plugin";
+          inherit cargoVendorDir;
+          cargoArtifacts = null;
+          cargoExtraArgs = "-p my-plugin";
+        };
+        templatePluginFlake = (import ./nix/templates/plugin/flake.nix).outputs { chap = self; };
+        templateWitVersion =
+          assert pkgs.lib.assertMsg (templatePluginFlake.lib.witVersion == witVersion)
+            "plugin template WIT version ${templatePluginFlake.lib.witVersion} does not match ${witVersion}";
+          pkgs.runCommand "chap-template-wit-version" { } "touch $out";
         pluginRoleSettings = spec:
           pkgs.lib.optionalAttrs ((spec.tools or null) != null) { inherit (spec) tools; }
           // pkgs.lib.optionalAttrs ((spec.context or null) != null) { inherit (spec) context; };
@@ -484,6 +512,8 @@
             pkgs.runCommand "mkchap-eval-guards" { } "touch $out"
           else
             throw "mkChap accepted invalid arguments: ${builtins.concatStringsSep ", " accepted}";
+        templateInstance =
+          ((import ./nix/templates/instance/flake.nix).outputs { chap = self; }).packages.${system}.default;
         wasiSysroot = import ./nix/wasip3-sysroot.nix { inherit pkgs system; };
         rustfmtHook = {
           enable = true;
@@ -610,6 +640,9 @@
           plugin-vm = pluginVm;
           plugin-persona = pluginPersona;
           plugin-default-vendor = pluginDefaultVendor;
+          template-plugin = templatePlugin;
+          template-instance = templateInstance;
+          template-wit-version = templateWitVersion;
           mkchap-example = mkChapExample;
           mkchap-exec-example = mkChapExecExample;
           mkchap-state-example = mkChapStateExample;

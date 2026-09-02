@@ -32,5 +32,8 @@
           CARGO_TARGET_WASM32_WASIP2_RUNNER = "wasmtime run";
         };
       }
-    );
+    )
+    // {
+      lib.witVersion = "0.3.0";
+    };
 }
