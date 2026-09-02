@@ -1,4 +1,5 @@
 use crate::{FinishReason, ProviderError, ToolError};
+use lockgate::PluginId;
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt,
@@ -198,9 +199,9 @@ pub enum ContextError {
 }
 
 #[derive(Debug, Error)]
-#[error("context plugin `{plugin}` failed: {source}")]
+#[error("context plugin `{plugin_id}` failed: {source}")]
 pub struct ContextFailure {
-    pub plugin: String,
+    pub plugin_id: PluginId,
     #[source]
     pub source: ContextError,
 }

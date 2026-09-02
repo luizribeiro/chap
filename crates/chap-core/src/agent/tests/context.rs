@@ -92,7 +92,7 @@ async fn hanging_real_context_plugin_fails_session_creation_at_the_deadline() {
         panic!("expected structured context failures")
     };
     assert_eq!(failures.len(), 1);
-    assert_eq!(failures[0].plugin, "hanging-context");
+    assert_eq!(failures[0].plugin_id.as_str(), "hanging-context");
     assert_eq!(
         failures[0].to_string(),
         "context plugin `hanging-context` failed: timed out after 10s"
@@ -133,7 +133,7 @@ async fn preserves_a_context_plugin_wire_error_at_the_host_boundary() {
         panic!("expected structured context failures")
     };
     assert_eq!(failures.len(), 1);
-    assert_eq!(failures[0].plugin, "failing-context");
+    assert_eq!(failures[0].plugin_id.as_str(), "failing-context");
     assert!(matches!(
         &failures[0].source,
         ContextError::PluginReported { message } if message == "configured context failure"

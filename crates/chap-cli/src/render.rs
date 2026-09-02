@@ -192,13 +192,13 @@ mod tests {
     fn renders_context_failures_one_per_line() {
         let error = SessionError::Context(vec![
             ContextFailure {
-                plugin: "alpha".to_owned(),
+                plugin_id: "alpha".into(),
                 source: ContextError::PluginReported {
                     message: "unavailable".to_owned(),
                 },
             },
             ContextFailure {
-                plugin: "bravo".to_owned(),
+                plugin_id: "bravo".into(),
                 source: ContextError::PluginReported {
                     message: "timed out after 10s".to_owned(),
                 },

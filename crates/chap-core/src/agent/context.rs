@@ -5,7 +5,7 @@ use crate::{
 };
 use bindings::context as context_bindings;
 use futures::future::join_all;
-use lockgate::CallError;
+use lockgate::{CallError, PluginId};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -15,7 +15,7 @@ pub(super) struct ContextSegment {
     pub(super) priority: i32,
 }
 
-type PluginResults = BTreeMap<String, PluginResult>;
+type PluginResults = BTreeMap<PluginId, PluginResult>;
 
 struct PluginResult {
     channel: ContextChannel,
@@ -28,9 +28,9 @@ impl AgentInner {
             .plugins
             .iter()
             .filter(|(_, plugin)| plugin.has_role(&chap_wit::CONTEXT))
-            .map(|(id, plugin)| async move {
+            .map(|(plugin_id, plugin)| async move {
                 (
-                    id.as_str().to_owned(),
+                    plugin_id.clone(),
                     PluginResult {
                         channel: plugin.role_settings.context.channel(),
                         segments: self.request_context_segments(&plugin.handle).await,
@@ -64,12 +64,12 @@ fn compose_context(results: PluginResults) -> Result<AssembledContext, Vec<Conte
     let mut context = Vec::new();
     let mut failures = Vec::new();
 
-    for (plugin, result) in results {
+    for (plugin_id, result) in results {
         let segments = match result.segments {
             Ok(segments) => segments,
             Err(source) => {
-                tracing::warn!(plugin = %plugin, error = %source, "context plugin failed");
-                failures.push(ContextFailure { plugin, source });
+                tracing::warn!(plugin = %plugin_id, error = %source, "context plugin failed");
+                failures.push(ContextFailure { plugin_id, source });
                 continue;
             }
         };
@@ -78,10 +78,9 @@ fn compose_context(results: PluginResults) -> Result<AssembledContext, Vec<Conte
             ContextChannel::System => &mut system,
         };
         ordered.extend(
-            segments
-                .into_iter()
-                .enumerate()
-                .map(|(index, segment)| (segment.priority, plugin.clone(), index, segment.content)),
+            segments.into_iter().enumerate().map(|(index, segment)| {
+                (segment.priority, plugin_id.clone(), index, segment.content)
+            }),
         );
     }
 
@@ -95,7 +94,7 @@ fn compose_context(results: PluginResults) -> Result<AssembledContext, Vec<Conte
     }
 }
 
-fn render_channel(mut segments: Vec<(i32, String, usize, String)>) -> Option<String> {
+fn render_channel(mut segments: Vec<(i32, PluginId, usize, String)>) -> Option<String> {
     segments
         .sort_by(|left, right| (&left.0, &left.1, &left.2).cmp(&(&right.0, &right.1, &right.2)));
     (!segments.is_empty()).then(|| {
@@ -136,11 +135,11 @@ mod tests {
     fn composes_segments_by_priority() {
         let assembly = compose_context(BTreeMap::from([
             (
-                "first-plugin".to_owned(),
+                "first-plugin".into(),
                 success(ContextChannel::Context, vec![segment("late", 20)]),
             ),
             (
-                "second-plugin".to_owned(),
+                "second-plugin".into(),
                 success(ContextChannel::Context, vec![segment("early", -10)]),
             ),
         ]));
@@ -158,14 +157,14 @@ mod tests {
     fn ties_break_by_plugin_id_then_segment_index() {
         let assembly = compose_context(BTreeMap::from([
             (
-                "zeta".to_owned(),
+                "zeta".into(),
                 success(
                     ContextChannel::Context,
                     vec![segment("zeta-1", 0), segment("zeta-2", 0)],
                 ),
             ),
             (
-                "alpha".to_owned(),
+                "alpha".into(),
                 success(
                     ContextChannel::Context,
                     vec![segment("alpha-1", 0), segment("alpha-2", 0)],
@@ -183,19 +182,19 @@ mod tests {
     fn priorities_sort_independently_within_each_channel() {
         let assembly = compose_context(BTreeMap::from([
             (
-                "system-late".to_owned(),
+                "system-late".into(),
                 success(ContextChannel::System, vec![segment("system late", 50)]),
             ),
             (
-                "system-early".to_owned(),
+                "system-early".into(),
                 success(ContextChannel::System, vec![segment("system early", -5)]),
             ),
             (
-                "context-late".to_owned(),
+                "context-late".into(),
                 success(ContextChannel::Context, vec![segment("context late", 100)]),
             ),
             (
-                "context-early".to_owned(),
+                "context-early".into(),
                 success(
                     ContextChannel::Context,
                     vec![segment("context early", -100)],
@@ -216,11 +215,11 @@ mod tests {
     fn empty_channel_produces_no_message() {
         let assembly = compose_context(BTreeMap::from([
             (
-                "empty-context".to_owned(),
+                "empty-context".into(),
                 success(ContextChannel::Context, Vec::new()),
             ),
             (
-                "system".to_owned(),
+                "system".into(),
                 success(ContextChannel::System, vec![segment("operator", 0)]),
             ),
         ]));
@@ -237,7 +236,7 @@ mod tests {
     #[test]
     fn failure_names_the_plugin() {
         let assembly = compose_context(BTreeMap::from([(
-            "broken-context".to_owned(),
+            "broken-context".into(),
             failure(ContextChannel::Context, "unavailable"),
         )]));
 
@@ -249,12 +248,9 @@ mod tests {
     #[test]
     fn reports_every_failure_in_plugin_order() {
         let assembly = compose_context(BTreeMap::from([
+            ("zeta".into(), failure(ContextChannel::System, "timed out")),
             (
-                "zeta".to_owned(),
-                failure(ContextChannel::System, "timed out"),
-            ),
-            (
-                "alpha".to_owned(),
+                "alpha".into(),
                 failure(ContextChannel::Context, "unavailable"),
             ),
         ]));
@@ -269,11 +265,11 @@ mod tests {
     fn failure_rejects_an_assembly_with_successful_segments() {
         let assembly = compose_context(BTreeMap::from([
             (
-                "available".to_owned(),
+                "available".into(),
                 success(ContextChannel::Context, vec![segment("context", 0)]),
             ),
             (
-                "broken".to_owned(),
+                "broken".into(),
                 failure(ContextChannel::System, "unavailable"),
             ),
         ]));
@@ -299,8 +295,8 @@ mod tests {
         }
     }
 
-    fn assert_plugin_failure(failure: &ContextFailure, plugin: &str, message: &str) {
-        assert_eq!(failure.plugin, plugin);
+    fn assert_plugin_failure(failure: &ContextFailure, plugin_id: &str, message: &str) {
+        assert_eq!(failure.plugin_id.as_str(), plugin_id);
         assert!(matches!(
             &failure.source,
             ContextError::PluginReported { message: actual } if actual == message
