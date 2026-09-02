@@ -1,5 +1,5 @@
-use chap_core::{AgentBuilder, CallBudget, PluginCall, StartError};
-use lockgate::{HostBuilder, InvocationCtx, PluginConfig, PluginHandle, RuntimeLimits};
+use chap_core::{AgentBuilder, CallBudget, StartError};
+use lockgate::{HostBuilder, PluginConfig, PluginHandle, RuntimeLimits};
 use serde_json::json;
 use std::{
     path::{Path, PathBuf},
@@ -43,7 +43,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
         chap_builder.plugin_roles("sdk-multi-role").unwrap(),
         ["provider", "tool", "context"]
     );
-    let mut builder = HostBuilder::new(()).unwrap();
+    let mut builder = host_builder();
     let provider = admit(
         &mut builder,
         "sdk-provider-fixture",
@@ -64,13 +64,10 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     let completion = host
         .client::<bindings::provider::Role>(&provider)
         .unwrap()
-        .complete(
-            InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
-            bindings::types::CompletionRequest {
-                messages: vec![bindings::types::Message::User("hello".to_owned())],
-                tools: Vec::new(),
-            },
-        )
+        .complete(bindings::types::CompletionRequest {
+            messages: vec![bindings::types::Message::User("hello".to_owned())],
+            tools: Vec::new(),
+        })
         .await
         .unwrap()
         .unwrap();
@@ -86,7 +83,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     let segments = host
         .client::<bindings::context::Role>(&context)
         .unwrap()
-        .segments(InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE))
+        .segments()
         .await
         .unwrap()
         .unwrap();
@@ -98,13 +95,10 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     let first_completion = host
         .client::<bindings::provider::Role>(&multi_role)
         .unwrap()
-        .complete(
-            InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
-            bindings::types::CompletionRequest {
-                messages: vec![bindings::types::Message::User("use the tool".to_owned())],
-                tools: Vec::new(),
-            },
-        )
+        .complete(bindings::types::CompletionRequest {
+            messages: vec![bindings::types::Message::User("use the tool".to_owned())],
+            tools: Vec::new(),
+        })
         .await
         .unwrap()
         .unwrap();
@@ -121,11 +115,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     assert_eq!(call.arguments, r#"{"value":"round-trip"}"#);
 
     let tools = host.client::<bindings::tools::Role>(&multi_role).unwrap();
-    let registrations = tools
-        .definitions(InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE))
-        .await
-        .unwrap()
-        .unwrap();
+    let registrations = tools.definitions().await.unwrap().unwrap();
     assert_eq!(registrations.len(), 1);
     assert_eq!(registrations[0].definition.name, call.name);
     assert!(matches!(
@@ -135,7 +125,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     let segments = host
         .client::<bindings::context::Role>(&multi_role)
         .unwrap()
-        .segments(InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE))
+        .segments()
         .await
         .unwrap()
         .unwrap();
@@ -144,11 +134,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     assert_eq!(segments[0].content, "multi:context");
     assert_eq!(segments[0].priority, 7);
     let output = tools
-        .execute(
-            InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
-            &call.name,
-            &call.arguments,
-        )
+        .execute(&call.name, &call.arguments)
         .await
         .unwrap()
         .unwrap();
@@ -162,20 +148,17 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
     let final_completion = host
         .client::<bindings::provider::Role>(&multi_role)
         .unwrap()
-        .complete(
-            InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
-            bindings::types::CompletionRequest {
-                messages: vec![bindings::types::Message::ToolResult(
-                    bindings::types::ToolResult {
-                        call_id: call.id.clone(),
-                        name: call.name.clone(),
-                        output,
-                        is_error: false,
-                    },
-                )],
-                tools: definitions,
-            },
-        )
+        .complete(bindings::types::CompletionRequest {
+            messages: vec![bindings::types::Message::ToolResult(
+                bindings::types::ToolResult {
+                    call_id: call.id.clone(),
+                    name: call.name.clone(),
+                    output,
+                    is_error: false,
+                },
+            )],
+            tools: definitions,
+        })
         .await
         .unwrap()
         .unwrap();
@@ -194,7 +177,7 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
 async fn sdk_tool_error_variants_cross_the_component_boundary() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let components = sdk_components(&workspace);
-    let mut builder = HostBuilder::new(()).unwrap();
+    let mut builder = host_builder();
     let plugin = admit(
         &mut builder,
         "sdk-multi-role-fixture",
@@ -215,14 +198,7 @@ async fn sdk_tool_error_variants_cross_the_component_boundary() {
     ];
 
     for (name, expected_message) in cases {
-        let result = tools
-            .execute(
-                InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
-                name,
-                "{}",
-            )
-            .await
-            .unwrap();
+        let result = tools.execute(name, "{}").await.unwrap();
         let message = match (name, result) {
             ("sdk-invalid-input", Err(bindings::tools::ToolError::InvalidInput(message)))
             | ("sdk-denied", Err(bindings::tools::ToolError::Denied(message)))
@@ -259,13 +235,10 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
     let builder = AgentBuilder::load(&config_path)
         .unwrap()
         .state_dir(config_directory.path())
-        .call_budget(
-            PluginCall::ToolDefinitions,
-            CallBudget {
-                fuel: INVOCATION_FUEL,
-                deadline: Duration::from_secs(1),
-            },
-        );
+        .tools_budget(CallBudget {
+            fuel: INVOCATION_FUEL,
+            deadline: Duration::from_secs(1),
+        });
     builder.approve_plugin("sdk-multi-role").await.unwrap();
 
     // Generous outer bound: start() also wasmtime-compiles the component,
@@ -365,12 +338,7 @@ async fn admit(
         .unwrap();
     let acceptance = prepared.accept_all();
     builder
-        .admit(
-            prepared,
-            acceptance,
-            RuntimeLimits::default(),
-            InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
-        )
+        .admit(prepared, acceptance, RuntimeLimits::default())
         .await
         .unwrap()
 }
@@ -396,13 +364,28 @@ async fn admit_context(builder: &mut HostBuilder<()>, component: &Path) -> Plugi
         .unwrap();
     let acceptance = prepared.accept_all();
     builder
-        .admit(
-            prepared,
-            acceptance,
-            RuntimeLimits::default(),
-            InvocationCtx::bounded(INVOCATION_FUEL, INVOCATION_DEADLINE),
-        )
+        .admit(prepared, acceptance, RuntimeLimits::default())
         .await
+        .unwrap()
+}
+
+fn host_builder() -> HostBuilder<()> {
+    let budget = CallBudget {
+        fuel: INVOCATION_FUEL,
+        deadline: INVOCATION_DEADLINE,
+    };
+    HostBuilder::new(())
+        .unwrap()
+        .budgets::<bindings::provider::Role>(bindings::provider::Budgets { complete: budget })
+        .unwrap()
+        .budgets::<bindings::tools::Role>(bindings::tools::Budgets {
+            definitions: budget,
+            execute: budget,
+        })
+        .unwrap()
+        .budgets::<bindings::context::Role>(bindings::context::Budgets { segments: budget })
+        .unwrap()
+        .admission_budget(budget)
         .unwrap()
 }
 

@@ -1,7 +1,6 @@
 use super::{
     super::{
-        AgentBuilder, PLUGIN_ADMISSION_DEADLINE, PLUGIN_FUEL_PER_CALL, host_builder,
-        plugin_admission_context,
+        AgentBuilder, PLUGIN_ADMISSION_DEADLINE, PLUGIN_FUEL_PER_CALL, PluginBudgets, host_builder,
         provider::{CompletionBackend, PluginBackend},
         runtime_limits,
     },
@@ -16,19 +15,17 @@ use super::{
 };
 use crate::{
     CallBudget, ConsentError, ConsentRecord, ExecutionMode, ExportDriftKind, FinishReason,
-    PluginCall, PluginRefusal, PluginRefusalReason, ProviderError, StartError, Tool,
-    ToolDefinition, ToolError, ToolRegistrationError,
+    PluginRefusal, PluginRefusalReason, ProviderError, StartError, Tool, ToolDefinition, ToolError,
+    ToolRegistrationError,
 };
-use lockgate::{BudgetClass, ConsentRequired, DriftReport, Role, RuntimeLimits};
+use lockgate::{ConsentRequired, DriftReport, Role, RuntimeLimits};
 use std::{
-    collections::BTreeSet,
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
     time::Duration,
 };
-use wit_parser::{Resolve, WorldItem, WorldKey};
 
 fn refused_plugins(error: StartError) -> Vec<PluginRefusal> {
     let StartError::AdmissionRefused(refusals) = error else {
@@ -61,20 +58,6 @@ async fn panic_join_error() -> tokio::task::JoinError {
     tokio::spawn(async { panic!("forced cleanup panic") })
         .await
         .unwrap_err()
-}
-
-#[test]
-fn plugin_admission_context_has_expected_deadline() {
-    let context = plugin_admission_context();
-
-    assert_eq!(context.data, ());
-    assert_eq!(
-        context.budget,
-        BudgetClass::Bounded {
-            fuel: PLUGIN_FUEL_PER_CALL,
-            deadline: PLUGIN_ADMISSION_DEADLINE,
-        }
-    );
 }
 
 #[tokio::test]
@@ -140,72 +123,43 @@ fn guest_http_request_ceiling_uses_its_own_limit() {
 
 #[test]
 fn default_call_budgets_preserve_existing_bounds() {
-    let budgets = super::super::CallBudgets::default();
+    let budgets = PluginBudgets::default();
 
     assert_eq!(
-        budgets.resolve(PluginCall::ProviderComplete),
+        budgets.provider.complete,
         CallBudget {
             fuel: PLUGIN_FUEL_PER_CALL,
             deadline: Duration::from_secs(120),
         }
     );
     assert_eq!(
-        budgets.resolve(PluginCall::ToolDefinitions),
+        budgets.tools.definitions,
         CallBudget {
             fuel: PLUGIN_FUEL_PER_CALL,
             deadline: Duration::from_secs(30),
         }
     );
     assert_eq!(
-        budgets.resolve(PluginCall::ToolExecute),
+        budgets.tools.execute,
         CallBudget {
             fuel: PLUGIN_FUEL_PER_CALL,
             deadline: Duration::from_secs(30),
         }
     );
     assert_eq!(
-        budgets.resolve(PluginCall::ContextSegments),
+        budgets.context.segments,
         CallBudget {
             fuel: PLUGIN_FUEL_PER_CALL,
             deadline: Duration::from_secs(10),
         }
     );
-}
-
-#[test]
-fn plugin_call_keys_match_the_composed_wit_exports() {
-    let mut resolve = Resolve::new();
-    let package = resolve
-        .push_str("chap-plugin.wit", &chap_wit::world(chap_wit::ROLES, &[]))
-        .unwrap();
-    let world = resolve.packages[package].worlds[chap_wit::WORLD];
-    let mut exported_functions = BTreeSet::new();
-
-    for (key, item) in &resolve.worlds[world].exports {
-        let WorldItem::Interface { id, .. } = item else {
-            continue;
-        };
-        let interface = match key {
-            WorldKey::Name(name) => name.clone(),
-            WorldKey::Interface(_) => resolve.interfaces[*id]
-                .name
-                .clone()
-                .expect("exported interfaces must be named"),
-        };
-        for function in resolve.interfaces[*id].functions.keys() {
-            exported_functions.insert((interface.clone(), function.clone()));
+    assert_eq!(
+        budgets.admission,
+        CallBudget {
+            fuel: PLUGIN_FUEL_PER_CALL,
+            deadline: PLUGIN_ADMISSION_DEADLINE,
         }
-    }
-
-    let keyed_functions: BTreeSet<_> = PluginCall::ALL
-        .iter()
-        .map(|call| {
-            let (interface, function) = call.wit_name();
-            (interface.to_owned(), function.to_owned())
-        })
-        .collect();
-
-    assert_eq!(keyed_functions, exported_functions);
+    );
 }
 
 fn assert_default_runtime_limits_except_timeout_ceiling(
@@ -354,7 +308,9 @@ async fn reviews_multiple_plugins_with_one_caller_owned_host() {
     .unwrap();
     let builder = load_test_builder(&config_path);
     let consent = builder.consent_store().unwrap();
-    let mut host = host_builder(&builder.config).await.unwrap();
+    let mut host = host_builder(&builder.config, builder.budgets)
+        .await
+        .unwrap();
 
     let reviews = builder
         .review_configured_plugins(&mut host, &consent, &["alpha", "bravo"])
@@ -483,8 +439,7 @@ async fn times_out_a_hanging_provider_plugin() {
         }"#,
     )
     .unwrap();
-    let builder = load_test_builder(&config_path)
-        .call_budget(PluginCall::ProviderComplete, one_second_call_budget());
+    let builder = load_test_builder(&config_path).provider_budget(one_second_call_budget());
     builder.approve_plugin("example").await.unwrap();
     let agent = builder.start().await.unwrap();
     let backend = PluginBackend::new(&agent.inner, "example");
@@ -1141,8 +1096,7 @@ async fn times_out_a_hanging_tool_plugin() {
     )
     .unwrap();
 
-    let builder = load_test_builder(&config_path)
-        .call_budget(PluginCall::ToolExecute, one_second_call_budget());
+    let builder = load_test_builder(&config_path).tools_budget(one_second_call_budget());
     builder.approve_plugin("example.tools").await.unwrap();
     let agent = builder.start().await.unwrap();
 

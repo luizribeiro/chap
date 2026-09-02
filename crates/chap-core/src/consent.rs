@@ -67,6 +67,11 @@ pub enum ConsentError {
         #[source]
         source: lockgate::HostConstructionError,
     },
+    #[error("failed to configure a plugin call budget: {source}")]
+    InvalidCallBudget {
+        #[source]
+        source: lockgate::InvalidCallBudget,
+    },
     #[error("failed to register a host capability: {source}")]
     CapabilityRegistration {
         #[source]

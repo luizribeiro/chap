@@ -1,4 +1,4 @@
-use super::{AgentInner, PluginCall, bindings, telemetry::trace_plugin_call};
+use super::{AgentInner, bindings, telemetry::trace_plugin_call};
 use crate::{
     FinishReason, ProviderError, ToolDefinition,
     session::{AssistantContent, Message, Reasoning, ToolCall, Usage},
@@ -52,20 +52,15 @@ impl AgentInner {
                     provider: provider.to_owned(),
                     source,
                 })?
-                .complete(
-                    self.call_budgets
-                        .resolve(PluginCall::ProviderComplete)
-                        .invocation_context(),
-                    provider_types::CompletionRequest {
-                        messages: messages.into_iter().map(Into::into).collect(),
-                        tools: self
-                            .tools
-                            .definitions()
-                            .into_iter()
-                            .map(Into::into)
-                            .collect(),
-                    },
-                )
+                .complete(provider_types::CompletionRequest {
+                    messages: messages.into_iter().map(Into::into).collect(),
+                    tools: self
+                        .tools
+                        .definitions()
+                        .into_iter()
+                        .map(Into::into)
+                        .collect(),
+                })
                 .await
                 .map_err(|error| map_plugin_call_error(provider, error))?
                 .map_err(|error| map_provider_error(provider, error))

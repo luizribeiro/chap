@@ -8,7 +8,7 @@ use crate::session::{
 use crate::tool::ToolRegistry;
 use crate::{Tool, ToolDefinition, ToolRegistrationError};
 use lockgate::{
-    ConsentRecord, ConsentRequired, DriftReport, Host, HostBuilder, InvocationCtx, PluginConfig,
+    CallBudget, ConsentRecord, ConsentRequired, DriftReport, Host, HostBuilder, PluginConfig,
     PluginHandle, Prepared, RequiredEnvironmentVariable, Role, RuntimeLimits,
 };
 use plugin_tool::PluginTool;
@@ -37,61 +37,6 @@ const PLUGIN_FUEL_PER_CALL: u64 = 25_000_000;
 const PLUGIN_ADMISSION_DEADLINE: Duration = Duration::from_secs(30);
 const GUEST_HTTP_REQUEST_CEILING: Duration = Duration::from_secs(120);
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
-
-macro_rules! define_plugin_calls {
-    ($(
-        $(#[$meta:meta])*
-        $variant:ident => ($interface:literal, $function:literal),
-    )+) => {
-        /// An exported WIT function callable on a plugin.
-        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-        pub enum PluginCall {
-            $(
-                $(#[$meta])*
-                $variant,
-            )+
-        }
-
-        impl PluginCall {
-            #[cfg(test)]
-            const ALL: &'static [Self] = &[$(Self::$variant),+];
-
-            #[cfg(test)]
-            const fn wit_name(self) -> (&'static str, &'static str) {
-                match self {
-                    $(Self::$variant => ($interface, $function),)+
-                }
-            }
-        }
-    };
-}
-
-define_plugin_calls! {
-    /// `provider.complete`.
-    ProviderComplete => ("provider", "complete"),
-    /// `tools.definitions`.
-    ToolDefinitions => ("tools", "definitions"),
-    /// `tools.execute`.
-    ToolExecute => ("tools", "execute"),
-    /// `context.segments`.
-    ContextSegments => ("context", "segments"),
-}
-
-/// Fuel and wall-clock bounds for one exported plugin call.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CallBudget {
-    /// Maximum guest instructions consumed by the call.
-    pub fuel: u64,
-    /// Maximum wall-clock duration of the call.
-    pub deadline: Duration,
-}
-
-impl CallBudget {
-    /// Creates the bounded invocation context used to make the call.
-    pub fn invocation_context(self) -> InvocationCtx<()> {
-        InvocationCtx::bounded(self.fuel, self.deadline)
-    }
-}
 
 #[derive(Debug, Error)]
 #[error(
@@ -175,53 +120,43 @@ fn role_label(role: &'static str) -> &'static str {
     role.strip_suffix('s').unwrap_or(role)
 }
 
-/// Production plugin-call budgets, keyed by exported WIT function.
+/// Production plugin-call budgets, grouped by exported role.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct CallBudgets {
-    provider_complete: CallBudget,
-    tool_definitions: CallBudget,
-    tool_execute: CallBudget,
-    context_segments: CallBudget,
+struct PluginBudgets {
+    provider: bindings::provider::Budgets,
+    tools: bindings::tools::Budgets,
+    context: bindings::context::Budgets,
+    admission: CallBudget,
 }
 
-impl CallBudgets {
-    fn resolve(self, call: PluginCall) -> CallBudget {
-        match call {
-            PluginCall::ProviderComplete => self.provider_complete,
-            PluginCall::ToolDefinitions => self.tool_definitions,
-            PluginCall::ToolExecute => self.tool_execute,
-            PluginCall::ContextSegments => self.context_segments,
-        }
-    }
-
-    fn set(&mut self, call: PluginCall, budget: CallBudget) {
-        match call {
-            PluginCall::ProviderComplete => self.provider_complete = budget,
-            PluginCall::ToolDefinitions => self.tool_definitions = budget,
-            PluginCall::ToolExecute => self.tool_execute = budget,
-            PluginCall::ContextSegments => self.context_segments = budget,
-        }
-    }
-}
-
-impl Default for CallBudgets {
+impl Default for PluginBudgets {
     fn default() -> Self {
         Self {
-            provider_complete: CallBudget {
-                fuel: PLUGIN_FUEL_PER_CALL,
-                deadline: Duration::from_secs(120),
+            provider: bindings::provider::Budgets {
+                complete: CallBudget {
+                    fuel: PLUGIN_FUEL_PER_CALL,
+                    deadline: Duration::from_secs(120),
+                },
             },
-            tool_definitions: CallBudget {
-                fuel: PLUGIN_FUEL_PER_CALL,
-                deadline: Duration::from_secs(30),
+            tools: bindings::tools::Budgets {
+                definitions: CallBudget {
+                    fuel: PLUGIN_FUEL_PER_CALL,
+                    deadline: Duration::from_secs(30),
+                },
+                execute: CallBudget {
+                    fuel: PLUGIN_FUEL_PER_CALL,
+                    deadline: Duration::from_secs(30),
+                },
             },
-            tool_execute: CallBudget {
-                fuel: PLUGIN_FUEL_PER_CALL,
-                deadline: Duration::from_secs(30),
+            context: bindings::context::Budgets {
+                segments: CallBudget {
+                    fuel: PLUGIN_FUEL_PER_CALL,
+                    deadline: Duration::from_secs(10),
+                },
             },
-            context_segments: CallBudget {
+            admission: CallBudget {
                 fuel: PLUGIN_FUEL_PER_CALL,
-                deadline: Duration::from_secs(10),
+                deadline: PLUGIN_ADMISSION_DEADLINE,
             },
         }
     }
@@ -235,17 +170,24 @@ type StartDropResources = (
     Option<HostBuilder<()>>,
 );
 
-async fn host_builder(config: &Config) -> Result<HostBuilder<()>, ConsentError> {
-    configured_host_builder(config, false).await
+async fn host_builder(
+    config: &Config,
+    budgets: PluginBudgets,
+) -> Result<HostBuilder<()>, ConsentError> {
+    configured_host_builder(config, false, budgets).await
 }
 
-async fn preflight_host_builder(config: &Config) -> Result<HostBuilder<()>, ConsentError> {
-    configured_host_builder(config, true).await
+async fn preflight_host_builder(
+    config: &Config,
+    budgets: PluginBudgets,
+) -> Result<HostBuilder<()>, ConsentError> {
+    configured_host_builder(config, true, budgets).await
 }
 
 async fn configured_host_builder(
     _config: &Config,
     _preflight: bool,
+    budgets: PluginBudgets,
 ) -> Result<HostBuilder<()>, ConsentError> {
     #[cfg(feature = "vm")]
     let vm = if _preflight {
@@ -261,8 +203,16 @@ async fn configured_host_builder(
         #[cfg(feature = "vm")]
         vm,
     };
-    let builder =
-        HostBuilder::new(imports).map_err(|source| ConsentError::HostConstruction { source })?;
+    let builder = HostBuilder::new(imports)
+        .map_err(|source| ConsentError::HostConstruction { source })?
+        .budgets::<bindings::provider::Role>(budgets.provider)
+        .map_err(|source| ConsentError::InvalidCallBudget { source })?
+        .budgets::<bindings::tools::Role>(budgets.tools)
+        .map_err(|source| ConsentError::InvalidCallBudget { source })?
+        .budgets::<bindings::context::Role>(budgets.context)
+        .map_err(|source| ConsentError::InvalidCallBudget { source })?
+        .admission_budget(budgets.admission)
+        .map_err(|source| ConsentError::InvalidCallBudget { source })?;
     #[cfg(feature = "exec")]
     let builder = builder
         .register::<chap_exec::exec::Contract>()
@@ -338,7 +288,7 @@ pub struct AgentBuilder {
     config: Config,
     state_dir: Option<PathBuf>,
     tools: ToolRegistry,
-    call_budgets: CallBudgets,
+    budgets: PluginBudgets,
 }
 
 /// The consent-free coherence result for one configured plugin.
@@ -359,7 +309,6 @@ pub(crate) struct AgentInner {
     tools: ToolRegistry,
     /// Agent-level scheduling settings; see [`crate::config`] for the settings layers.
     tool_execution: ToolExecutionSettings,
-    call_budgets: CallBudgets,
 }
 
 impl AgentBuilder {
@@ -369,7 +318,7 @@ impl AgentBuilder {
             config,
             state_dir: None,
             tools: ToolRegistry::new(),
-            call_budgets: CallBudgets::default(),
+            budgets: PluginBudgets::default(),
         })
     }
 
@@ -392,11 +341,16 @@ impl AgentBuilder {
         ))
     }
 
-    /// Overrides the execution budget for one exported plugin call on every plugin.
-    ///
-    /// Calls without an override retain their production fuel and deadline defaults.
-    pub fn call_budget(mut self, call: PluginCall, budget: CallBudget) -> Self {
-        self.call_budgets.set(call, budget);
+    /// Overrides the provider-role execution budget on every plugin.
+    pub fn provider_budget(mut self, budget: CallBudget) -> Self {
+        self.budgets.provider.complete = budget;
+        self
+    }
+
+    /// Overrides both tools-role execution budgets on every plugin.
+    pub fn tools_budget(mut self, budget: CallBudget) -> Self {
+        self.budgets.tools.definitions = budget;
+        self.budgets.tools.execute = budget;
         self
     }
 
@@ -435,7 +389,7 @@ impl AgentBuilder {
     /// Required environment variables are reported with their current presence,
     /// but an unset variable does not make the coherence check fail.
     pub async fn check_plugins(&self) -> Result<Vec<PluginCheck>, StartError> {
-        let builder = preflight_host_builder(&self.config)
+        let builder = preflight_host_builder(&self.config, self.budgets)
             .await
             .map_err(StartError::Consent)?;
         let mut resources = StartResources::new(ToolRegistry::new(), builder);
@@ -484,7 +438,7 @@ impl AgentBuilder {
         let path = config.component_path(plugin);
         let prepared = Self::prepare_plugin(builder, config, id, plugin).await?;
         let operation = builder
-            .preflight(&prepared, &runtime_limits(), plugin_admission_context())
+            .preflight(&prepared, &runtime_limits())
             .await
             .map(|preflight| PluginCheck {
                 instance_id: id.to_owned(),
@@ -510,8 +464,10 @@ impl AgentBuilder {
     pub async fn approve_plugin(&self, id: &str) -> Result<ConsentRecord, ConsentError> {
         let consent = self.consent_store()?;
         self.configured_plugin(id)?;
-        let mut resources =
-            StartResources::new(ToolRegistry::new(), host_builder(&self.config).await?);
+        let mut resources = StartResources::new(
+            ToolRegistry::new(),
+            host_builder(&self.config, self.budgets).await?,
+        );
         let result = self
             .approve_configured_plugin(
                 resources.builder.as_mut().expect("uninitialized host"),
@@ -561,8 +517,10 @@ impl AgentBuilder {
         for id in ids {
             self.configured_plugin(id)?;
         }
-        let mut resources =
-            StartResources::new(ToolRegistry::new(), host_builder(&self.config).await?);
+        let mut resources = StartResources::new(
+            ToolRegistry::new(),
+            host_builder(&self.config, self.budgets).await?,
+        );
         let result = self
             .review_configured_plugins(
                 resources.builder.as_mut().expect("uninitialized host"),
@@ -661,23 +619,24 @@ impl AgentBuilder {
             config,
             state_dir: _,
             tools,
-            call_budgets,
+            budgets,
         } = self;
-        let builder = host_builder(&config).await.map_err(StartError::Consent)?;
+        let builder = host_builder(&config, budgets)
+            .await
+            .map_err(StartError::Consent)?;
         let mut resources = StartResources::new(tools, builder);
-        let plugins =
-            match Self::initialize_plugins(&mut resources, &config, &consent, call_budgets).await {
-                Ok(plugins) => plugins,
-                Err(error) => {
-                    return match resources.cleanup().await {
-                        Ok(()) => Err(error),
-                        Err(cleanup) => Err(StartError::OperationAndCleanup {
-                            source: Box::new(error),
-                            cleanup: Box::new(cleanup),
-                        }),
-                    };
-                }
-            };
+        let plugins = match Self::initialize_plugins(&mut resources, &config, &consent).await {
+            Ok(plugins) => plugins,
+            Err(error) => {
+                return match resources.cleanup().await {
+                    Ok(()) => Err(error),
+                    Err(cleanup) => Err(StartError::OperationAndCleanup {
+                        source: Box::new(error),
+                        cleanup: Box::new(cleanup),
+                    }),
+                };
+            }
+        };
         let lockgate = resources.host.take().expect("initialized Lockgate host");
         let tools = resources.tools.take().expect("initialized tool registry");
         let tool_execution = config.tool_execution();
@@ -688,7 +647,6 @@ impl AgentBuilder {
                 sessions: SessionManager::new(),
                 tools,
                 tool_execution,
-                call_budgets,
             }),
         })
     }
@@ -697,7 +655,6 @@ impl AgentBuilder {
         resources: &mut StartResources,
         config: &Config,
         consent: &ConsentStore,
-        call_budgets: CallBudgets,
     ) -> Result<BTreeMap<String, ActivePlugin>, StartError> {
         let plugins = Self::load_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
@@ -717,7 +674,6 @@ impl AgentBuilder {
                 Arc::clone(lockgate),
                 plugin.handle.clone(),
                 &plugin.role_settings.tools,
-                call_budgets,
             )
             .await?
             {
@@ -777,10 +733,7 @@ impl AgentBuilder {
         let acceptance = match prepared.accept_reviewed(record.as_ref()) {
             Ok(acceptance) => acceptance,
             Err(required) => {
-                let refusal = match builder
-                    .preflight(&prepared, &runtime_limits(), plugin_admission_context())
-                    .await
-                {
+                let refusal = match builder.preflight(&prepared, &runtime_limits()).await {
                     Ok(_) => Self::consent_refusal(id, &path, required),
                     Err(source) => Self::plugin_refusal(
                         id,
@@ -822,12 +775,7 @@ impl AgentBuilder {
             .map(|role| role.interface)
             .collect();
         let handle = builder
-            .admit(
-                prepared,
-                acceptance,
-                runtime_limits(),
-                plugin_admission_context(),
-            )
+            .admit(prepared, acceptance, runtime_limits())
             .await
             .map_err(|source| ConsentError::LoadPlugin {
                 plugin: id.to_owned(),
@@ -971,10 +919,6 @@ impl AgentBuilder {
             source,
         })
     }
-}
-
-fn plugin_admission_context() -> InvocationCtx<()> {
-    InvocationCtx::bounded(PLUGIN_FUEL_PER_CALL, PLUGIN_ADMISSION_DEADLINE)
 }
 
 fn runtime_limits() -> RuntimeLimits {

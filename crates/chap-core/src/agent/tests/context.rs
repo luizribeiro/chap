@@ -1,4 +1,4 @@
-use super::super::{Agent, CallBudgets, PluginCall};
+use super::super::{Agent, PluginBudgets};
 use crate::{ContextError, SessionError, SessionOptions, session::Message};
 use serde_json::{Map, Value, json};
 use std::{
@@ -77,9 +77,7 @@ async fn real_context_plugins_use_configured_channels_without_reaching_history()
 async fn hanging_real_context_plugin_fails_session_creation_at_the_deadline() {
     let (agent, _directory) =
         start_agent([context_plugin("hanging-context", json!({ "hang": true }))]).await;
-    let context_deadline = CallBudgets::default()
-        .resolve(PluginCall::ContextSegments)
-        .deadline;
+    let context_deadline = PluginBudgets::default().context.segments.deadline;
 
     let error = tokio::time::timeout(
         context_deadline + Duration::from_secs(5),

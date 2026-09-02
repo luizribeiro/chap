@@ -1,6 +1,4 @@
-use super::{
-    CallBudgets, InnerHost, PluginCall, StartError, bindings, telemetry::trace_plugin_call,
-};
+use super::{InnerHost, StartError, bindings, telemetry::trace_plugin_call};
 use crate::{ExecutionMode, Tool, ToolDefinition, ToolError, config::roles::ToolsSettings};
 use lockgate::{CallError, PluginHandle};
 use std::{future::Future, pin::Pin, sync::Arc};
@@ -16,7 +14,6 @@ pub(super) struct PluginTool {
     definition: ToolDefinition,
     execution_mode: ExecutionMode,
     runtime: Arc<InnerHost>,
-    call_budgets: CallBudgets,
 }
 
 impl PluginTool {
@@ -25,7 +22,6 @@ impl PluginTool {
         runtime: Arc<InnerHost>,
         handle: PluginHandle,
         settings: &ToolsSettings,
-        call_budgets: CallBudgets,
     ) -> Result<Vec<Self>, StartError> {
         let definitions = trace_plugin_call(plugin, "tools", "definitions", async {
             runtime
@@ -35,11 +31,7 @@ impl PluginTool {
                     plugin: plugin.to_owned(),
                     source,
                 })?
-                .definitions(
-                    call_budgets
-                        .resolve(PluginCall::ToolDefinitions)
-                        .invocation_context(),
-                )
+                .definitions()
                 .await
                 .map_err(|source| StartError::RoleCallFailed {
                     role: "tools",
@@ -63,7 +55,6 @@ impl PluginTool {
                     definition: registration.definition.into(),
                     execution_mode: resolve_tool_mode(declared_mode, settings.execution()),
                     runtime: Arc::clone(&runtime),
-                    call_budgets,
                 }
             })
             .collect())
@@ -93,13 +84,7 @@ impl Tool for PluginTool {
                     .map_err(|error| {
                         ToolError::Failed(format!("tool plugin `{}` failed: {error}", self.plugin))
                     })?
-                    .execute(
-                        self.call_budgets
-                            .resolve(PluginCall::ToolExecute)
-                            .invocation_context(),
-                        &self.definition.name,
-                        &arguments,
-                    )
+                    .execute(&self.definition.name, &arguments)
                     .await
                     .map_err(|error| tool_call_error(&self.plugin, error))?
                     .map_err(|error| map_tool_error(&self.plugin, error))

@@ -1,4 +1,4 @@
-use super::{AgentInner, PluginCall, bindings, telemetry::trace_plugin_call};
+use super::{AgentInner, bindings, telemetry::trace_plugin_call};
 use crate::{
     config::roles::ContextChannel,
     session::{AssembledContext, ContextError, ContextFailure},
@@ -49,11 +49,7 @@ impl AgentInner {
             self.lockgate
                 .client::<context_bindings::Role>(plugin)
                 .map_err(|source| ContextError::RoleUnavailable { source })?
-                .segments(
-                    self.call_budgets
-                        .resolve(PluginCall::ContextSegments)
-                        .invocation_context(),
-                )
+                .segments()
                 .await
                 .map_err(ContextError::from)?
                 .map_err(|message| ContextError::PluginReported { message })
