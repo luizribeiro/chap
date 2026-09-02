@@ -11,13 +11,19 @@ use model::ChatMessage;
 use std::{fmt, io::IsTerminal, path::Path};
 use tokio::task::JoinHandle;
 
+pub(crate) use diagnostics::DiagnosticWriter;
+
 const PROVIDER: &str = "openai";
 
 struct TuiContext {
     session: Session,
 }
 
-pub async fn run(agent: chap_core::Agent, consent_path: &Path) -> Result<(), String> {
+pub async fn run(
+    agent: chap_core::Agent,
+    consent_path: &Path,
+    tracing: &crate::telemetry::TracingRouter,
+) -> Result<(), String> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return Err("the terminal interface requires an interactive terminal".into());
     }
@@ -32,7 +38,7 @@ pub async fn run(agent: chap_core::Agent, consent_path: &Path) -> Result<(), Str
             Chap
         }
     };
-    let diagnostics = TuiDiagnostics::install(consent_path, session_id)?;
+    let diagnostics = TuiDiagnostics::install(consent_path, session_id, tracing)?;
     let diagnostic_writer = diagnostics.writer();
     let render_task =
         tokio::spawn(async move { element.fullscreen().stderr(diagnostic_writer).await });

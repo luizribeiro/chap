@@ -1,3 +1,4 @@
+use crate::telemetry::{TracingRouter, TuiTracingGuard};
 use chap_core::SessionId;
 use std::{
     backtrace::Backtrace,
@@ -15,10 +16,15 @@ pub(super) struct TuiDiagnostics {
     path: PathBuf,
     writer: DiagnosticWriter,
     previous_hook: Option<PanicHook>,
+    tracing: Option<TuiTracingGuard>,
 }
 
 impl TuiDiagnostics {
-    pub(super) fn install(consent_path: &Path, session_id: SessionId) -> Result<Self, String> {
+    pub(super) fn install(
+        consent_path: &Path,
+        session_id: SessionId,
+        tracing: &TracingRouter,
+    ) -> Result<Self, String> {
         let path = consent_path.with_file_name(format!("tui-{session_id}.log"));
         let parent = path
             .parent()
@@ -40,11 +46,13 @@ impl TuiDiagnostics {
         let hook_writer = writer.clone();
         let previous_hook = panic::take_hook();
         panic::set_hook(Box::new(move |info| hook_writer.write_panic(info)));
+        let tracing = tracing.route_to(writer.clone());
 
         Ok(Self {
             path,
             writer,
             previous_hook: Some(previous_hook),
+            tracing: Some(tracing),
         })
     }
 
@@ -54,6 +62,7 @@ impl TuiDiagnostics {
 
     pub(super) fn finish(mut self) {
         self.restore_hook();
+        self.tracing.take();
         let _ = self.writer.flush();
         let _ = write_notice_if_nonempty(&self.path, &mut io::stderr().lock());
     }
@@ -71,16 +80,17 @@ impl TuiDiagnostics {
 impl Drop for TuiDiagnostics {
     fn drop(&mut self) {
         self.restore_hook();
+        self.tracing.take();
     }
 }
 
 #[derive(Clone)]
-pub(super) struct DiagnosticWriter {
+pub(crate) struct DiagnosticWriter {
     sink: Arc<Mutex<Box<dyn Write + Send>>>,
 }
 
 impl DiagnosticWriter {
-    fn new(sink: impl Write + Send + 'static) -> Self {
+    pub(crate) fn new(sink: impl Write + Send + 'static) -> Self {
         Self {
             sink: Arc::new(Mutex::new(Box::new(sink))),
         }

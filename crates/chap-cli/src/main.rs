@@ -1,6 +1,7 @@
 mod args;
 mod commands;
 mod render;
+mod telemetry;
 mod tui;
 
 use args::{Cli, resolve_config_path};
@@ -10,13 +11,15 @@ use render::{render_load_error, render_session_error, render_start_error};
 use std::{env, path::Path, process::ExitCode};
 
 fn main() -> ExitCode {
+    let tracing = telemetry::TracingRouter::new();
+    telemetry::install(tracing.clone());
     install_crypto_provider();
-    async_main()
+    async_main(tracing)
 }
 
 #[tokio::main]
-async fn async_main() -> ExitCode {
-    match run(Cli::parse()).await {
+async fn async_main(tracing: telemetry::TracingRouter) -> ExitCode {
+    match run(Cli::parse(), &tracing).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("Error: {error}");
@@ -29,7 +32,7 @@ fn install_crypto_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
-async fn run(cli: Cli) -> Result<(), String> {
+async fn run(cli: Cli, tracing: &telemetry::TracingRouter) -> Result<(), String> {
     let xdg_config_home = env::var_os("XDG_CONFIG_HOME");
     let home = env::var_os("HOME");
     let config_path = resolve_config_path(
@@ -45,6 +48,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             tui::run(
                 builder.start().await.map_err(render_start_error)?,
                 &consent_path,
+                tracing,
             )
             .await?;
         }

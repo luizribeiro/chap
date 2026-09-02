@@ -731,6 +731,8 @@ dependencies = [
  "shlex",
  "tempfile",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "two-face",
  "unicode-segmentation",
  "unicode-width 0.2.2",
