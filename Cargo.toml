@@ -36,6 +36,7 @@ lockgate = { git = "https://github.com/luizribeiro/lockgate.git", rev = "fa3b05f
 lockgate-http = { git = "https://github.com/luizribeiro/lockgate.git", rev = "fa3b05f009e69852310e49ac594364ab77cc6341" }
 lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", rev = "fa3b05f009e69852310e49ac594364ab77cc6341", default-features = false }
 lockgate-policy = { git = "https://github.com/luizribeiro/lockgate.git", rev = "fa3b05f009e69852310e49ac594364ab77cc6341" }
+microsandbox = { version = "0.6.16", default-features = false, features = ["net", "prebuilt"] }
 chap-plugin = { path = "crates/chap-plugin", default-features = false }
 chap-plugin-macros = { path = "crates/chap-plugin-macros" }
 chap-state = { path = "crates/chap-state", default-features = false }

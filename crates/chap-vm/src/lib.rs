@@ -227,6 +227,21 @@ pub mod vm {
         }
     }
 
+    #[cfg(feature = "microsandbox")]
+    impl Egress {
+        pub(crate) const fn addr(&self) -> IpAddr {
+            self.addr
+        }
+
+        pub(crate) const fn prefix_len(&self) -> u8 {
+            self.prefix_len
+        }
+
+        pub(crate) const fn port(&self) -> Option<u16> {
+            self.port
+        }
+    }
+
     impl Scope for Egress {
         fn contains(&self, inner: &Self) -> bool {
             self.prefix_len <= inner.prefix_len

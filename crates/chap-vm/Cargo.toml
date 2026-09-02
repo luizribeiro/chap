@@ -7,8 +7,14 @@ publish.workspace = true
 [features]
 host = ["dep:serde", "dep:sha2"]
 mock = ["host"]
+microsandbox = ["host", "dep:microsandbox", "dep:tokio"]
 
 [dependencies]
 lockgate-policy.workspace = true
+microsandbox = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true

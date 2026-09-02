@@ -14,7 +14,11 @@ use crate::vm::{Egress, normalize_absolute_path};
 #[cfg(feature = "mock")]
 mod mock;
 #[cfg(feature = "mock")]
-pub type Backend = mock::MockVmBackend;
+pub use mock::MockVmBackend as Backend;
+#[cfg(feature = "microsandbox")]
+mod microsandbox;
+#[cfg(feature = "microsandbox")]
+pub use microsandbox::MicrosandboxBackend as Backend;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VmIdentity {
@@ -325,6 +329,7 @@ pub struct VmSettings {
     pub max_vms_per_plugin: u32,
     pub max_read_bytes: u64,
     pub max_exec_ms: u64,
+    pub max_output_bytes: u64,
     pub registries: Vec<String>,
     pub default_cpus: u32,
     pub default_memory_mb: u64,
@@ -338,6 +343,7 @@ impl Default for VmSettings {
             max_vms_per_plugin: default_max_vms_per_plugin(),
             max_read_bytes: default_max_read_bytes(),
             max_exec_ms: default_max_exec_ms(),
+            max_output_bytes: default_max_output_bytes(),
             registries: default_registries(),
             default_cpus: default_cpus(),
             default_memory_mb: default_memory_mb(),
@@ -357,6 +363,10 @@ pub const fn default_max_read_bytes() -> u64 {
 
 pub const fn default_max_exec_ms() -> u64 {
     120_000
+}
+
+pub const fn default_max_output_bytes() -> u64 {
+    64 * 1024
 }
 
 pub fn default_registries() -> Vec<String> {
@@ -708,6 +718,7 @@ mod tests {
                 max_vms_per_plugin: 8,
                 max_read_bytes: 16 * 1024 * 1024,
                 max_exec_ms: 120_000,
+                max_output_bytes: 64 * 1024,
                 registries: vec![],
                 default_cpus: 1,
                 default_memory_mb: 512,

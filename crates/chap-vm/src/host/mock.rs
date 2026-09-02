@@ -22,7 +22,7 @@ struct MockVm {
 }
 
 impl MockVmBackend {
-    pub fn new() -> Self {
+    pub fn new(_settings: &super::VmSettings) -> Self {
         Self::default()
     }
 
@@ -151,7 +151,7 @@ mod tests {
 
     use super::MockVmBackend;
     use crate::host::{
-        ResolvedImage, Subject, VmBackend, VmCommand, VmConfig, VmError, VmIdentity,
+        ResolvedImage, Subject, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmSettings,
     };
 
     fn block_on<F: Future>(future: F) -> F::Output {
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn create_then_get_returns_the_same_vm() {
         block_on(async {
-            let backend = MockVmBackend::new();
+            let backend = MockVmBackend::new(&VmSettings::default());
             let id = identity("installation-a", 7, "builder@grant-a", "build-env");
             let created = backend.create(&id, &config("hash-a")).await.unwrap();
 
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn create_rejects_an_existing_identity() {
         block_on(async {
-            let backend = MockVmBackend::new();
+            let backend = MockVmBackend::new(&VmSettings::default());
             let id = identity("installation-a", 7, "builder@grant-a", "build-env");
             backend.create(&id, &config("hash-a")).await.unwrap();
 
@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn get_or_create_reuses_only_a_matching_config() {
         block_on(async {
-            let backend = MockVmBackend::new();
+            let backend = MockVmBackend::new(&VmSettings::default());
             let id = identity("installation-a", 7, "builder@grant-a", "build-env");
             let created = backend.get_or_create(&id, &config("hash-a")).await.unwrap();
 
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn guest_files_round_trip_and_missing_files_are_distinct() {
         block_on(async {
-            let backend = MockVmBackend::new();
+            let backend = MockVmBackend::new(&VmSettings::default());
             let id = identity("installation-a", 7, "builder@grant-a", "build-env");
             let vm = backend.create(&id, &config("hash-a")).await.unwrap();
 
@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn guest_file_reads_enforce_the_byte_limit() {
         block_on(async {
-            let backend = MockVmBackend::new();
+            let backend = MockVmBackend::new(&VmSettings::default());
             let id = identity("installation-a", 7, "builder@grant-a", "build-env");
             let vm = backend.create(&id, &config("hash-a")).await.unwrap();
             backend
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn exec_returns_deterministic_output_and_honors_zero_timeout() {
         block_on(async {
-            let backend = MockVmBackend::new();
+            let backend = MockVmBackend::new(&VmSettings::default());
             let id = identity("installation-a", 7, "builder@grant-a", "build-env");
             let vm = backend.create(&id, &config("hash-a")).await.unwrap();
 
@@ -321,7 +321,7 @@ mod tests {
     #[test]
     fn destroy_removes_the_vm() {
         block_on(async {
-            let backend = MockVmBackend::new();
+            let backend = MockVmBackend::new(&VmSettings::default());
             let id = identity("installation-a", 7, "builder@grant-a", "build-env");
             let vm = backend.create(&id, &config("hash-a")).await.unwrap();
 
@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn owner_is_the_creating_principal() {
         block_on(async {
-            let backend = MockVmBackend::new();
+            let backend = MockVmBackend::new(&VmSettings::default());
             let id = identity("installation-a", 7, "builder@grant-a", "build-env");
             let vm = backend.create(&id, &config("hash-a")).await.unwrap();
 
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn equal_logical_names_under_different_principals_are_isolated() {
         block_on(async {
-            let backend = MockVmBackend::new();
+            let backend = MockVmBackend::new(&VmSettings::default());
             let first = identity("installation-a", 7, "builder@grant-a", "build-env");
             let second = identity("installation-a", 7, "builder@grant-b", "build-env");
             let first_vm = backend.create(&first, &config("hash-a")).await.unwrap();
@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn reap_is_scoped_to_installation_and_preserves_the_keep_set() {
         block_on(async {
-            let backend = MockVmBackend::new();
+            let backend = MockVmBackend::new(&VmSettings::default());
             let keep = identity("installation-a", 8, "builder@grant-a", "keep");
             let orphan = identity("installation-a", 8, "builder@grant-a", "orphan");
             let prior_epoch = identity("installation-a", 7, "builder@grant-a", "stale");
