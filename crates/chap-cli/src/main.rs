@@ -41,7 +41,12 @@ async fn run(cli: Cli) -> Result<(), String> {
     let builder = AgentBuilder::load(&config_path).map_err(render_load_error)?;
     match cli.command {
         None => {
-            tui::run(builder.start().await.map_err(render_start_error)?).await?;
+            let consent_path = builder.consent_path().map_err(render_load_error)?;
+            tui::run(
+                builder.start().await.map_err(render_start_error)?,
+                &consent_path,
+            )
+            .await?;
         }
         Some(command) => command.run(builder).await?,
     }
