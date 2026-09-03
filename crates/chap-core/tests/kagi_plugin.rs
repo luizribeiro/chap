@@ -31,8 +31,14 @@ async fn migrated_kagi_component_admits_and_classifies_as_tools_only() {
     let builder = AgentBuilder::load(&config_path)
         .unwrap()
         .state_dir(directory.path());
-    assert_eq!(builder.plugin_roles(&"kagi".into()).unwrap(), ["tool"]);
-    builder.approve_plugin(&"kagi".into()).await.unwrap();
+    assert_eq!(
+        builder.plugin_roles(&"kagi".parse().unwrap()).unwrap(),
+        ["tool"]
+    );
+    builder
+        .approve_plugin(&"kagi".parse().unwrap())
+        .await
+        .unwrap();
     let agent = builder.start().await.unwrap();
 
     tokio::task::spawn_blocking(move || drop(agent))

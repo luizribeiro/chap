@@ -135,11 +135,11 @@ mod tests {
     fn composes_segments_by_priority() {
         let assembly = compose_context(BTreeMap::from([
             (
-                "first-plugin".into(),
+                "first-plugin".parse().unwrap(),
                 success(ContextChannel::Context, vec![segment("late", 20)]),
             ),
             (
-                "second-plugin".into(),
+                "second-plugin".parse().unwrap(),
                 success(ContextChannel::Context, vec![segment("early", -10)]),
             ),
         ]));
@@ -157,14 +157,14 @@ mod tests {
     fn ties_break_by_plugin_id_then_segment_index() {
         let assembly = compose_context(BTreeMap::from([
             (
-                "zeta".into(),
+                "zeta".parse().unwrap(),
                 success(
                     ContextChannel::Context,
                     vec![segment("zeta-1", 0), segment("zeta-2", 0)],
                 ),
             ),
             (
-                "alpha".into(),
+                "alpha".parse().unwrap(),
                 success(
                     ContextChannel::Context,
                     vec![segment("alpha-1", 0), segment("alpha-2", 0)],
@@ -182,19 +182,19 @@ mod tests {
     fn priorities_sort_independently_within_each_channel() {
         let assembly = compose_context(BTreeMap::from([
             (
-                "system-late".into(),
+                "system-late".parse().unwrap(),
                 success(ContextChannel::System, vec![segment("system late", 50)]),
             ),
             (
-                "system-early".into(),
+                "system-early".parse().unwrap(),
                 success(ContextChannel::System, vec![segment("system early", -5)]),
             ),
             (
-                "context-late".into(),
+                "context-late".parse().unwrap(),
                 success(ContextChannel::Context, vec![segment("context late", 100)]),
             ),
             (
-                "context-early".into(),
+                "context-early".parse().unwrap(),
                 success(
                     ContextChannel::Context,
                     vec![segment("context early", -100)],
@@ -215,11 +215,11 @@ mod tests {
     fn empty_channel_produces_no_message() {
         let assembly = compose_context(BTreeMap::from([
             (
-                "empty-context".into(),
+                "empty-context".parse().unwrap(),
                 success(ContextChannel::Context, Vec::new()),
             ),
             (
-                "system".into(),
+                "system".parse().unwrap(),
                 success(ContextChannel::System, vec![segment("operator", 0)]),
             ),
         ]));
@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn failure_names_the_plugin() {
         let assembly = compose_context(BTreeMap::from([(
-            "broken-context".into(),
+            "broken-context".parse().unwrap(),
             failure(ContextChannel::Context, "unavailable"),
         )]));
 
@@ -248,9 +248,12 @@ mod tests {
     #[test]
     fn reports_every_failure_in_plugin_order() {
         let assembly = compose_context(BTreeMap::from([
-            ("zeta".into(), failure(ContextChannel::System, "timed out")),
             (
-                "alpha".into(),
+                "zeta".parse().unwrap(),
+                failure(ContextChannel::System, "timed out"),
+            ),
+            (
+                "alpha".parse().unwrap(),
                 failure(ContextChannel::Context, "unavailable"),
             ),
         ]));
@@ -265,11 +268,11 @@ mod tests {
     fn failure_rejects_an_assembly_with_successful_segments() {
         let assembly = compose_context(BTreeMap::from([
             (
-                "available".into(),
+                "available".parse().unwrap(),
                 success(ContextChannel::Context, vec![segment("context", 0)]),
             ),
             (
-                "broken".into(),
+                "broken".parse().unwrap(),
                 failure(ContextChannel::System, "unavailable"),
             ),
         ]));

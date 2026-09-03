@@ -145,7 +145,6 @@ impl VmBackend for MockVmBackend {
 
 #[cfg(test)]
 mod tests {
-    use lockgate_policy::PluginId;
     use std::{
         boxed::Box,
         future::Future,
@@ -174,7 +173,7 @@ mod tests {
         VmIdentity {
             installation_id: installation_id.into(),
             session_epoch: epoch,
-            plugin_id: plugin_id.into(),
+            plugin_id: plugin_id.parse().unwrap(),
             logical_name: name.into(),
         }
     }
@@ -345,7 +344,7 @@ mod tests {
 
             assert_eq!(
                 backend.owner_of(&vm).await.unwrap(),
-                Some(PluginId::from("builder@grant-a"))
+                Some("builder@grant-a".parse().unwrap())
             );
         });
     }

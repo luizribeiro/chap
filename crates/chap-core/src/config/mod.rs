@@ -393,7 +393,7 @@ mod tests {
         .unwrap();
 
         let (id, plugin) = config.plugins().next().unwrap();
-        assert_eq!(id, &PluginId::from("openai"));
+        assert_eq!(id, &"openai".parse::<PluginId>().unwrap());
         assert_eq!(
             plugin.component(),
             Path::new("./plugins/openai-compatible.wasm")
@@ -449,7 +449,7 @@ mod tests {
             let Ok(config) = serde_json::from_str::<Config>(&source) else {
                 continue;
             };
-            let plugin = config.plugin(&PluginId::from("example")).unwrap();
+            let plugin = config.plugin(&"example".parse().unwrap()).unwrap();
 
             assert!(
                 plugin.has_section(role.interface),
@@ -476,7 +476,7 @@ mod tests {
         .unwrap();
 
         let settings = config
-            .plugin(&PluginId::from("example"))
+            .plugin(&"example".parse().unwrap())
             .unwrap()
             .settings();
         assert_eq!(settings["api_key_env"], "EXAMPLE_API_KEY");

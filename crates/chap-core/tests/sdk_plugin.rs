@@ -1,5 +1,5 @@
 use chap_core::{AgentBuilder, CallBudget, StartError};
-use lockgate::{HostBuilder, PluginConfig, PluginHandle, PluginId, RuntimeLimits};
+use lockgate::{HostBuilder, PluginConfig, PluginHandle, RuntimeLimits};
 use serde_json::json;
 use std::{
     path::{Path, PathBuf},
@@ -40,7 +40,9 @@ async fn author_facing_sdk_plugins_admit_and_invoke_all_roles() {
         .unwrap()
         .state_dir(config_directory.path());
     assert_eq!(
-        chap_builder.plugin_roles(&"sdk-multi-role".into()).unwrap(),
+        chap_builder
+            .plugin_roles(&"sdk-multi-role".parse().unwrap())
+            .unwrap(),
         ["provider", "tool", "context"]
     );
     let mut builder = host_builder();
@@ -241,7 +243,7 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
         .unwrap()
         .state_dir(config_directory.path());
     builder
-        .approve_plugin(&"sdk-multi-role".into())
+        .approve_plugin(&"sdk-multi-role".parse().unwrap())
         .await
         .unwrap();
 
@@ -300,7 +302,7 @@ async fn preserves_a_tool_plugin_definitions_error_at_the_host_boundary() {
         .unwrap()
         .state_dir(config_directory.path());
     builder
-        .approve_plugin(&"sdk-multi-role".into())
+        .approve_plugin(&"sdk-multi-role".parse().unwrap())
         .await
         .unwrap();
 
@@ -334,7 +336,7 @@ async fn admit(
     let bytes = std::fs::read(component).unwrap();
     let prepared = builder
         .prepare(
-            PluginId::from(id),
+            id.parse().unwrap(),
             &bytes,
             PluginConfig {
                 settings: Some(json!({ "prefix": prefix })),
@@ -354,7 +356,7 @@ async fn admit_context(builder: &mut HostBuilder<()>, component: &Path) -> Plugi
     let bytes = std::fs::read(component).unwrap();
     let prepared = builder
         .prepare(
-            PluginId::from("sdk-context-fixture"),
+            "sdk-context-fixture".parse().unwrap(),
             &bytes,
             PluginConfig {
                 settings: Some(json!({

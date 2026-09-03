@@ -189,12 +189,14 @@ impl VmBackend for MicrosandboxBackend {
         let config = handle
             .config()
             .map_err(|error| map_sdk_error("VM metadata read", error))?;
-        Ok(config
+        config
             .spec
             .labels
             .get(PLUGIN_ID_LABEL)
             .cloned()
-            .map(PluginId::from))
+            .map(PluginId::try_from)
+            .transpose()
+            .map_err(|error| VmError::Failed(format!("invalid VM owner metadata: {error}")))
     }
 
     async fn reap(&self, installation_id: &str, current_epoch: u64) -> Result<(), VmError> {

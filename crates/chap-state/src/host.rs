@@ -143,7 +143,7 @@ mod tests {
     use super::{PluginId, StateError, StateSettings, StateStore};
 
     fn plugin_id(id: &str) -> PluginId {
-        PluginId::from(id)
+        id.parse().unwrap()
     }
 
     fn store_with_quota(max_bytes: u64) -> StateStore {

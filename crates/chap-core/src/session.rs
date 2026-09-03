@@ -694,7 +694,7 @@ mod tests {
     fn session_state(manager: &SessionManager) -> Arc<SessionState> {
         manager
             .create(
-                SessionOptions::new("provider".into()),
+                SessionOptions::new("provider".parse().unwrap()),
                 AssembledContext::default(),
             )
             .unwrap()
@@ -736,7 +736,10 @@ mod tests {
     #[test]
     fn sessions_require_a_provider() {
         let error = SessionManager::new()
-            .create(SessionOptions::new("".into()), AssembledContext::default())
+            .create(
+                SessionOptions::new(" ".parse().unwrap()),
+                AssembledContext::default(),
+            )
             .err()
             .expect("an empty provider should fail");
 

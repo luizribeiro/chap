@@ -1407,7 +1407,10 @@ fn session_state() -> Arc<SessionState> {
 
 fn session_state_with_context(context: AssembledContext) -> Arc<SessionState> {
     SessionManager::new()
-        .create(SessionOptions::new("test-provider".into()), context)
+        .create(
+            SessionOptions::new("test-provider".parse().unwrap()),
+            context,
+        )
         .unwrap()
 }
 

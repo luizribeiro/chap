@@ -32,14 +32,14 @@ mod tests {
         assert_eq!(
             render_plugin_checks(&[
                 PluginCheck {
-                    plugin_id: "kagi".into(),
+                    plugin_id: "kagi".parse().unwrap(),
                     required_environment_variables: vec![RequiredEnvironmentVariable {
                         name: "KAGI_API_KEY".to_owned(),
                         present: false,
                     }],
                 },
                 PluginCheck {
-                    plugin_id: "persona".into(),
+                    plugin_id: "persona".parse().unwrap(),
                     required_environment_variables: Vec::new(),
                 },
             ]),

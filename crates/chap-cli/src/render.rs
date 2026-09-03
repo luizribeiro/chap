@@ -132,7 +132,7 @@ mod tests {
 
     fn refusal(plugin_id: &str, component: &str, reason: PluginRefusalReason) -> PluginRefusal {
         PluginRefusal {
-            plugin_id: plugin_id.into(),
+            plugin_id: plugin_id.parse().unwrap(),
             source_path: PathBuf::from(component),
             reason,
         }
@@ -192,13 +192,13 @@ mod tests {
     fn renders_context_failures_one_per_line() {
         let error = SessionError::Context(vec![
             ContextFailure {
-                plugin_id: "alpha".into(),
+                plugin_id: "alpha".parse().unwrap(),
                 source: ContextError::PluginReported {
                     message: "unavailable".to_owned(),
                 },
             },
             ContextFailure {
-                plugin_id: "bravo".into(),
+                plugin_id: "bravo".parse().unwrap(),
                 source: ContextError::PluginReported {
                     message: "timed out after 10s".to_owned(),
                 },
@@ -211,7 +211,7 @@ mod tests {
         );
         assert_eq!(
             render_session_error(SessionError::ProviderNotConfigured {
-                provider: "missing".into(),
+                provider: "missing".parse().unwrap(),
             }),
             "provider plugin `missing` is not configured"
         );
@@ -324,7 +324,7 @@ mod tests {
             "plugins/missing.wasm",
             PluginRefusalReason::ComponentLoad {
                 source: Box::new(ConsentError::ReadPlugin {
-                    plugin_id: "missing".into(),
+                    plugin_id: "missing".parse().unwrap(),
                     path: PathBuf::from("plugins/missing.wasm"),
                     source: std::io::Error::new(std::io::ErrorKind::NotFound, "component missing"),
                 }),
@@ -361,7 +361,10 @@ mod tests {
         let builder = AgentBuilder::load(&config_path)
             .unwrap()
             .state_dir(directory.path());
-        let error = builder.review_plugin(&"broken".into()).await.unwrap_err();
+        let error = builder
+            .review_plugin(&"broken".parse().unwrap())
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             &error,
@@ -369,7 +372,7 @@ mod tests {
                 if plugin_id.as_str() == "broken" && path == &component
         ));
         let refusal = PluginRefusal {
-            plugin_id: "broken".into(),
+            plugin_id: "broken".parse().unwrap(),
             source_path: component.clone(),
             reason: PluginRefusalReason::ComponentLoad {
                 source: Box::new(error),
@@ -388,7 +391,7 @@ mod tests {
     #[test]
     fn renders_consent_errors_with_export_details() {
         let error = ConsentError::UnsupportedRole {
-            plugin_id: "example".into(),
+            plugin_id: "example".parse().unwrap(),
             path: PathBuf::from("plugins/example.wasm"),
             role: "chap:agent@0.3.0".to_owned(),
             exported_interfaces: Vec::new(),

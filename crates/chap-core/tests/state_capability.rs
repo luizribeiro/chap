@@ -41,11 +41,17 @@ async fn state_persists_across_sequential_tool_calls() {
     let builder = AgentBuilder::load(&config_path)
         .unwrap()
         .state_dir(directory.path());
-    builder.approve_plugin(&"memory".into()).await.unwrap();
-    builder.approve_plugin(&"openai".into()).await.unwrap();
+    builder
+        .approve_plugin(&"memory".parse().unwrap())
+        .await
+        .unwrap();
+    builder
+        .approve_plugin(&"openai".parse().unwrap())
+        .await
+        .unwrap();
     let agent = builder.start().await.unwrap();
     let session = agent
-        .session(SessionOptions::new("openai".into()))
+        .session(SessionOptions::new("openai".parse().unwrap()))
         .await
         .unwrap();
     let mut events = session.subscribe();

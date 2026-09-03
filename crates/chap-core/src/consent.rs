@@ -343,7 +343,7 @@ mod tests {
     }
 
     fn plugin_id(id: &str) -> PluginId {
-        PluginId::from(id)
+        id.parse().unwrap()
     }
 
     #[test]

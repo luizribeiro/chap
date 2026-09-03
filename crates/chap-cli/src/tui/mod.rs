@@ -28,8 +28,11 @@ pub async fn run(
         return Err("the terminal interface requires an interactive terminal".into());
     }
 
+    let provider = PROVIDER
+        .parse::<chap_core::PluginId>()
+        .map_err(|error| error.to_string())?;
     let session = agent
-        .session(SessionOptions::new(PROVIDER.into()))
+        .session(SessionOptions::new(provider))
         .await
         .map_err(crate::render_session_error)?;
     let session_id = session.id();

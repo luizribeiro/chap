@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn maps_each_provider_error() {
-        let provider = PluginId::from("example");
+        let provider = "example".parse().unwrap();
         let errors = [
             (
                 provider_types::ProviderError::RateLimited(provider_types::RateLimit {
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn provider_role_failures_preserve_the_source() {
         let error = ProviderError::RoleUnavailable {
-            provider: "example".into(),
+            provider: "example".parse().unwrap(),
             source: lockgate::RoleError::WrongHost,
         };
 
@@ -302,7 +302,7 @@ mod tests {
     #[test]
     fn provider_call_failures_preserve_the_source() {
         let error = map_plugin_call_error(
-            &"example".into(),
+            &"example".parse().unwrap(),
             CallError::Trap {
                 detail: "guest panicked".to_owned(),
             },
@@ -322,7 +322,7 @@ mod tests {
     #[test]
     fn provider_host_panics_name_the_import() {
         let error = map_plugin_call_error(
-            &"example".into(),
+            &"example".parse().unwrap(),
             CallError::HostPanic {
                 import: "chap:state/state.recall".to_owned(),
                 message: "host invariant failed".to_owned(),
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn provider_deadlines_preserve_the_call_source() {
         let error = map_plugin_call_error(
-            &"example".into(),
+            &"example".parse().unwrap(),
             CallError::DeadlineExceeded {
                 deadline: Duration::from_secs(12),
             },

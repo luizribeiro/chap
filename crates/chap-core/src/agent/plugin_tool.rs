@@ -190,7 +190,7 @@ mod tests {
         ];
 
         for (error, expected) in errors {
-            assert_eq!(map_tool_error(&"example".into(), error), expected);
+            assert_eq!(map_tool_error(&"example".parse().unwrap(), error), expected);
         }
     }
 
@@ -198,7 +198,7 @@ mod tests {
     fn maps_host_panics_to_tool_failures_with_the_import_name() {
         assert_eq!(
             tool_call_error(
-                &"example".into(),
+                &"example".parse().unwrap(),
                 CallError::HostPanic {
                     import: "chap:exec/exec.run".to_owned(),
                     message: "host invariant failed".to_owned(),

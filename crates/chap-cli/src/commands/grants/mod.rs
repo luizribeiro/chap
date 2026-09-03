@@ -82,13 +82,13 @@ mod tests {
             approve.command,
             Some(Command::Grants(Grants {
                 command: GrantsCommand::Approve { plugin_id }
-            })) if plugin_id == PluginId::from("openai")
+            })) if plugin_id == "openai".parse::<PluginId>().unwrap()
         ));
         assert!(matches!(
             deny.command,
             Some(Command::Grants(Grants {
                 command: GrantsCommand::Deny { plugin_id }
-            })) if plugin_id == PluginId::from("openai")
+            })) if plugin_id == "openai".parse::<PluginId>().unwrap()
         ));
     }
 }

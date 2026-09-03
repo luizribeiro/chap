@@ -148,7 +148,7 @@ mod host_tests {
     use super::{CommandTarget, ExecError, ExecSettings, Executor, PluginId};
 
     fn plugin_id(id: &str) -> PluginId {
-        PluginId::from(id)
+        id.parse().unwrap()
     }
 
     fn target(program: &str, args: &[&str]) -> CommandTarget {

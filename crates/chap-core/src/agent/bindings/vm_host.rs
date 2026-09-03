@@ -587,11 +587,11 @@ mod tests {
                 inner: Backend::new(&VmSettings::default()),
                 blocked_plugin_ids: blocked_plugin_ids
                     .iter()
-                    .map(|plugin_id| PluginId::from(*plugin_id))
+                    .map(|plugin_id| plugin_id.parse().unwrap())
                     .collect(),
                 failed_identities: failed_identities
                     .iter()
-                    .map(|(plugin_id, name)| (PluginId::from(*plugin_id), (*name).to_owned()))
+                    .map(|(plugin_id, name)| (plugin_id.parse().unwrap(), (*name).to_owned()))
                     .collect(),
                 create_started: Notify::new(),
                 release_create: Notify::new(),
@@ -724,7 +724,7 @@ mod tests {
         VmIdentity {
             installation_id: "test-installation".into(),
             session_epoch: 1,
-            plugin_id: plugin_id.into(),
+            plugin_id: plugin_id.parse().unwrap(),
             logical_name: logical_name.into(),
         }
     }
@@ -795,7 +795,7 @@ mod tests {
             host.vm_counts
                 .lock()
                 .unwrap()
-                .get(&PluginId::from("failing"))
+                .get(&"failing".parse().unwrap())
                 .copied(),
             Some(1)
         );
@@ -921,7 +921,7 @@ mod tests {
         backend.create(&id, &resolved_config()).await.unwrap();
         backend.vanish_on_next_owner_lookup();
 
-        let plugin_id = PluginId::from("principal");
+        let plugin_id = "principal".parse().unwrap();
         let result = authorize_backend_vm(&backend, &id, &plugin_id, || Ok(())).await;
 
         assert!(matches!(result, Err(vm::VmError::NoSuchVm)));

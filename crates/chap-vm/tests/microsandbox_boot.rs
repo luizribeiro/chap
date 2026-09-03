@@ -27,7 +27,7 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
     let identity = VmIdentity {
         installation_id: format!("chap-microsandbox-e2e-{nonce}"),
         session_epoch: 1,
-        plugin_id: "microsandbox-e2e".into(),
+        plugin_id: "microsandbox-e2e".parse().unwrap(),
         logical_name: "alpine".into(),
     };
     let config = VmConfig {

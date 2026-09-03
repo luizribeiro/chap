@@ -54,7 +54,7 @@ async fn real_context_plugins_use_configured_channels_without_reaching_history()
     ])
     .await;
     let session = agent
-        .session(SessionOptions::new("fixture-provider".into()))
+        .session(SessionOptions::new("fixture-provider".parse().unwrap()))
         .await
         .unwrap();
 
@@ -81,7 +81,7 @@ async fn hanging_real_context_plugin_fails_session_creation_at_the_deadline() {
 
     let error = tokio::time::timeout(
         context_deadline + Duration::from_secs(5),
-        agent.session(SessionOptions::new("fixture-provider".into())),
+        agent.session(SessionOptions::new("fixture-provider".parse().unwrap())),
     )
     .await
     .expect("context call did not respect its assembly deadline")
@@ -124,7 +124,7 @@ async fn preserves_a_context_plugin_wire_error_at_the_host_boundary() {
         start_agent([context_plugin("failing-context", json!({ "error": true }))]).await;
 
     let error = agent
-        .session(SessionOptions::new("fixture-provider".into()))
+        .session(SessionOptions::new("fixture-provider".parse().unwrap()))
         .await
         .err()
         .expect("the failing context plugin unexpectedly created a session");
@@ -145,7 +145,7 @@ async fn session_creation_reports_an_unconfigured_provider() {
     let (agent, _directory) = start_agent([]).await;
 
     let error = agent
-        .session(SessionOptions::new("missing-provider".into()))
+        .session(SessionOptions::new("missing-provider".parse().unwrap()))
         .await
         .err()
         .expect("an unconfigured provider should fail session creation");
@@ -185,7 +185,10 @@ async fn start_agent(
 
     let builder = super::load_test_builder(&config_path);
     for id in plugins.keys() {
-        builder.approve_plugin(&id.as_str().into()).await.unwrap();
+        builder
+            .approve_plugin(&id.as_str().parse().unwrap())
+            .await
+            .unwrap();
     }
     (builder.start().await.unwrap(), directory)
 }

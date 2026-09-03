@@ -200,7 +200,7 @@ mod tests {
     fn manifest(scopes: &[&str], digest_byte: char) -> ConsentManifest {
         let fingerprint = consent_record("example", digest_byte).request_digest;
         ConsentManifest {
-            plugin_id: "example".into(),
+            plugin_id: "example".parse().unwrap(),
             plugin_label: "Example provider".to_owned(),
             request_digest: fingerprint,
             component_digest: format!("sha256:{}", digest_byte.to_string().repeat(64)),
