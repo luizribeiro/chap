@@ -404,6 +404,25 @@ mod tests {
     }
 
     #[test]
+    fn rejects_an_invalid_plugin_id() {
+        let error = load_config(
+            r#"{
+                "plugins": {
+                    "bad/id": {
+                        "component": "plugin.wasm"
+                    }
+                }
+            }"#,
+        )
+        .unwrap_err();
+
+        let LoadError::ParseConfig { source, .. } = error else {
+            panic!("expected config parse failure");
+        };
+        assert!(source.to_string().contains("bad/id"));
+    }
+
+    #[test]
     fn rejects_top_level_plugin_execution() {
         let error = load_config(
             r#"{
