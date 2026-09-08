@@ -7,7 +7,9 @@ use std::{num::NonZeroUsize, time::Duration};
 
 const DEFAULT_PLUGIN_FUEL: u64 = 25_000_000;
 const DEFAULT_ADMISSION_DEADLINE_MS: u64 = 30_000;
-const DEFAULT_PROVIDER_DEADLINE_MS: u64 = 120_000;
+const DEFAULT_PROVIDER_DEADLINE_MS: u64 = 600_000;
+const DEFAULT_HTTP_REQUEST_TIMEOUT_CEILING_MS: u64 = 300_000;
+const MAX_HTTP_REQUEST_TIMEOUT_CEILING_MS: u64 = 600_000;
 const DEFAULT_TOOLS_DEADLINE_MS: u64 = 30_000;
 const DEFAULT_CONTEXT_DEADLINE_MS: u64 = 10_000;
 const MAX_PLUGIN_FUEL: u64 = 1_000_000_000;
@@ -22,9 +24,42 @@ pub(crate) struct AgentSettings {
     tool_execution: ToolExecutionSettings,
     #[serde(default)]
     budgets: PluginBudgetOverrides,
+    #[serde(default)]
+    http: HttpSettings,
     exec: Option<Value>,
     state: Option<Value>,
     vm: Option<Value>,
+}
+
+/// Host ceiling for every plugin HTTP request, independent of invocation budgets.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct HttpSettings {
+    request_timeout_ceiling_ms: HttpRequestTimeoutCeilingMs,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HttpRequestTimeoutCeilingMs(u64);
+
+impl Default for HttpRequestTimeoutCeilingMs {
+    fn default() -> Self {
+        Self(DEFAULT_HTTP_REQUEST_TIMEOUT_CEILING_MS)
+    }
+}
+
+impl<'de> Deserialize<'de> for HttpRequestTimeoutCeilingMs {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_bounded_nonzero(
+            deserializer,
+            "request_timeout_ceiling_ms",
+            MAX_HTTP_REQUEST_TIMEOUT_CEILING_MS,
+            "600,000 milliseconds (10 minutes)",
+        )
+        .map(Self)
+    }
 }
 
 /// Resolved execution budgets shared by every configured plugin.
@@ -73,6 +108,10 @@ pub(crate) struct ToolExecutionSettings {
 impl Config {
     pub(crate) fn tool_execution(&self) -> ToolExecutionSettings {
         self.agent.tool_execution
+    }
+
+    pub(crate) fn http_request_timeout_ceiling(&self) -> Duration {
+        Duration::from_millis(self.agent.http.request_timeout_ceiling_ms.0)
     }
 
     pub(crate) fn plugin_budgets(&self) -> PluginBudgetSettings {
@@ -267,6 +306,67 @@ fn default_max_concurrency() -> NonZeroUsize {
 mod tests {
     use super::*;
     use crate::config::load_config;
+
+    #[test]
+    fn defaults_http_ceiling_when_sections_or_field_are_absent() {
+        for source in ["{}", r#"{"agent":{}}"#, r#"{"agent":{"http":{}}}"#] {
+            let config = load_config(source).unwrap();
+            assert_eq!(
+                config.http_request_timeout_ceiling(),
+                Duration::from_secs(300)
+            );
+            assert_eq!(
+                config.plugin_budgets().provider.deadline,
+                Duration::from_secs(600)
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_http_ceiling_bounds_and_keeps_provider_budget_separate() {
+        for value in [1, 120_000, 360_000, 600_000] {
+            let config = load_config(&format!(
+                r#"{{"agent":{{"http":{{"request_timeout_ceiling_ms":{value}}},"budgets":{{"provider":{{"deadline_ms":390000}}}}}}}}"#
+            )).unwrap();
+            assert_eq!(
+                config.http_request_timeout_ceiling(),
+                Duration::from_millis(value)
+            );
+            assert_eq!(
+                config.plugin_budgets().provider.deadline,
+                Duration::from_secs(390)
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_http_ceilings_and_unknown_fields() {
+        for (http, expected) in [
+            (
+                r#"{"request_timeout_ceiling_ms":0}"#,
+                "must be greater than zero",
+            ),
+            (
+                r#"{"request_timeout_ceiling_ms":600001}"#,
+                "must not exceed 600,000",
+            ),
+            (r#"{"request_timeout_ceiling_ms":-1}"#, "invalid value"),
+            (
+                r#"{"request_timeout_ceiling_ms":18446744073709551616}"#,
+                "invalid type",
+            ),
+            (r#"{"request_timeout_ceiling_ms":1.5}"#, "invalid type"),
+            (r#"{"request_timeout_ceiling_ms":"120000"}"#, "invalid type"),
+            (r#"{"request_timeout_ceiling_ms":null}"#, "invalid type"),
+            (r#"{"timeout_ms":120000}"#, "unknown field `timeout_ms`"),
+        ] {
+            let error = load_config(&format!(r#"{{"agent":{{"http":{http}}}}}"#)).unwrap_err();
+            let LoadError::ParseConfig { source, .. } = error else {
+                panic!("expected config parse failure");
+            };
+            assert!(source.to_string().contains(expected), "{source}");
+        }
+    }
 
     #[test]
     fn defaults_agent_tool_execution_when_sections_are_absent() {

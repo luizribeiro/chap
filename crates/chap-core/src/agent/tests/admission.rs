@@ -2,7 +2,6 @@ use super::{
     super::{
         AgentBuilder, PluginBudgets, host_builder,
         provider::{CompletionBackend, PluginBackend},
-        runtime_limits,
     },
     fixtures::{
         fast_provider_component, fast_tool_component, hanging_provider_component,
@@ -118,22 +117,100 @@ async fn operation_and_cleanup_preserves_the_cleanup_join_error() {
 }
 
 #[test]
-fn guest_http_request_ceiling_uses_its_own_limit() {
+fn guest_http_request_ceiling_is_resolved_from_config_with_other_defaults_preserved() {
+    let directory = tempfile::tempdir().unwrap();
+    let config_path = directory.path().join("chap.json");
+    for (source, expected) in [
+        ("{}", 300_000),
+        (
+            r#"{"agent":{"http":{"request_timeout_ceiling_ms":360000}}}"#,
+            360_000,
+        ),
+    ] {
+        fs::write(&config_path, source).unwrap();
+        let builder = load_test_builder(&config_path);
+        assert_default_runtime_limits_except_timeout_ceiling(
+            builder.runtime_limits,
+            Duration::from_millis(expected),
+        );
+        assert_eq!(
+            builder.budgets.provider.complete.deadline,
+            Duration::from_secs(600)
+        );
+    }
+}
+
+// An impossible memory limit makes forwarding observable without an external
+// HTTP service. Every path must receive the limits resolved by AgentBuilder::load.
+#[tokio::test]
+async fn resolved_runtime_limits_reach_plugin_check_preflight() {
+    let (_directory, mut builder) = builder_with_restrictive_runtime_limits();
+    let error = builder.check_plugins().await.unwrap_err();
+    assert_runtime_limit_refusal(error);
+    builder.runtime_limits.max_memory_bytes = RuntimeLimits::default().max_memory_bytes;
+    assert_eq!(builder.check_plugins().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn resolved_runtime_limits_reach_unapproved_plugin_preflight() {
+    let (_directory, builder) = builder_with_restrictive_runtime_limits();
+    let error = builder.start().await.err().expect("preflight must fail");
+    assert_runtime_limit_refusal(error);
+}
+
+#[tokio::test]
+async fn resolved_runtime_limits_reach_approved_plugin_admission() {
+    let (_directory, builder) = builder_with_restrictive_runtime_limits();
+    builder.approve_plugin(&plugin_id("example")).await.unwrap();
+    let error = builder.start().await.err().expect("admission must fail");
+    assert_runtime_limit_refusal(error);
+}
+
+fn builder_with_restrictive_runtime_limits() -> (tempfile::TempDir, AgentBuilder) {
+    let directory = tempfile::tempdir().unwrap();
+    fs::write(
+        directory.path().join("provider.wasm"),
+        provider_component("example.provider"),
+    )
+    .unwrap();
+    let config_path = directory.path().join("chap.json");
+    fs::write(
+        &config_path,
+        r#"{
+        "agent": {"http": {"request_timeout_ceiling_ms": 360000}},
+        "plugins": {"example": {"component": "provider.wasm"}}
+    }"#,
+    )
+    .unwrap();
+    let mut builder = load_test_builder(&config_path);
     assert_default_runtime_limits_except_timeout_ceiling(
-        runtime_limits(),
-        super::super::GUEST_HTTP_REQUEST_CEILING,
+        builder.runtime_limits,
+        Duration::from_secs(360),
     );
+    builder.runtime_limits.max_memory_bytes = 0;
+    (directory, builder)
+}
+
+fn assert_runtime_limit_refusal(error: StartError) {
+    let refusal = only_refusal(error);
+    let PluginRefusalReason::ComponentLoad { source } = refusal.reason else {
+        panic!("expected runtime-limit failure, got {refusal:?}");
+    };
+    let ConsentError::LoadPlugin { source, .. } = *source else {
+        panic!("expected plugin-load failure");
+    };
+    assert!(source.to_string().contains("memory"), "{source}");
 }
 
 #[test]
-fn default_call_budgets_preserve_existing_bounds() {
+fn default_call_budgets_use_ten_minutes_for_provider_and_preserve_other_bounds() {
     let budgets = PluginBudgets::default();
 
     assert_eq!(
         budgets.provider.complete,
         CallBudget {
             fuel: 25_000_000,
-            deadline: Duration::from_secs(120),
+            deadline: Duration::from_secs(600),
         }
     );
     assert_eq!(
@@ -176,6 +253,7 @@ fn assert_default_runtime_limits_except_timeout_ceiling(
     assert_eq!(limits.instantiation_fuel, default.instantiation_fuel);
     assert_eq!(limits.max_memory_bytes, default.max_memory_bytes);
     assert_eq!(limits.max_detached_jobs, default.max_detached_jobs);
+    assert_eq!(limits.max_host_import_calls, default.max_host_import_calls);
 }
 
 #[cfg(not(feature = "exec"))]

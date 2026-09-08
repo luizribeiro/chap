@@ -21,7 +21,6 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
 };
 use thiserror::Error;
 use turn::run_agent_loop;
@@ -36,7 +35,6 @@ mod turn;
 #[path = "vm.rs"]
 mod vm_host;
 
-const GUEST_HTTP_REQUEST_CEILING: Duration = Duration::from_secs(120);
 const MAX_PROVIDER_STEPS_PER_TURN: usize = 64;
 
 #[derive(Debug, Error)]
@@ -307,6 +305,7 @@ pub struct AgentBuilder {
     tls_roots: Option<RootCertStore>,
     tools: ToolRegistry,
     budgets: PluginBudgets,
+    runtime_limits: RuntimeLimits,
 }
 
 /// The consent-free coherence result for one configured plugin.
@@ -333,12 +332,14 @@ impl AgentBuilder {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, LoadError> {
         let config = Config::load(path.as_ref())?;
         let budgets = PluginBudgets::from(config.plugin_budgets());
+        let runtime_limits = runtime_limits(&config);
         Ok(Self {
             config,
             state_dir: None,
             tls_roots: None,
             tools: ToolRegistry::new(),
             budgets,
+            runtime_limits,
         })
     }
 
@@ -429,6 +430,7 @@ impl AgentBuilder {
         let result = Self::preflight_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
             &self.config,
+            &self.runtime_limits,
         )
         .await;
         match (result, resources.cleanup().await) {
@@ -445,12 +447,13 @@ impl AgentBuilder {
     async fn preflight_plugins(
         builder: &mut HostBuilder<()>,
         config: &Config,
+        limits: &RuntimeLimits,
     ) -> Result<Vec<PluginCheck>, StartError> {
         let mut checks = Vec::new();
         let mut refusals = Vec::new();
         for (plugin_id, plugin) in config.plugins() {
             let path = config.component_path(plugin);
-            match Self::preflight_plugin(builder, config, plugin_id, plugin).await {
+            match Self::preflight_plugin(builder, config, plugin_id, plugin, limits).await {
                 Ok(check) => checks.push(check),
                 Err(error) => refusals.push(Self::plugin_refusal(plugin_id, &path, error)?),
             }
@@ -467,11 +470,12 @@ impl AgentBuilder {
         config: &Config,
         plugin_id: &PluginId,
         plugin: &ConfiguredPlugin,
+        limits: &RuntimeLimits,
     ) -> Result<PluginCheck, ConsentError> {
         let path = config.component_path(plugin);
         let prepared = Self::prepare_plugin(builder, config, plugin_id, plugin).await?;
         let operation = builder
-            .preflight(&prepared, &runtime_limits())
+            .preflight(&prepared, limits)
             .await
             .map(|preflight| PluginCheck {
                 plugin_id: plugin_id.clone(),
@@ -681,12 +685,20 @@ impl AgentBuilder {
             tls_roots,
             tools,
             budgets,
+            runtime_limits,
         } = self;
         let builder = host_builder(&config, budgets, compiled_cache, tls_roots)
             .await
             .map_err(StartError::Consent)?;
         let mut resources = StartResources::new(tools, builder);
-        let plugins = match Self::initialize_plugins(&mut resources, &config, &consent).await {
+        let plugins = match Self::initialize_plugins(
+            &mut resources,
+            &config,
+            &consent,
+            &runtime_limits,
+        )
+        .await
+        {
             Ok(plugins) => plugins,
             Err(error) => {
                 return match resources.cleanup().await {
@@ -716,11 +728,13 @@ impl AgentBuilder {
         resources: &mut StartResources,
         config: &Config,
         consent: &ConsentStore,
+        limits: &RuntimeLimits,
     ) -> Result<BTreeMap<PluginId, ActivePlugin>, StartError> {
         let plugins = Self::load_plugins(
             resources.builder.as_mut().expect("uninitialized host"),
             config,
             consent,
+            limits,
         )
         .await?;
         let builder = resources.builder.take().expect("uninitialized host");
@@ -752,12 +766,13 @@ impl AgentBuilder {
         builder: &mut HostBuilder<()>,
         config: &Config,
         consent: &ConsentStore,
+        limits: &RuntimeLimits,
     ) -> Result<BTreeMap<PluginId, ActivePlugin>, StartError> {
         let mut plugins = BTreeMap::new();
         let mut refusals = Vec::new();
 
         for (plugin_id, plugin) in config.plugins() {
-            match Self::load_plugin(builder, config, consent, plugin_id, plugin).await? {
+            match Self::load_plugin(builder, config, consent, plugin_id, plugin, limits).await? {
                 PluginLoad::Admitted(admitted) => {
                     plugins.insert(plugin_id.clone(), admitted);
                 }
@@ -781,6 +796,7 @@ impl AgentBuilder {
         consent: &ConsentStore,
         plugin_id: &PluginId,
         plugin: &ConfiguredPlugin,
+        limits: &RuntimeLimits,
     ) -> Result<PluginLoad, StartError> {
         let path = config.component_path(plugin);
         let prepared = match Self::prepare_plugin(builder, config, plugin_id, plugin).await {
@@ -795,7 +811,7 @@ impl AgentBuilder {
         let acceptance = match prepared.accept_reviewed(record.as_ref()) {
             Ok(acceptance) => acceptance,
             Err(required) => {
-                let refusal = match builder.preflight(&prepared, &runtime_limits()).await {
+                let refusal = match builder.preflight(&prepared, limits).await {
                     Ok(_) => Self::consent_refusal(plugin_id, &path, required),
                     Err(source) => Self::plugin_refusal(
                         plugin_id,
@@ -837,7 +853,7 @@ impl AgentBuilder {
             .map(|role| role.interface)
             .collect();
         let handle = builder
-            .admit(prepared, acceptance, runtime_limits())
+            .admit(prepared, acceptance, *limits)
             .await
             .map_err(|source| ConsentError::LoadPlugin {
                 plugin_id: plugin_id.clone(),
@@ -989,9 +1005,9 @@ impl AgentBuilder {
     }
 }
 
-fn runtime_limits() -> RuntimeLimits {
+fn runtime_limits(config: &Config) -> RuntimeLimits {
     RuntimeLimits {
-        http_request_timeout_ceiling: Some(GUEST_HTTP_REQUEST_CEILING),
+        http_request_timeout_ceiling: Some(config.http_request_timeout_ceiling()),
         ..RuntimeLimits::default()
     }
 }

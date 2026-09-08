@@ -360,6 +360,34 @@ whose tool resolves to sequential makes the whole batch sequential; otherwise
 `agent.tool_execution.max_concurrency` limits the number of calls in flight.
 The limit must be at least 1 and has no fixed upper bound.
 
+### Plugin HTTP timeouts
+
+`agent.http.request_timeout_ceiling_ms` controls the host timeout ceiling for
+HTTP requests from every plugin. It defaults to 300,000 milliseconds and accepts
+integers from 1 through 600,000. Omitted sections or fields retain the default;
+unknown fields are rejected.
+
+```json
+{
+  "agent": {
+    "http": { "request_timeout_ceiling_ms": 360000 },
+    "budgets": { "provider": { "deadline_ms": 390000 } }
+  }
+}
+```
+
+The same ceiling applies during plugin checks, admission preflight, and admitted
+plugin execution. A lower plugin-requested HTTP timeout still takes precedence.
+The HTTP ceiling bounds connection, first-byte, and between-frame inactivity
+timeouts. The provider invocation budget defaults to 600,000 milliseconds and
+bounds the total invocation. Raising the HTTP ceiling does not change
+`agent.budgets.provider.deadline_ms`. For a server that buffers its response,
+waiting for the first response byte includes the server's processing time. This HTTP ceiling is not an overall agent
+turn deadline.
+
+Previously both defaults were 120,000 milliseconds. Set both fields explicitly
+to 120000 to retain those limits.
+
 ### Plugin call budgets
 
 Fuel and wall-clock deadlines are configured agent-wide by plugin role:
@@ -369,7 +397,7 @@ Fuel and wall-clock deadlines are configured agent-wide by plugin role:
   "agent": {
     "budgets": {
       "admission": { "fuel": 25000000, "deadline_ms": 30000 },
-      "provider": { "fuel": 25000000, "deadline_ms": 120000 },
+      "provider": { "fuel": 25000000, "deadline_ms": 600000 },
       "tools": { "fuel": 25000000, "deadline_ms": 30000 },
       "context": { "fuel": 25000000, "deadline_ms": 10000 }
     }
