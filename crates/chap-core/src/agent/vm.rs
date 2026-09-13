@@ -1,7 +1,7 @@
 use std::{format, path::Path, str::FromStr, string::ToString, vec, vec::Vec};
 
 use chap_vm::{
-    host::{EnvVar, MountSpec, OciReference, RequestedVmConfig, VmSettings},
+    host::{EnvVar, MountSpec, OciReference, RequestedVmConfig, VmRef, VmSettings},
     vm::{Egress, InstanceScope, Mount},
 };
 use lockgate::{PluginSubject, ScopedResource};
@@ -37,22 +37,12 @@ impl ScopedResource<Egress> for EgressResource {
 }
 
 pub(super) struct ManagedVm {
-    pub(super) owned_by_caller: bool,
-}
-
-impl ManagedVm {
-    fn scopes(&self) -> Vec<InstanceScope> {
-        if self.owned_by_caller {
-            vec![InstanceScope::CreatedByCaller]
-        } else {
-            vec![]
-        }
-    }
+    pub(super) vm_ref: VmRef,
 }
 
 impl ScopedResource<InstanceScope> for ManagedVm {
     fn scopes_for(&self, _subject: &PluginSubject<'_>) -> Vec<InstanceScope> {
-        self.scopes()
+        vec![InstanceScope::CreatedByCaller]
     }
 }
 
@@ -313,24 +303,6 @@ mod tests {
                 .map(ScopeRepr::canonical)
                 .collect::<Vec<_>>(),
             ["10.0.0.1:443"]
-        );
-    }
-
-    #[test]
-    fn managed_vm_scopes_only_vms_owned_by_the_caller() {
-        assert!(
-            ManagedVm {
-                owned_by_caller: false,
-            }
-            .scopes()
-            .is_empty()
-        );
-        assert_eq!(
-            ManagedVm {
-                owned_by_caller: true,
-            }
-            .scopes(),
-            [InstanceScope::CreatedByCaller]
         );
     }
 

@@ -8,7 +8,7 @@ use chap_vm::host::{
     Backend, ExecOutcome as VmExecOutcome, RequestedVmConfig, VmBackend, VmCommand, VmConfig,
     VmIdentity, VmRef, VmSettings,
 };
-use lockgate::{HostCtx, PermissionDenied, PluginId, PluginSubject};
+use lockgate::{HostCtx, PermissionDenied, PluginId, PluginSubject, ResolveScopedResource};
 use std::{
     collections::HashMap,
     fmt,
@@ -142,6 +142,30 @@ impl<B: VmBackend> VmHost<B> {
             plugin_id: subject.plugin_id().clone(),
             logical_name: logical_name.to_owned(),
         }
+    }
+
+    async fn resolve_owned(
+        &self,
+        subject: &PluginSubject<'_>,
+        name: &str,
+    ) -> Result<ManagedVm, vm::VmError> {
+        let id = self.identity(subject, name);
+        self.resolve_owned_identity(&id, subject.plugin_id()).await
+    }
+
+    async fn resolve_owned_identity(
+        &self,
+        id: &VmIdentity,
+        plugin_id: &PluginId,
+    ) -> Result<ManagedVm, vm::VmError> {
+        let Some(vm_ref) = self.backend.get(id).await? else {
+            // Physical identity includes the caller plugin id, so absence reveals no other VM.
+            return Err(vm::VmError::NoSuchVm);
+        };
+        if self.backend.owner_of(&vm_ref).await?.as_ref() != Some(plugin_id) {
+            return Err(vm::VmError::NoSuchVm);
+        }
+        Ok(ManagedVm { vm_ref })
     }
 
     fn backend_config(&self, requested: RequestedVmConfig) -> Result<VmConfig, vm::VmError> {
@@ -375,51 +399,19 @@ fn decrement_vm_count(counts: &Mutex<HashMap<PluginId, u32>>, plugin_id: &Plugin
     }
 }
 
-impl CapabilityHost {
-    fn authorize_manage(&self, cx: &HostCtx<'_, ()>) -> Result<(), vm::VmError> {
-        cx.require_scoped(
-            chap_vm::vm::MANAGE,
-            &ManagedVm {
-                owned_by_caller: true,
-            },
-        )
-        .map_err(Into::into)
-    }
+impl ResolveScopedResource<chap_vm::vm::InstanceScope, String> for CapabilityHost {
+    type Resource = ManagedVm;
+    type Error = vm::VmError;
 
-    async fn authorize_owned(
-        &self,
-        cx: &HostCtx<'_, ()>,
-        name: &str,
-    ) -> Result<VmRef, vm::VmError> {
-        let id = self.vm.identity(&cx.subject(), name);
-        authorize_backend_vm(
-            self.vm.backend.as_ref(),
-            &id,
-            cx.subject().plugin_id(),
-            || self.authorize_manage(cx),
-        )
-        .await
+    async fn resolve_scoped_resource<'a>(
+        &'a self,
+        subject: &'a PluginSubject<'_>,
+        name: &'a String,
+    ) -> Result<Self::Resource, Self::Error> {
+        self.vm.resolve_owned(subject, name).await
     }
 }
 
-async fn authorize_backend_vm<B: VmBackend>(
-    backend: &B,
-    id: &VmIdentity,
-    plugin_id: &PluginId,
-    authorize: impl FnOnce() -> Result<(), vm::VmError>,
-) -> Result<VmRef, vm::VmError> {
-    let Some(vm) = backend.get(id).await? else {
-        // Physical identity includes the caller plugin id, so absence reveals no other VM.
-        return Err(vm::VmError::NoSuchVm);
-    };
-    if backend.owner_of(&vm).await?.as_ref() != Some(plugin_id) {
-        return Err(vm::VmError::NoSuchVm);
-    }
-    authorize()?;
-    Ok(vm)
-}
-
-// Creation combines three guards, while management needs an async identity lookup first.
 #[lockgate::guarded]
 impl vm::Host for CapabilityHost {
     #[lockgate::no_capability_required(
@@ -441,20 +433,20 @@ impl vm::Host for CapabilityHost {
     }
 
     #[lockgate::no_capability_required(
-        reason = "returns only the caller's own vm by physical identity"
+        reason = "an absent target cannot be expressed as a successful result by the guard"
     )]
     async fn get(
         &mut self,
         cx: HostCtx<'_, ()>,
         name: String,
     ) -> Result<Option<String>, vm::VmError> {
-        let id = self.vm.identity(&cx.subject(), &name);
-        match self.vm.backend.get(&id).await? {
-            None => Ok(None),
-            Some(_) => {
-                self.authorize_manage(&cx)?;
+        match self.vm.resolve_owned(&cx.subject(), &name).await {
+            Ok(vm) => {
+                cx.require_scoped(chap_vm::vm::MANAGE, &vm)?;
                 Ok(Some(name))
             }
+            Err(vm::VmError::NoSuchVm) => Ok(None),
+            Err(error) => Err(error),
         }
     }
 
@@ -476,50 +468,46 @@ impl vm::Host for CapabilityHost {
         Ok(name)
     }
 
-    #[lockgate::no_capability_required(reason = "enforces vm::manage on the caller's own vm")]
+    #[lockgate::requires(permission = chap_vm::vm::MANAGE, target = vm, wire_type = String)]
     async fn exec(
         &mut self,
-        cx: HostCtx<'_, ()>,
-        name: String,
+        _cx: HostCtx<'_, ()>,
+        vm: ManagedVm,
         command: Vec<String>,
         cwd: Option<String>,
         stdin: Option<Vec<u8>>,
         timeout_ms: Option<u64>,
     ) -> Result<vm::ExecResult, vm::VmError> {
-        let vm = self.authorize_owned(&cx, &name).await?;
         self.vm
-            .exec(&vm, command, cwd, stdin, timeout_ms)
+            .exec(&vm.vm_ref, command, cwd, stdin, timeout_ms)
             .await
             .map(Into::into)
     }
 
-    #[lockgate::no_capability_required(reason = "enforces vm::manage on the caller's own vm")]
+    #[lockgate::requires(permission = chap_vm::vm::MANAGE, target = vm, wire_type = String)]
     async fn write_file(
         &mut self,
-        cx: HostCtx<'_, ()>,
-        name: String,
+        _cx: HostCtx<'_, ()>,
+        vm: ManagedVm,
         path: String,
         contents: Vec<u8>,
     ) -> Result<(), vm::VmError> {
-        let vm = self.authorize_owned(&cx, &name).await?;
-        self.vm.write_file(&vm, &path, &contents).await
+        self.vm.write_file(&vm.vm_ref, &path, &contents).await
     }
 
-    #[lockgate::no_capability_required(reason = "enforces vm::manage on the caller's own vm")]
+    #[lockgate::requires(permission = chap_vm::vm::MANAGE, target = vm, wire_type = String)]
     async fn read_file(
         &mut self,
-        cx: HostCtx<'_, ()>,
-        name: String,
+        _cx: HostCtx<'_, ()>,
+        vm: ManagedVm,
         path: String,
     ) -> Result<Vec<u8>, vm::VmError> {
-        let vm = self.authorize_owned(&cx, &name).await?;
-        self.vm.read_file(&vm, &path).await
+        self.vm.read_file(&vm.vm_ref, &path).await
     }
 
-    #[lockgate::no_capability_required(reason = "enforces vm::manage on the caller's own vm")]
-    async fn destroy(&mut self, cx: HostCtx<'_, ()>, name: String) -> Result<(), vm::VmError> {
-        let vm = self.authorize_owned(&cx, &name).await?;
-        self.vm.destroy(cx.subject().plugin_id(), &vm).await
+    #[lockgate::requires(permission = chap_vm::vm::MANAGE, target = vm, wire_type = String)]
+    async fn destroy(&mut self, cx: HostCtx<'_, ()>, vm: ManagedVm) -> Result<(), vm::VmError> {
+        self.vm.destroy(cx.subject().plugin_id(), &vm.vm_ref).await
     }
 }
 
@@ -915,14 +903,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_unknown_logical_name_does_not_resolve() {
+        let backend = Arc::new(ControlledBackend::new(&[], &[]));
+        let host = test_host(backend, 1).await;
+        let plugin_id = "principal".parse().unwrap();
+
+        let result = host
+            .resolve_owned_identity(&identity("principal", "missing"), &plugin_id)
+            .await;
+
+        assert!(matches!(result, Err(vm::VmError::NoSuchVm)));
+    }
+
+    #[tokio::test]
+    async fn a_vm_created_by_the_caller_resolves_to_the_backend_reference() {
+        let backend = Arc::new(ControlledBackend::new(&[], &[]));
+        let host = test_host(Arc::clone(&backend), 1).await;
+        let id = identity("principal", "owned");
+        let expected = backend.create(&id, &resolved_config()).await.unwrap();
+        let plugin_id = "principal".parse().unwrap();
+
+        let managed = host.resolve_owned_identity(&id, &plugin_id).await.unwrap();
+
+        assert_eq!(managed.vm_ref, expected);
+    }
+
+    #[tokio::test]
     async fn a_vm_that_vanishes_during_ownership_lookup_is_not_found() {
-        let backend = ControlledBackend::new(&[], &[]);
+        let backend = Arc::new(ControlledBackend::new(&[], &[]));
+        let host = test_host(Arc::clone(&backend), 1).await;
         let id = identity("principal", "vanishing");
         backend.create(&id, &resolved_config()).await.unwrap();
         backend.vanish_on_next_owner_lookup();
 
         let plugin_id = "principal".parse().unwrap();
-        let result = authorize_backend_vm(&backend, &id, &plugin_id, || Ok(())).await;
+        let result = host.resolve_owned_identity(&id, &plugin_id).await;
 
         assert!(matches!(result, Err(vm::VmError::NoSuchVm)));
     }
