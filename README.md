@@ -331,11 +331,11 @@ stack must be compiled in with Cargo's `vm` feature or the `chap-vm` Nix
 package. A build without it rejects `agent.vm` at startup and refuses plugins
 that require VM permissions at admission.
 
-The real, booting backend test is opt-in because it needs the host hypervisor
-and network access:
+The real, booting backend test is marked ignored because it needs the host
+hypervisor and network access:
 
 ```console
-CHAP_MICROSANDBOX_E2E=1 cargo test -p chap-vm --features host,microsandbox
+cargo test -p chap-vm --features host,microsandbox -- --ignored
 ```
 
 ### Tool execution

@@ -12,12 +12,8 @@ const HOST_CONTENTS: &[u8] = b"hello from the host bind mount\n";
 const GUEST_CONTENTS: &[u8] = b"written through the guest filesystem";
 
 #[tokio::test]
+#[ignore = "boots a microsandbox vm and pulls docker.io/library/alpine:3.20; run with -- --ignored"]
 async fn boots_alpine_and_exercises_the_backend_contract() {
-    if std::env::var("CHAP_MICROSANDBOX_E2E").as_deref() != Ok("1") {
-        println!("CHAP_MICROSANDBOX_E2E is not 1; skipping microsandbox boot test");
-        return;
-    }
-
     let host_dir = tempfile::tempdir().unwrap();
     std::fs::write(host_dir.path().join("known.txt"), HOST_CONTENTS).unwrap();
     let nonce = SystemTime::now()
