@@ -103,8 +103,8 @@ impl VmBackend for MicrosandboxBackend {
         let timeout = Duration::from_millis(
             command
                 .timeout_ms
-                .unwrap_or(self.settings.max_exec_ms)
-                .min(self.settings.max_exec_ms),
+                .unwrap_or(self.settings.calls.exec_timeout_ceiling_ms)
+                .min(self.settings.calls.exec_timeout_ceiling_ms),
         );
         let cwd = command.cwd;
         let stdin = command.stdin;
@@ -125,7 +125,7 @@ impl VmBackend for MicrosandboxBackend {
 
         match tokio::time::timeout(
             timeout,
-            collect_exec(&mut handle, self.settings.max_output_bytes),
+            collect_exec(&mut handle, self.settings.calls.exec_max_output_bytes),
         )
         .await
         {
@@ -134,7 +134,7 @@ impl VmBackend for MicrosandboxBackend {
                 let _ = handle.kill().await;
                 let _ = tokio::time::timeout(
                     EXEC_KILL_WAIT,
-                    collect_exec(&mut handle, self.settings.max_output_bytes),
+                    collect_exec(&mut handle, self.settings.calls.exec_max_output_bytes),
                 )
                 .await;
                 Err(VmError::TimedOut)
@@ -295,7 +295,7 @@ fn sandbox_builder(id: &VmIdentity, cfg: &VmConfig) -> Result<SandboxBuilder, Vm
         .cpus(cpus)
         .memory(memory)
         .detached(true)
-        .max_duration(cfg.max_duration_ms.div_ceil(1_000))
+        .max_duration(cfg.max_lifetime_ms.div_ceil(1_000))
         .idle_timeout(cfg.idle_timeout_ms.div_ceil(1_000))
         .label(INSTALLATION_LABEL, &id.installation_id)
         .label(EPOCH_LABEL, id.session_epoch.to_string())
@@ -373,7 +373,7 @@ async fn destroy_handle(handle: SandboxHandle) -> Result<(), VmError> {
 
 async fn collect_exec(
     handle: &mut microsandbox::ExecHandle,
-    max_output_bytes: u64,
+    output_limit: u64,
 ) -> Result<ExecOutcome, VmError> {
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -384,10 +384,10 @@ async fn collect_exec(
         match event {
             ExecEvent::Started { .. } => {}
             ExecEvent::Stdout(bytes) => {
-                truncated |= append_capped(&mut stdout, &bytes, &mut captured, max_output_bytes);
+                truncated |= append_capped(&mut stdout, &bytes, &mut captured, output_limit);
             }
             ExecEvent::Stderr(bytes) => {
-                truncated |= append_capped(&mut stderr, &bytes, &mut captured, max_output_bytes);
+                truncated |= append_capped(&mut stderr, &bytes, &mut captured, output_limit);
             }
             ExecEvent::Exited { code } => {
                 return Ok(ExecOutcome {
@@ -573,8 +573,8 @@ mod tests {
     }
 
     #[test]
-    fn max_output_bytes_defaults_to_sixty_four_kibibytes() {
-        assert_eq!(VmSettings::default().max_output_bytes, 64 * 1024);
+    fn exec_output_limit_defaults_to_sixty_four_kibibytes() {
+        assert_eq!(VmSettings::default().calls.exec_max_output_bytes, 64 * 1024);
     }
 
     fn policy(scopes: &[&str]) -> Value {

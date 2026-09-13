@@ -87,7 +87,7 @@ impl<B: VmBackend> VmHost<B> {
         session_epoch: u64,
     ) -> Result<Self, chap_vm::host::VmError> {
         if let Err(error) = match tokio::time::timeout(
-            Duration::from_millis(settings.max_exec_ms),
+            Duration::from_millis(settings.calls.exec_timeout_ceiling_ms),
             backend.reap(&installation_id, session_epoch),
         )
         .await
@@ -102,7 +102,7 @@ impl<B: VmBackend> VmHost<B> {
                 backend: Arc::clone(&backend),
                 installation_id: installation_id.clone(),
                 session_epoch,
-                timeout: Duration::from_millis(settings.max_exec_ms),
+                timeout: Duration::from_millis(settings.calls.exec_timeout_ceiling_ms),
                 shutdown_on_drop: true,
             }),
             backend,
@@ -124,7 +124,7 @@ impl<B: VmBackend> VmHost<B> {
                 backend: Arc::clone(&backend),
                 installation_id: installation_id.clone(),
                 session_epoch,
-                timeout: Duration::from_millis(settings.max_exec_ms),
+                timeout: Duration::from_millis(settings.calls.exec_timeout_ceiling_ms),
                 shutdown_on_drop: false,
             }),
             backend,
@@ -179,19 +179,19 @@ impl<B: VmBackend> VmHost<B> {
             mounts: requested.mounts,
             egress: requested.egress,
             env: requested.env,
-            cpus: self.settings.default_cpus,
-            memory_mb: self.settings.default_memory_mb,
-            max_duration_ms: self.settings.max_duration_ms,
-            idle_timeout_ms: self.settings.idle_timeout_ms,
+            cpus: self.settings.instance.cpus,
+            memory_mb: self.settings.instance.memory_mb,
+            max_lifetime_ms: self.settings.instance.max_lifetime_ms,
+            idle_timeout_ms: self.settings.instance.idle_timeout_ms,
             config_hash,
         })
     }
 
     fn enforce_vm_limit(&self, count: u32) -> Result<(), vm::VmError> {
-        if count >= self.settings.max_vms_per_plugin {
+        if count >= self.settings.limits.max_vms_per_plugin {
             Err(vm::VmError::Denied(format!(
                 "maximum of {} VMs per plugin reached",
-                self.settings.max_vms_per_plugin
+                self.settings.limits.max_vms_per_plugin
             )))
         } else {
             Ok(())
@@ -221,7 +221,12 @@ impl<B: VmBackend> VmHost<B> {
     where
         F: Future<Output = Result<T, chap_vm::host::VmError>>,
     {
-        match tokio::time::timeout(Duration::from_millis(self.settings.max_exec_ms), call).await {
+        match tokio::time::timeout(
+            Duration::from_millis(self.settings.calls.exec_timeout_ceiling_ms),
+            call,
+        )
+        .await
+        {
             Ok(result) => result.map_err(Into::into),
             Err(_) => Err(vm::VmError::TimedOut),
         }
@@ -273,8 +278,8 @@ impl<B: VmBackend> VmHost<B> {
     ) -> Result<VmExecOutcome, vm::VmError> {
         let timeout_ms = Some(
             timeout_ms
-                .unwrap_or(self.settings.max_exec_ms)
-                .min(self.settings.max_exec_ms),
+                .unwrap_or(self.settings.calls.exec_timeout_ceiling_ms)
+                .min(self.settings.calls.exec_timeout_ceiling_ms),
         );
         self.backend
             .exec(
@@ -292,7 +297,7 @@ impl<B: VmBackend> VmHost<B> {
 
     async fn read_file(&self, vm: &VmRef, path: &str) -> Result<Vec<u8>, vm::VmError> {
         self.backend
-            .read_file(vm, path, self.settings.max_read_bytes)
+            .read_file(vm, path, self.settings.calls.read_file_max_bytes)
             .await
             .map_err(Into::into)
     }
@@ -537,7 +542,7 @@ impl From<VmExecOutcome> for vm::ExecResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chap_vm::host::{EnvVar, MountSpec, OciReference, ResolvedImage};
+    use chap_vm::host::{EnvVar, MountSpec, OciReference, ResolvedImage, VmCallSettings, VmLimits};
     use std::{
         collections::HashSet,
         io::{self, Write},
@@ -696,9 +701,12 @@ mod tests {
         VmHost::with_backend(
             backend,
             VmSettings {
-                max_vms_per_plugin,
-                max_exec_ms: 1_000,
                 registries: vec!["ghcr.io".into()],
+                limits: VmLimits { max_vms_per_plugin },
+                calls: VmCallSettings {
+                    exec_timeout_ceiling_ms: 1_000,
+                    ..VmCallSettings::default()
+                },
                 ..VmSettings::default()
             },
             "test-installation".into(),
@@ -740,7 +748,7 @@ mod tests {
             env: Vec::new(),
             cpus: 1,
             memory_mb: 512,
-            max_duration_ms: 3_600_000,
+            max_lifetime_ms: 3_600_000,
             idle_timeout_ms: 300_000,
             config_hash: "test-config".into(),
         }
@@ -790,7 +798,7 @@ mod tests {
 
         let timeout_backend = Arc::new(ControlledBackend::new(&["timeout"], &[]));
         let mut timeout_host = test_host(Arc::clone(&timeout_backend), 1).await;
-        timeout_host.settings.max_exec_ms = 10;
+        timeout_host.settings.calls.exec_timeout_ceiling_ms = 10;
         assert!(matches!(
             timeout_host
                 .create(&identity("timeout", "first"), requested_config())
@@ -825,8 +833,11 @@ mod tests {
         let host = VmHost::with_backend(
             backend,
             VmSettings {
-                max_exec_ms: 1_000,
                 registries: vec!["ghcr.io".into()],
+                calls: VmCallSettings {
+                    exec_timeout_ceiling_ms: 1_000,
+                    ..VmCallSettings::default()
+                },
                 ..VmSettings::default()
             },
             "test-installation".into(),
@@ -868,8 +879,11 @@ mod tests {
         let host = VmHost::with_backend(
             Arc::clone(&backend),
             VmSettings {
-                max_exec_ms: 1_000,
                 registries: vec!["ghcr.io".into()],
+                calls: VmCallSettings {
+                    exec_timeout_ceiling_ms: 1_000,
+                    ..VmCallSettings::default()
+                },
                 ..VmSettings::default()
             },
             "test-installation".into(),

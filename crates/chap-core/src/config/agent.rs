@@ -716,7 +716,7 @@ mod tests {
         let config: Config = serde_json::from_str(
             r#"{
                 "agent": {
-                    "vm": { "max_vms_per_plugin": 3 }
+                    "vm": { "limits": { "max_vms_per_plugin": 3 } }
                 }
             }"#,
         )
@@ -735,23 +735,46 @@ mod tests {
         let config: Config = serde_json::from_str(
             r#"{
                 "agent": {
-                    "vm": { "max_vms_per_plugin": 3 }
+                    "vm": {
+                        "registries": ["ghcr.io"],
+                        "limits": { "max_vms_per_plugin": 3 },
+                        "instance": {
+                            "cpus": 2,
+                            "memory_mb": 1024,
+                            "max_lifetime_ms": 7200000,
+                            "idle_timeout_ms": 600000
+                        },
+                        "calls": {
+                            "exec_timeout_ceiling_ms": 30000,
+                            "exec_max_output_bytes": 32768,
+                            "read_file_max_bytes": 1048576
+                        }
+                    }
                 }
             }"#,
         )
         .unwrap();
 
-        assert_eq!(config.vm_settings().unwrap().max_vms_per_plugin, 3);
+        let vm = config.vm_settings().unwrap();
+        assert_eq!(vm.registries, ["ghcr.io"]);
+        assert_eq!(vm.limits.max_vms_per_plugin, 3);
+        assert_eq!(vm.instance.cpus, 2);
+        assert_eq!(vm.instance.memory_mb, 1024);
+        assert_eq!(vm.instance.max_lifetime_ms, 7_200_000);
+        assert_eq!(vm.instance.idle_timeout_ms, 600_000);
+        assert_eq!(vm.calls.exec_timeout_ceiling_ms, 30_000);
+        assert_eq!(vm.calls.exec_max_output_bytes, 32_768);
+        assert_eq!(vm.calls.read_file_max_bytes, 1_048_576);
     }
 
     #[cfg(feature = "vm")]
     #[test]
     fn defaults_vm_settings_when_the_section_is_absent() {
         let config: Config = serde_json::from_str("{}").unwrap();
-        let vm = config.vm_settings().unwrap();
-
-        assert_eq!(vm.max_vms_per_plugin, 8);
-        assert_eq!(vm.default_memory_mb, 512);
+        assert_eq!(
+            config.vm_settings().unwrap(),
+            chap_vm::host::VmSettings::default()
+        );
     }
 
     #[cfg(feature = "vm")]
@@ -760,7 +783,7 @@ mod tests {
         let config: Config = serde_json::from_str(
             r#"{
                 "agent": {
-                    "vm": { "max_vms_per_plugin": "many" }
+                    "vm": { "limits": { "max_vms_per_plugin": "many" } }
                 }
             }"#,
         )

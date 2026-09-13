@@ -158,7 +158,7 @@ pub struct VmConfig {
     pub env: Vec<EnvVar>,
     pub cpus: u32,
     pub memory_mb: u64,
-    pub max_duration_ms: u64,
+    pub max_lifetime_ms: u64,
     pub idle_timeout_ms: u64,
     pub config_hash: String,
 }
@@ -321,70 +321,65 @@ pub struct ResolvedImage {
     pub digest: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct VmSettings {
-    pub max_vms_per_plugin: u32,
-    pub max_read_bytes: u64,
-    pub max_exec_ms: u64,
-    pub max_output_bytes: u64,
     pub registries: Vec<String>,
-    pub default_cpus: u32,
-    pub default_memory_mb: u64,
-    pub max_duration_ms: u64,
-    pub idle_timeout_ms: u64,
+    pub limits: VmLimits,
+    pub instance: VmInstanceSettings,
+    pub calls: VmCallSettings,
 }
 
-impl Default for VmSettings {
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct VmLimits {
+    pub max_vms_per_plugin: u32,
+}
+
+impl Default for VmLimits {
     fn default() -> Self {
         Self {
-            max_vms_per_plugin: default_max_vms_per_plugin(),
-            max_read_bytes: default_max_read_bytes(),
-            max_exec_ms: default_max_exec_ms(),
-            max_output_bytes: default_max_output_bytes(),
-            registries: default_registries(),
-            default_cpus: default_cpus(),
-            default_memory_mb: default_memory_mb(),
-            max_duration_ms: default_max_duration_ms(),
-            idle_timeout_ms: default_idle_timeout_ms(),
+            max_vms_per_plugin: 8,
         }
     }
 }
 
-pub const fn default_max_vms_per_plugin() -> u32 {
-    8
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct VmInstanceSettings {
+    pub cpus: u32,
+    pub memory_mb: u64,
+    pub max_lifetime_ms: u64,
+    pub idle_timeout_ms: u64,
 }
 
-pub const fn default_max_read_bytes() -> u64 {
-    16 * 1024 * 1024
+impl Default for VmInstanceSettings {
+    fn default() -> Self {
+        Self {
+            cpus: 1,
+            memory_mb: 512,
+            max_lifetime_ms: 3_600_000,
+            idle_timeout_ms: 300_000,
+        }
+    }
 }
 
-pub const fn default_max_exec_ms() -> u64 {
-    120_000
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct VmCallSettings {
+    pub exec_timeout_ceiling_ms: u64,
+    pub exec_max_output_bytes: u64,
+    pub read_file_max_bytes: u64,
 }
 
-pub const fn default_max_output_bytes() -> u64 {
-    64 * 1024
-}
-
-pub fn default_registries() -> Vec<String> {
-    Vec::new()
-}
-
-pub const fn default_cpus() -> u32 {
-    1
-}
-
-pub const fn default_memory_mb() -> u64 {
-    512
-}
-
-pub const fn default_max_duration_ms() -> u64 {
-    3_600_000
-}
-
-pub const fn default_idle_timeout_ms() -> u64 {
-    300_000
+impl Default for VmCallSettings {
+    fn default() -> Self {
+        Self {
+            exec_timeout_ceiling_ms: 120_000,
+            exec_max_output_bytes: 64 * 1024,
+            read_file_max_bytes: 16 * 1024 * 1024,
+        }
+    }
 }
 
 fn parse_registry(value: &str) -> Option<String> {
@@ -503,7 +498,8 @@ mod tests {
     use std::{format, vec};
 
     use super::{
-        EnvVar, MountSpec, OciReference, RequestedVmConfig, VmError, VmIdentity, VmSettings,
+        EnvVar, MountSpec, OciReference, RequestedVmConfig, VmCallSettings, VmError, VmIdentity,
+        VmInstanceSettings, VmLimits, VmSettings,
     };
     use crate::vm::Egress;
 
@@ -713,16 +709,22 @@ mod tests {
         assert_eq!(
             VmSettings::default(),
             VmSettings {
-                max_vms_per_plugin: 8,
-                max_read_bytes: 16 * 1024 * 1024,
-                max_exec_ms: 120_000,
-                max_output_bytes: 64 * 1024,
                 registries: vec![],
-                default_cpus: 1,
-                default_memory_mb: 512,
-                max_duration_ms: 3_600_000,
-                idle_timeout_ms: 300_000,
+                limits: VmLimits::default(),
+                instance: VmInstanceSettings::default(),
+                calls: VmCallSettings::default(),
             }
+        );
+        assert_eq!(VmLimits::default().max_vms_per_plugin, 8);
+        assert_eq!(VmInstanceSettings::default().cpus, 1);
+        assert_eq!(VmInstanceSettings::default().memory_mb, 512);
+        assert_eq!(VmInstanceSettings::default().max_lifetime_ms, 3_600_000);
+        assert_eq!(VmInstanceSettings::default().idle_timeout_ms, 300_000);
+        assert_eq!(VmCallSettings::default().exec_timeout_ceiling_ms, 120_000);
+        assert_eq!(VmCallSettings::default().exec_max_output_bytes, 64 * 1024);
+        assert_eq!(
+            VmCallSettings::default().read_file_max_bytes,
+            16 * 1024 * 1024
         );
     }
 }

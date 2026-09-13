@@ -3,8 +3,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chap_vm::host::{
-    Backend as MicrosandboxBackend, MountSpec, ResolvedImage, VmBackend, VmCommand, VmConfig,
-    VmError, VmIdentity, VmSettings,
+    Backend as MicrosandboxBackend, MountSpec, ResolvedImage, VmBackend, VmCallSettings, VmCommand,
+    VmConfig, VmError, VmIdentity, VmSettings,
 };
 use chap_vm::vm::Egress;
 
@@ -47,12 +47,15 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
         env: vec![],
         cpus: 1,
         memory_mb: 256,
-        max_duration_ms: 60_000,
+        max_lifetime_ms: 60_000,
         idle_timeout_ms: 30_000,
         config_hash: "microsandbox-e2e-v1".into(),
     };
     let settings = VmSettings {
-        max_exec_ms: 5_000,
+        calls: VmCallSettings {
+            exec_timeout_ceiling_ms: 5_000,
+            ..VmCallSettings::default()
+        },
         ..VmSettings::default()
     };
     let backend = MicrosandboxBackend::new(&settings);
@@ -133,7 +136,10 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
     println!("microsandbox boot: reap removed the sandbox");
 
     let network_backend = MicrosandboxBackend::new(&VmSettings {
-        max_exec_ms: 60_000,
+        calls: VmCallSettings {
+            exec_timeout_ceiling_ms: 60_000,
+            ..VmCallSettings::default()
+        },
         ..VmSettings::default()
     });
     let dns_identity = VmIdentity {
@@ -144,7 +150,7 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
     dns_config.mounts.clear();
     dns_config.egress = egress(&["0.0.0.0/0:443", "0.0.0.0/0:80", "0.0.0.0/0:53"]);
     dns_config.config_hash = "microsandbox-e2e-dns-v1".into();
-    dns_config.max_duration_ms = 120_000;
+    dns_config.max_lifetime_ms = 120_000;
     let dns_vm = network_backend
         .create(&dns_identity, &dns_config)
         .await

@@ -191,7 +191,7 @@ mod tests {
             env: vec![],
             cpus: 1,
             memory_mb: 512,
-            max_duration_ms: 3_600_000,
+            max_lifetime_ms: 3_600_000,
             idle_timeout_ms: 300_000,
             config_hash: hash.into(),
         }

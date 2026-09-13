@@ -192,25 +192,30 @@ OCI registries that plugins may use:
 {
   "agent": {
     "vm": {
-      "max_vms_per_plugin": 8,
-      "max_read_bytes": 16777216,
-      "max_exec_ms": 120000,
-      "max_output_bytes": 65536,
       "registries": [],
-      "default_cpus": 1,
-      "default_memory_mb": 512,
-      "max_duration_ms": 3600000,
-      "idle_timeout_ms": 300000
+      "limits": { "max_vms_per_plugin": 8 },
+      "instance": {
+        "cpus": 1,
+        "memory_mb": 512,
+        "max_lifetime_ms": 3600000,
+        "idle_timeout_ms": 300000
+      },
+      "calls": {
+        "exec_timeout_ceiling_ms": 120000,
+        "exec_max_output_bytes": 65536,
+        "read_file_max_bytes": 16777216
+      }
     }
   }
 }
 ```
 
-The values shown are the defaults. `max_vms_per_plugin` bounds each plugin
-instance separately. `max_read_bytes` caps one file read; `max_exec_ms` caps one
-command; and `max_output_bytes` caps stdout and stderr together while the host
-streams them. New VMs receive `default_cpus` and `default_memory_mb`, and the
-duration and idle settings bound their lifetime.
+The values shown are the defaults. `limits.max_vms_per_plugin` bounds each
+plugin instance separately. `instance` defines the CPU count, memory, maximum
+lifetime, and idle timeout that every new VM receives. `calls` bounds single
+host calls: `exec_timeout_ceiling_ms` is both the default and the maximum for a
+command's `timeout-ms`, `exec_max_output_bytes` caps stdout and stderr together,
+and `read_file_max_bytes` caps one file read.
 
 `registries` is empty by default, so even a fully qualified image is denied
 until the operator lists its registry. In particular, add `docker.io` to pull
