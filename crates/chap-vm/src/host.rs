@@ -367,6 +367,8 @@ impl Default for VmInstanceSettings {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct VmCallSettings {
+    pub create_timeout_ms: u64,
+    pub destroy_timeout_ms: u64,
     pub exec_timeout_ceiling_ms: u64,
     pub exec_max_output_bytes: u64,
     pub read_file_max_bytes: u64,
@@ -375,6 +377,8 @@ pub struct VmCallSettings {
 impl Default for VmCallSettings {
     fn default() -> Self {
         Self {
+            create_timeout_ms: 600_000,
+            destroy_timeout_ms: 60_000,
             exec_timeout_ceiling_ms: 120_000,
             exec_max_output_bytes: 64 * 1024,
             read_file_max_bytes: 16 * 1024 * 1024,
@@ -720,6 +724,8 @@ mod tests {
         assert_eq!(VmInstanceSettings::default().memory_mb, 512);
         assert_eq!(VmInstanceSettings::default().max_lifetime_ms, 3_600_000);
         assert_eq!(VmInstanceSettings::default().idle_timeout_ms, 300_000);
+        assert_eq!(VmCallSettings::default().create_timeout_ms, 600_000);
+        assert_eq!(VmCallSettings::default().destroy_timeout_ms, 60_000);
         assert_eq!(VmCallSettings::default().exec_timeout_ceiling_ms, 120_000);
         assert_eq!(VmCallSettings::default().exec_max_output_bytes, 64 * 1024);
         assert_eq!(

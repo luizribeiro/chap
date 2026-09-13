@@ -745,6 +745,8 @@ mod tests {
                             "idle_timeout_ms": 600000
                         },
                         "calls": {
+                            "create_timeout_ms": 180000,
+                            "destroy_timeout_ms": 45000,
                             "exec_timeout_ceiling_ms": 30000,
                             "exec_max_output_bytes": 32768,
                             "read_file_max_bytes": 1048576
@@ -762,6 +764,8 @@ mod tests {
         assert_eq!(vm.instance.memory_mb, 1024);
         assert_eq!(vm.instance.max_lifetime_ms, 7_200_000);
         assert_eq!(vm.instance.idle_timeout_ms, 600_000);
+        assert_eq!(vm.calls.create_timeout_ms, 180_000);
+        assert_eq!(vm.calls.destroy_timeout_ms, 45_000);
         assert_eq!(vm.calls.exec_timeout_ceiling_ms, 30_000);
         assert_eq!(vm.calls.exec_max_output_bytes, 32_768);
         assert_eq!(vm.calls.read_file_max_bytes, 1_048_576);

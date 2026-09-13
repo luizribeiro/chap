@@ -86,8 +86,9 @@ impl<B: VmBackend> VmHost<B> {
         installation_id: String,
         session_epoch: u64,
     ) -> Result<Self, chap_vm::host::VmError> {
+        let destroy_timeout = Duration::from_millis(settings.calls.destroy_timeout_ms);
         if let Err(error) = match tokio::time::timeout(
-            Duration::from_millis(settings.calls.exec_timeout_ceiling_ms),
+            destroy_timeout,
             backend.reap(&installation_id, session_epoch),
         )
         .await
@@ -102,7 +103,7 @@ impl<B: VmBackend> VmHost<B> {
                 backend: Arc::clone(&backend),
                 installation_id: installation_id.clone(),
                 session_epoch,
-                timeout: Duration::from_millis(settings.calls.exec_timeout_ceiling_ms),
+                timeout: destroy_timeout,
                 shutdown_on_drop: true,
             }),
             backend,
@@ -124,7 +125,7 @@ impl<B: VmBackend> VmHost<B> {
                 backend: Arc::clone(&backend),
                 installation_id: installation_id.clone(),
                 session_epoch,
-                timeout: Duration::from_millis(settings.calls.exec_timeout_ceiling_ms),
+                timeout: Duration::from_millis(settings.calls.destroy_timeout_ms),
                 shutdown_on_drop: false,
             }),
             backend,
@@ -217,16 +218,11 @@ impl<B: VmBackend> VmHost<B> {
         })
     }
 
-    async fn backend_call<T, F>(&self, call: F) -> Result<T, vm::VmError>
+    async fn backend_call<T, F>(&self, timeout_ms: u64, call: F) -> Result<T, vm::VmError>
     where
         F: Future<Output = Result<T, chap_vm::host::VmError>>,
     {
-        match tokio::time::timeout(
-            Duration::from_millis(self.settings.calls.exec_timeout_ceiling_ms),
-            call,
-        )
-        .await
-        {
+        match tokio::time::timeout(Duration::from_millis(timeout_ms), call).await {
             Ok(result) => result.map_err(Into::into),
             Err(_) => Err(vm::VmError::TimedOut),
         }
@@ -238,11 +234,20 @@ impl<B: VmBackend> VmHost<B> {
         requested: RequestedVmConfig,
     ) -> Result<VmRef, vm::VmError> {
         let config = self.backend_config(requested)?;
-        if self.backend_call(self.backend.get(id)).await?.is_some() {
+        if self
+            .backend_call(self.settings.calls.create_timeout_ms, self.backend.get(id))
+            .await?
+            .is_some()
+        {
             return Err(vm::VmError::AlreadyExists);
         }
         let reservation = self.reserve_vm(&id.plugin_id)?;
-        let vm = self.backend_call(self.backend.create(id, &config)).await?;
+        let vm = self
+            .backend_call(
+                self.settings.calls.create_timeout_ms,
+                self.backend.create(id, &config),
+            )
+            .await?;
         reservation.commit();
         Ok(vm)
     }
@@ -253,14 +258,20 @@ impl<B: VmBackend> VmHost<B> {
         requested: RequestedVmConfig,
     ) -> Result<VmRef, vm::VmError> {
         let config = self.backend_config(requested)?;
-        let exists = self.backend_call(self.backend.get(id)).await?.is_some();
+        let exists = self
+            .backend_call(self.settings.calls.create_timeout_ms, self.backend.get(id))
+            .await?
+            .is_some();
         let reservation = if exists {
             None
         } else {
             Some(self.reserve_vm(&id.plugin_id)?)
         };
         let vm = self
-            .backend_call(self.backend.get_or_create(id, &config))
+            .backend_call(
+                self.settings.calls.create_timeout_ms,
+                self.backend.get_or_create(id, &config),
+            )
             .await?;
         if let Some(reservation) = reservation {
             reservation.commit();
@@ -310,7 +321,11 @@ impl<B: VmBackend> VmHost<B> {
     }
 
     async fn destroy(&self, plugin_id: &PluginId, vm: &VmRef) -> Result<(), vm::VmError> {
-        self.backend_call(self.backend.destroy(vm)).await?;
+        self.backend_call(
+            self.settings.calls.destroy_timeout_ms,
+            self.backend.destroy(vm),
+        )
+        .await?;
         decrement_vm_count(&self.vm_counts, plugin_id);
         Ok(())
     }
@@ -570,6 +585,7 @@ mod tests {
         failed_identities: HashSet<(PluginId, String)>,
         create_started: Notify,
         release_create: Notify,
+        destroy_never_completes: AtomicBool,
         vanish_on_owner: AtomicBool,
         reap_fails: AtomicBool,
     }
@@ -588,6 +604,7 @@ mod tests {
                     .collect(),
                 create_started: Notify::new(),
                 release_create: Notify::new(),
+                destroy_never_completes: AtomicBool::new(false),
                 vanish_on_owner: AtomicBool::new(false),
                 reap_fails: AtomicBool::new(false),
             }
@@ -595,6 +612,10 @@ mod tests {
 
         fn vanish_on_next_owner_lookup(&self) {
             self.vanish_on_owner.store(true, Ordering::SeqCst);
+        }
+
+        fn block_destroy(&self) {
+            self.destroy_never_completes.store(true, Ordering::SeqCst);
         }
 
         fn fail_reap(&self) {
@@ -662,6 +683,9 @@ mod tests {
         }
 
         async fn destroy(&self, vm: &VmRef) -> Result<(), chap_vm::host::VmError> {
+            if self.destroy_never_completes.load(Ordering::SeqCst) {
+                return std::future::pending().await;
+            }
             self.inner.destroy(vm).await
         }
 
@@ -795,10 +819,14 @@ mod tests {
                 .copied(),
             Some(1)
         );
+    }
 
+    #[tokio::test]
+    async fn create_timeout_is_independent_from_the_exec_ceiling() {
         let timeout_backend = Arc::new(ControlledBackend::new(&["timeout"], &[]));
         let mut timeout_host = test_host(Arc::clone(&timeout_backend), 1).await;
-        timeout_host.settings.calls.exec_timeout_ceiling_ms = 10;
+        timeout_host.settings.calls.create_timeout_ms = 10;
+        assert_eq!(timeout_host.settings.calls.exec_timeout_ceiling_ms, 1_000);
         assert!(matches!(
             timeout_host
                 .create(&identity("timeout", "first"), requested_config())
@@ -811,6 +839,25 @@ mod tests {
                 .create(&identity("timeout", "second"), requested_config())
                 .await
                 .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn plugin_destroy_times_out_when_the_backend_never_completes() {
+        let backend = Arc::new(ControlledBackend::new(&[], &[]));
+        let mut host = test_host(Arc::clone(&backend), 1).await;
+        let id = identity("principal", "vm");
+        let vm = host.create(&id, requested_config()).await.unwrap();
+        backend.block_destroy();
+        host.settings.calls.destroy_timeout_ms = 10;
+
+        assert!(matches!(
+            host.destroy(&id.plugin_id, &vm).await,
+            Err(vm::VmError::TimedOut)
+        ));
+        assert_eq!(
+            host.vm_counts.lock().unwrap().get(&id.plugin_id).copied(),
+            Some(1)
         );
     }
 

@@ -201,6 +201,8 @@ OCI registries that plugins may use:
         "idle_timeout_ms": 300000
       },
       "calls": {
+        "create_timeout_ms": 600000,
+        "destroy_timeout_ms": 60000,
         "exec_timeout_ceiling_ms": 120000,
         "exec_max_output_bytes": 65536,
         "read_file_max_bytes": 16777216
@@ -213,9 +215,11 @@ OCI registries that plugins may use:
 The values shown are the defaults. `limits.max_vms_per_plugin` bounds each
 plugin instance separately. `instance` defines the CPU count, memory, maximum
 lifetime, and idle timeout that every new VM receives. `calls` bounds single
-host calls: `exec_timeout_ceiling_ms` is both the default and the maximum for a
-command's `timeout-ms`, `exec_max_output_bytes` caps stdout and stderr together,
-and `read_file_max_bytes` caps one file read.
+host calls: `create_timeout_ms` covers each existence lookup and creation call,
+including the image pull and boot; `destroy_timeout_ms` covers destruction plus
+the startup and shutdown reaps; `exec_timeout_ceiling_ms` is both the default
+and the maximum for a command's `timeout-ms`; `exec_max_output_bytes` caps
+stdout and stderr together; and `read_file_max_bytes` caps one file read.
 
 `registries` is empty by default, so even a fully qualified image is denied
 until the operator lists its registry. In particular, add `docker.io` to pull
