@@ -415,7 +415,7 @@ impl ResolveScopedResource<chap_vm::vm::InstanceScope, String> for CapabilityHos
 #[lockgate::guarded]
 impl vm::Host for CapabilityHost {
     #[lockgate::no_capability_required(
-        reason = "enforces vm::create plus per-element vm::mount and vm::egress"
+        reason = "needs vm::create plus per-element vm::mount and vm::egress checks; the guard admits one classification per method (lockgate#21)"
     )]
     async fn create(
         &mut self,
@@ -451,7 +451,7 @@ impl vm::Host for CapabilityHost {
     }
 
     #[lockgate::no_capability_required(
-        reason = "enforces vm::create plus per-element vm::mount and vm::egress"
+        reason = "needs vm::create plus per-element vm::mount and vm::egress checks; the guard admits one classification per method (lockgate#21)"
     )]
     async fn get_or_create(
         &mut self,
