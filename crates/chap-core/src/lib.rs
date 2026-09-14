@@ -20,9 +20,19 @@ pub use session::{
 };
 pub use tool::{ExecutionMode, Tool, ToolDefinition, ToolError, ToolRegistrationError};
 
-/// Installs the crypto provider used by Chap's TLS clients.
+/// Installs `ring` as the process-wide rustls crypto provider.
 ///
-/// Calling this more than once is harmless.
+/// rustls picks a provider on its own only when exactly one of its `ring` and
+/// `aws-lc-rs` features is compiled in. A binary with the microsandbox backend
+/// has both: wasmtime-wasi-http and the microsandbox crates enable `ring`, while
+/// reqwest, pulled in by microsandbox and oci-client, enables `aws-lc-rs`. With
+/// both present, the first `ClientConfig::builder()` anywhere in the process
+/// panics unless a default was installed beforehand. Cargo features are
+/// additive, so neither side can be switched off from this workspace; the
+/// binary has to choose, and it has to do so before any TLS client is built.
+///
+/// Calling this more than once is harmless: a second install fails and the
+/// error is ignored.
 pub fn install_crypto_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
