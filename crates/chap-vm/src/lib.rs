@@ -80,6 +80,13 @@ pub mod vm {
     }
 
     impl Mount {
+        pub fn new(path: &str, readonly_required: bool) -> Result<Self, ScopeError> {
+            Ok(Self {
+                path: normalize_absolute_path(path)?,
+                readonly_required,
+            })
+        }
+
         pub fn path(&self) -> &str {
             &self.path
         }
@@ -97,12 +104,7 @@ pub mod vm {
                 Some(path) => (path, true),
                 None => (value, false),
             };
-            let path = normalize_absolute_path(path).map_err(|_| ScopeError::unknown(value))?;
-
-            Ok(Self {
-                path,
-                readonly_required,
-            })
+            Self::new(path, readonly_required).map_err(|_| ScopeError::unknown(value))
         }
     }
 
@@ -526,6 +528,27 @@ mod tests {
                 "normalized {invalid:?}"
             );
         }
+    }
+
+    #[test]
+    fn mount_constructor_normalizes_paths() {
+        assert_eq!(
+            Mount::new("/a//b/", true).unwrap(),
+            Mount::from_str("ro:/a/b").unwrap()
+        );
+    }
+
+    #[test]
+    fn mount_constructor_rejects_invalid_paths() {
+        assert!(Mount::new("relative", false).is_err());
+        assert!(Mount::new("/a/../b", false).is_err());
+    }
+
+    #[test]
+    fn mount_constructor_canonical_form_round_trips() {
+        let mount = Mount::new("/a//b/", true).unwrap();
+
+        assert_eq!(Mount::from_str(&mount.canonical()).unwrap(), mount);
     }
 
     #[test]
