@@ -513,7 +513,7 @@ mod tests {
         VmIdentity {
             installation_id: "installation-a".into(),
             session_epoch: 7,
-            plugin_id: "build-plugin@grant-a".parse().unwrap(),
+            plugin_id: "build-plugin-grant-a".parse().unwrap(),
             logical_name: "build-env".into(),
         }
     }
@@ -557,7 +557,7 @@ mod tests {
                 ..original.clone()
             },
             VmIdentity {
-                plugin_id: "build-plugin@grant-b".parse().unwrap(),
+                plugin_id: "build-plugin-grant-b".parse().unwrap(),
                 ..original.clone()
             },
             VmIdentity {

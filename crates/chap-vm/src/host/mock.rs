@@ -210,7 +210,7 @@ mod tests {
     fn create_then_get_returns_the_same_vm() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
-            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let id = identity("installation-a", 7, "builder-grant-a", "build-env");
             let created = backend.create(&id, &config("hash-a")).await.unwrap();
 
             assert_eq!(created.physical_label(), id.physical_label());
@@ -222,7 +222,7 @@ mod tests {
     fn create_rejects_an_existing_identity() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
-            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let id = identity("installation-a", 7, "builder-grant-a", "build-env");
             backend.create(&id, &config("hash-a")).await.unwrap();
 
             assert_eq!(
@@ -236,7 +236,7 @@ mod tests {
     fn get_or_create_reuses_only_a_matching_config() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
-            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let id = identity("installation-a", 7, "builder-grant-a", "build-env");
             let created = backend.get_or_create(&id, &config("hash-a")).await.unwrap();
 
             assert_eq!(
@@ -254,7 +254,7 @@ mod tests {
     fn guest_files_round_trip_and_missing_files_are_distinct() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
-            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let id = identity("installation-a", 7, "builder-grant-a", "build-env");
             let vm = backend.create(&id, &config("hash-a")).await.unwrap();
 
             backend
@@ -279,7 +279,7 @@ mod tests {
     fn guest_file_reads_enforce_the_byte_limit() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
-            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let id = identity("installation-a", 7, "builder-grant-a", "build-env");
             let vm = backend.create(&id, &config("hash-a")).await.unwrap();
             backend
                 .write_file(&vm, "/work/result.wasm", b"wasm-bytes")
@@ -304,7 +304,7 @@ mod tests {
     fn exec_returns_deterministic_output_and_honors_zero_timeout() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
-            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let id = identity("installation-a", 7, "builder-grant-a", "build-env");
             let vm = backend.create(&id, &config("hash-a")).await.unwrap();
 
             let outcome = backend
@@ -326,7 +326,7 @@ mod tests {
     fn destroy_removes_the_vm() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
-            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let id = identity("installation-a", 7, "builder-grant-a", "build-env");
             let vm = backend.create(&id, &config("hash-a")).await.unwrap();
 
             backend.destroy(&vm).await.unwrap();
@@ -339,12 +339,12 @@ mod tests {
     fn owner_is_the_creating_principal() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
-            let id = identity("installation-a", 7, "builder@grant-a", "build-env");
+            let id = identity("installation-a", 7, "builder-grant-a", "build-env");
             let vm = backend.create(&id, &config("hash-a")).await.unwrap();
 
             assert_eq!(
                 backend.owner_of(&vm).await.unwrap(),
-                Some("builder@grant-a".parse().unwrap())
+                Some("builder-grant-a".parse().unwrap())
             );
         });
     }
@@ -353,8 +353,8 @@ mod tests {
     fn equal_logical_names_under_different_principals_are_isolated() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
-            let first = identity("installation-a", 7, "builder@grant-a", "build-env");
-            let second = identity("installation-a", 7, "builder@grant-b", "build-env");
+            let first = identity("installation-a", 7, "builder-grant-a", "build-env");
+            let second = identity("installation-a", 7, "builder-grant-b", "build-env");
             let first_vm = backend.create(&first, &config("hash-a")).await.unwrap();
             let second_vm = backend.create(&second, &config("hash-a")).await.unwrap();
 
@@ -374,10 +374,10 @@ mod tests {
     fn startup_reap_is_scoped_to_installation_and_preserves_the_current_epoch() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
-            let keep = identity("installation-a", 8, "builder@grant-a", "keep");
-            let same_epoch = identity("installation-a", 8, "builder@grant-a", "same-epoch");
-            let prior_epoch = identity("installation-a", 7, "builder@grant-a", "stale");
-            let other_installation = identity("installation-b", 7, "builder@grant-a", "other");
+            let keep = identity("installation-a", 8, "builder-grant-a", "keep");
+            let same_epoch = identity("installation-a", 8, "builder-grant-a", "same-epoch");
+            let prior_epoch = identity("installation-a", 7, "builder-grant-a", "stale");
+            let other_installation = identity("installation-b", 7, "builder-grant-a", "other");
             for id in [&keep, &same_epoch, &prior_epoch, &other_installation] {
                 backend.create(id, &config("hash-a")).await.unwrap();
             }
@@ -398,10 +398,10 @@ mod tests {
     fn shutdown_destroys_only_the_current_epochs_vms() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
-            let first = identity("installation-a", 8, "builder@grant-a", "first");
-            let second = identity("installation-a", 8, "builder@grant-b", "second");
-            let prior_epoch = identity("installation-a", 7, "builder@grant-a", "prior");
-            let other_installation = identity("installation-b", 8, "builder@grant-a", "other");
+            let first = identity("installation-a", 8, "builder-grant-a", "first");
+            let second = identity("installation-a", 8, "builder-grant-b", "second");
+            let prior_epoch = identity("installation-a", 7, "builder-grant-a", "prior");
+            let other_installation = identity("installation-b", 8, "builder-grant-a", "other");
             for id in [&first, &second, &prior_epoch, &other_installation] {
                 backend.create(id, &config("hash-a")).await.unwrap();
             }

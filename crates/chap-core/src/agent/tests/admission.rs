@@ -170,7 +170,7 @@ fn builder_with_restrictive_runtime_limits() -> (tempfile::TempDir, AgentBuilder
     let directory = tempfile::tempdir().unwrap();
     fs::write(
         directory.path().join("provider.wasm"),
-        provider_component("example.provider"),
+        provider_component("example-provider"),
     )
     .unwrap();
     let config_path = directory.path().join("chap.json");
@@ -359,7 +359,7 @@ fn exec_plugin_config(allowed_commands: &[&str]) -> (PathBuf, PathBuf) {
 fn write_exec_plugin_config(directory: &Path, allowed_commands: &[&str]) {
     fs::write(
         directory.join("provider.wasm"),
-        provider_component_requiring_exec("example.provider"),
+        provider_component_requiring_exec("example-provider"),
     )
     .unwrap();
     let config = serde_json::json!({
@@ -384,7 +384,7 @@ async fn reviews_multiple_plugins_with_one_caller_owned_host() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
-        provider_component("example.provider"),
+        provider_component("example-provider"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -434,7 +434,7 @@ async fn approved_matching_manifest_admits_a_configured_provider() {
     fs::write(
         &component,
         provider_component_with_schema(
-            "example.provider",
+            "example-provider",
             r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"model":{"type":"string"}},"required":["model"],"additionalProperties":false}"#,
         ),
     )
@@ -444,7 +444,7 @@ async fn approved_matching_manifest_admits_a_configured_provider() {
         &config_path,
         r#"{
             "plugins": {
-                "example.provider": {
+                "example-provider": {
                     "component": "provider.wasm",
                     "settings": {
                         "model": "example-model"
@@ -460,12 +460,12 @@ async fn approved_matching_manifest_admits_a_configured_provider() {
     assert_eq!(builder.plugins().count(), 1);
     assert_eq!(
         builder
-            .plugin_roles(&plugin_id("example.provider"))
+            .plugin_roles(&plugin_id("example-provider"))
             .unwrap(),
         ["provider"]
     );
     let record = builder
-        .approve_plugin(&plugin_id("example.provider"))
+        .approve_plugin(&plugin_id("example-provider"))
         .await
         .unwrap();
     assert_eq!(
@@ -487,7 +487,7 @@ async fn approved_matching_manifest_admits_a_configured_provider() {
         agent
             .inner
             .plugins
-            .contains_key(&plugin_id("example.provider"))
+            .contains_key(&plugin_id("example-provider"))
     );
     fs::remove_dir_all(directory).unwrap();
 }
@@ -497,7 +497,7 @@ async fn classifies_a_trapping_provider_as_a_plugin_failure() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
-        provider_component("example.provider"),
+        provider_component("example-provider"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -536,7 +536,7 @@ async fn configured_provider_budget_reaches_the_host_builder() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
-        hanging_provider_component("example.provider"),
+        hanging_provider_component("example-provider"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -594,12 +594,12 @@ async fn fast_provider_and_tool_plugins_succeed_with_deadlines() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
-        fast_provider_component("example.provider"),
+        fast_provider_component("example-provider"),
     )
     .unwrap();
     fs::write(
         directory.join("tools.wasm"),
-        fast_tool_component("example.tools"),
+        fast_tool_component("example-tools"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -607,10 +607,10 @@ async fn fast_provider_and_tool_plugins_succeed_with_deadlines() {
         &config_path,
         r#"{
             "plugins": {
-                "example.provider": {
+                "example-provider": {
                     "component": "provider.wasm"
                 },
-                "example.tools": {
+                "example-tools": {
                     "component": "tools.wasm"
                 }
             }
@@ -619,15 +619,15 @@ async fn fast_provider_and_tool_plugins_succeed_with_deadlines() {
     .unwrap();
     let builder = load_test_builder(&config_path);
     builder
-        .approve_plugin(&plugin_id("example.provider"))
+        .approve_plugin(&plugin_id("example-provider"))
         .await
         .unwrap();
     builder
-        .approve_plugin(&plugin_id("example.tools"))
+        .approve_plugin(&plugin_id("example-tools"))
         .await
         .unwrap();
     let agent = builder.start().await.unwrap();
-    let provider = "example.provider".parse().unwrap();
+    let provider = "example-provider".parse().unwrap();
     let backend = PluginBackend::new(&agent.inner, &provider);
 
     let completion = backend.complete(Vec::new()).await.unwrap();
@@ -650,7 +650,7 @@ async fn start_refuses_and_names_every_unapproved_plugin() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
-        provider_component("example.provider"),
+        provider_component("example-provider"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -794,7 +794,7 @@ async fn admission_refusal_emits_a_warning_with_the_plugin_id() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
-        provider_component("example.provider"),
+        provider_component("example-provider"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -837,7 +837,7 @@ async fn approving_then_denying_toggles_plugin_admission() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
-        provider_component("example.provider"),
+        provider_component("example-provider"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -937,7 +937,7 @@ async fn compiled_components_are_cached_and_reused_under_the_state_directory() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
-        provider_component("example.provider"),
+        provider_component("example-provider"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -1006,7 +1006,7 @@ async fn review_surfaces_a_gained_export_after_a_role_change() {
 async fn nonblocking_drift_errors_are_reported_without_panicking() {
     let directory = test_directory();
     let component = directory.join("provider.wasm");
-    fs::write(&component, provider_component("example.provider")).unwrap();
+    fs::write(&component, provider_component("example-provider")).unwrap();
     let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
@@ -1055,7 +1055,7 @@ async fn rejects_missing_required_settings_during_prepare() {
     fs::write(
         &component,
         provider_component_with_schema(
-            "example.provider",
+            "example-provider",
             r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"model":{"type":"string"}},"required":["model"],"additionalProperties":false}"#,
         ),
     )
@@ -1065,7 +1065,7 @@ async fn rejects_missing_required_settings_during_prepare() {
         &config_path,
         r#"{
             "plugins": {
-                "example.provider": {
+                "example-provider": {
                     "component": "provider.wasm"
                 }
             }
@@ -1079,7 +1079,7 @@ async fn rejects_missing_required_settings_during_prepare() {
     };
 
     let refusal = only_refusal(error);
-    assert_eq!(refusal.plugin_id.as_str(), "example.provider");
+    assert_eq!(refusal.plugin_id.as_str(), "example-provider");
     assert_eq!(refusal.source_path, component);
     assert!(matches!(
         refusal.reason,
@@ -1096,7 +1096,7 @@ async fn validates_settings_before_loading_tool_definitions() {
     fs::write(
         &component,
         tool_component_with_schema(
-            "example.tools",
+            "example-tools",
             r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["api_key"]}"#,
         ),
     )
@@ -1106,7 +1106,7 @@ async fn validates_settings_before_loading_tool_definitions() {
         &config_path,
         r#"{
             "plugins": {
-                "example.tools": {
+                "example-tools": {
                     "component": "tools.wasm"
                 }
             }
@@ -1120,7 +1120,7 @@ async fn validates_settings_before_loading_tool_definitions() {
     };
 
     let refusal = only_refusal(error);
-    assert_eq!(refusal.plugin_id.as_str(), "example.tools");
+    assert_eq!(refusal.plugin_id.as_str(), "example-tools");
     assert_eq!(refusal.source_path, component);
     assert!(matches!(
         refusal.reason,
@@ -1169,13 +1169,13 @@ async fn reports_framework_schema_transport_errors() {
 fn discovers_a_configured_tool_plugin() {
     let directory = test_directory();
     let component = directory.join("tools.wasm");
-    fs::write(&component, tool_component("example.tools")).unwrap();
+    fs::write(&component, tool_component("example-tools")).unwrap();
     let config_path = directory.join("chap.json");
     fs::write(
         &config_path,
         r#"{
             "plugins": {
-                "example.tools": {
+                "example-tools": {
                     "component": "tools.wasm"
                 }
             }
@@ -1186,7 +1186,7 @@ fn discovers_a_configured_tool_plugin() {
     let builder = load_test_builder(&config_path);
 
     assert_eq!(
-        builder.plugin_roles(&plugin_id("example.tools")).unwrap(),
+        builder.plugin_roles(&plugin_id("example-tools")).unwrap(),
         ["tool"]
     );
     fs::remove_dir_all(directory).unwrap();
@@ -1197,7 +1197,7 @@ async fn loads_definitions_from_an_admitted_tool_plugin() {
     let directory = test_directory();
     fs::write(
         directory.join("tools.wasm"),
-        tool_component("example.tools"),
+        tool_component("example-tools"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -1205,7 +1205,7 @@ async fn loads_definitions_from_an_admitted_tool_plugin() {
         &config_path,
         r#"{
             "plugins": {
-                "example.tools": {
+                "example-tools": {
                     "component": "tools.wasm"
                 }
             }
@@ -1215,7 +1215,7 @@ async fn loads_definitions_from_an_admitted_tool_plugin() {
 
     let builder = load_test_builder(&config_path);
     builder
-        .approve_plugin(&plugin_id("example.tools"))
+        .approve_plugin(&plugin_id("example-tools"))
         .await
         .unwrap();
     let agent = builder.start().await.unwrap();
@@ -1229,7 +1229,7 @@ async fn preserves_plugin_tool_registration_failures() {
     let directory = test_directory();
     fs::write(
         directory.join("tools.wasm"),
-        tool_component("example.tools"),
+        tool_component("example-tools"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -1237,7 +1237,7 @@ async fn preserves_plugin_tool_registration_failures() {
         &config_path,
         r#"{
             "plugins": {
-                "example.tools": {
+                "example-tools": {
                     "component": "tools.wasm"
                 }
             }
@@ -1248,7 +1248,7 @@ async fn preserves_plugin_tool_registration_failures() {
         .tool(NamedTool("fixture-tool"))
         .unwrap();
     builder
-        .approve_plugin(&plugin_id("example.tools"))
+        .approve_plugin(&plugin_id("example-tools"))
         .await
         .unwrap();
 
@@ -1275,7 +1275,7 @@ async fn times_out_a_hanging_tool_plugin() {
     let directory = test_directory();
     fs::write(
         directory.join("tools.wasm"),
-        hanging_tool_component("example.tools"),
+        hanging_tool_component("example-tools"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -1288,7 +1288,7 @@ async fn times_out_a_hanging_tool_plugin() {
                 }
             },
             "plugins": {
-                "example.tools": {
+                "example-tools": {
                     "component": "tools.wasm"
                 }
             }
@@ -1298,7 +1298,7 @@ async fn times_out_a_hanging_tool_plugin() {
 
     let builder = load_test_builder(&config_path);
     builder
-        .approve_plugin(&plugin_id("example.tools"))
+        .approve_plugin(&plugin_id("example-tools"))
         .await
         .unwrap();
     let agent = builder.start().await.unwrap();
@@ -1315,7 +1315,7 @@ async fn times_out_a_hanging_tool_plugin() {
         panic!("tool call deadline must be an execution failure")
     };
     assert!(
-        message.starts_with("tool plugin `example.tools` timed out after "),
+        message.starts_with("tool plugin `example-tools` timed out after "),
         "{message}"
     );
     assert!(!message.contains(" failed: "), "{message}");
@@ -1327,7 +1327,7 @@ async fn loads_execution_modes_declared_by_an_admitted_tool_plugin() {
     let directory = test_directory();
     fs::write(
         directory.join("tools.wasm"),
-        tool_component("example.tools"),
+        tool_component("example-tools"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -1335,7 +1335,7 @@ async fn loads_execution_modes_declared_by_an_admitted_tool_plugin() {
         &config_path,
         r#"{
             "plugins": {
-                "example.tools": {
+                "example-tools": {
                     "component": "tools.wasm"
                 }
             }
@@ -1345,7 +1345,7 @@ async fn loads_execution_modes_declared_by_an_admitted_tool_plugin() {
 
     let builder = load_test_builder(&config_path);
     builder
-        .approve_plugin(&plugin_id("example.tools"))
+        .approve_plugin(&plugin_id("example-tools"))
         .await
         .unwrap();
     let agent = builder.start().await.unwrap();
@@ -1366,7 +1366,7 @@ async fn plugin_execution_override_makes_loaded_tools_sequential() {
     let directory = test_directory();
     fs::write(
         directory.join("tools.wasm"),
-        tool_component("example.tools"),
+        tool_component("example-tools"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -1379,7 +1379,7 @@ async fn plugin_execution_override_makes_loaded_tools_sequential() {
                 }
             },
             "plugins": {
-                "example.tools": {
+                "example-tools": {
                     "component": "tools.wasm",
                     "tools": {
                         "execution": "sequential"
@@ -1392,7 +1392,7 @@ async fn plugin_execution_override_makes_loaded_tools_sequential() {
 
     let builder = load_test_builder(&config_path);
     builder
-        .approve_plugin(&plugin_id("example.tools"))
+        .approve_plugin(&plugin_id("example-tools"))
         .await
         .unwrap();
     let agent = builder.start().await.unwrap();
@@ -1410,7 +1410,7 @@ async fn rejects_tools_config_for_a_provider_only_plugin() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
-        provider_component("example.provider"),
+        provider_component("example-provider"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -1418,7 +1418,7 @@ async fn rejects_tools_config_for_a_provider_only_plugin() {
         &config_path,
         r#"{
             "plugins": {
-                "example.provider": {
+                "example-provider": {
                     "component": "provider.wasm",
                     "tools": {
                         "execution": "sequential"
@@ -1432,7 +1432,7 @@ async fn rejects_tools_config_for_a_provider_only_plugin() {
     let error = load_test_builder(&config_path).start().await.err().unwrap();
 
     let refusal = only_refusal(error);
-    assert_eq!(refusal.plugin_id.as_str(), "example.provider");
+    assert_eq!(refusal.plugin_id.as_str(), "example-provider");
     assert!(matches!(
         refusal.reason,
         PluginRefusalReason::RoleConfigInvalid { ref role } if role == "tools"
@@ -1445,7 +1445,7 @@ async fn rejects_context_config_for_a_provider_only_plugin() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
-        provider_component("example.provider"),
+        provider_component("example-provider"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");
@@ -1453,7 +1453,7 @@ async fn rejects_context_config_for_a_provider_only_plugin() {
         &config_path,
         r#"{
             "plugins": {
-                "example.provider": {
+                "example-provider": {
                     "component": "provider.wasm",
                     "context": {
                         "channel": "system"
@@ -1467,7 +1467,7 @@ async fn rejects_context_config_for_a_provider_only_plugin() {
     let error = load_test_builder(&config_path).start().await.err().unwrap();
 
     let refusal = only_refusal(error);
-    assert_eq!(refusal.plugin_id.as_str(), "example.provider");
+    assert_eq!(refusal.plugin_id.as_str(), "example-provider");
     assert!(matches!(
         refusal.reason,
         PluginRefusalReason::RoleConfigInvalid { ref role } if role == "context"
@@ -1507,7 +1507,7 @@ async fn drops_partial_start_resources_on_a_blocking_thread() {
     let directory = test_directory();
     fs::write(
         directory.join("provider.wasm"),
-        provider_component("example.provider"),
+        provider_component("example-provider"),
     )
     .unwrap();
     let config_path = directory.join("chap.json");

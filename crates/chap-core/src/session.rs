@@ -209,8 +209,6 @@ pub struct ContextFailure {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum SessionError {
-    #[error("a session provider is required")]
-    ProviderRequired,
     #[error("provider plugin `{provider}` is not configured")]
     ProviderNotConfigured { provider: PluginId },
     #[error("{} context plugin(s) failed", .0.len())]
@@ -426,9 +424,6 @@ impl SessionManager {
         options: SessionOptions,
         assembled_context: AssembledContext,
     ) -> Result<Arc<SessionState>, SessionError> {
-        if options.provider.as_str().trim().is_empty() {
-            return Err(SessionError::ProviderRequired);
-        }
         let id = SessionId(Uuid::now_v7());
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         let state = Arc::new(SessionState {
@@ -669,7 +664,6 @@ mod tests {
     fn session_error_implements_std_error() {
         fn assert_error(_: &dyn std::error::Error) {}
 
-        assert_error(&SessionError::ProviderRequired);
         assert_error(&SteerError::EmptyInput);
     }
 
@@ -731,19 +725,6 @@ mod tests {
                 .filter(|source| source.is_panic())
                 .is_some()
         );
-    }
-
-    #[test]
-    fn sessions_require_a_provider() {
-        let error = SessionManager::new()
-            .create(
-                SessionOptions::new(" ".parse().unwrap()),
-                AssembledContext::default(),
-            )
-            .err()
-            .expect("an empty provider should fail");
-
-        assert!(matches!(error, SessionError::ProviderRequired));
     }
 
     #[tokio::test]
