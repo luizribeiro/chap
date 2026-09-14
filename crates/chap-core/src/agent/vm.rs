@@ -96,13 +96,7 @@ pub(super) fn translate_requested_config(
         .mounts
         .iter()
         .map(|mount| {
-            let host = &mount.host;
-            let witness = if mount.readonly {
-                format!("ro:{host}")
-            } else {
-                host.clone()
-            };
-            Mount::from_str(&witness)
+            Mount::new(&mount.host, mount.readonly)
                 .map(MountResource)
                 .map_err(|error| vm::VmError::Failed(error.to_string()))
         })
