@@ -2,7 +2,7 @@ use chap_plugin::tools::{ToolDefinition, ToolError, Tools};
 use chap_plugin::vm::{ExecResult, Mount, Vm, VmConfig};
 use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, capabilities};
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 const RUN: &str = "run";
 
@@ -125,13 +125,14 @@ fn parse_arguments(arguments: &str) -> Result<RunArguments, ToolError> {
         .map_err(|error| ToolError::InvalidInput(format!("invalid `run` arguments: {error}")))
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Settings {
     /// OCI image reference used for the sandbox VM.
     #[serde(default = "default_image")]
     image: String,
     /// Host paths the plugin may mount into a VM.
+    #[serde(deserialize_with = "deserialize_allowed_mounts")]
     allowed_mounts: Vec<String>,
     /// Network destinations the plugin may expose to a VM.
     allowed_egress: Vec<String>,
@@ -139,6 +140,21 @@ struct Settings {
 
 fn default_image() -> String {
     "docker.io/library/alpine:3.20".to_owned()
+}
+
+fn deserialize_allowed_mounts<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let mounts = Vec::<String>::deserialize(deserializer)?;
+    for mount in &mounts {
+        if mount.is_empty() || mount.starts_with("ro:") || !mount.starts_with('/') {
+            return Err(serde::de::Error::custom(format!(
+                "allowed mount {mount:?} must be a non-empty plain absolute path starting with `/`"
+            )));
+        }
+    }
+    Ok(mounts)
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -174,6 +190,11 @@ mod tests {
             schema["properties"]["image"]["default"],
             "docker.io/library/alpine:3.20"
         );
+        assert_eq!(schema["properties"]["allowed_mounts"]["type"], "array");
+        assert_eq!(
+            schema["properties"]["allowed_mounts"]["items"]["type"],
+            "string"
+        );
     }
 
     #[test]
@@ -185,6 +206,32 @@ mod tests {
         .unwrap();
 
         assert_eq!(settings.image, "docker.io/library/alpine:3.20");
+    }
+
+    #[test]
+    fn rejects_invalid_allowed_mounts_when_settings_load() {
+        for mount in ["project", "ro:/project", ""] {
+            let error = serde_json::from_value::<Settings>(serde_json::json!({
+                "allowed_mounts": [mount],
+                "allowed_egress": [],
+            }))
+            .unwrap_err();
+            let message = error.to_string();
+
+            assert!(message.contains(&format!("{mount:?}")), "{message}");
+            assert!(message.contains("plain absolute path"), "{message}");
+        }
+    }
+
+    #[test]
+    fn accepts_absolute_allowed_mounts_when_settings_load() {
+        let settings: Settings = serde_json::from_value(serde_json::json!({
+            "allowed_mounts": ["/project", "/var/log"],
+            "allowed_egress": [],
+        }))
+        .unwrap();
+
+        assert_eq!(settings.allowed_mounts, ["/project", "/var/log"]);
     }
 
     #[test]
