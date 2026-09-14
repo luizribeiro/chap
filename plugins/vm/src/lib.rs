@@ -37,7 +37,7 @@ impl Tools for Sandbox {
             .settings
             .allowed_mounts
             .iter()
-            .map(|host| format!("/mnt{host}"))
+            .map(|host| guest_mount_point(host))
             .collect::<Vec<_>>()
             .join(", ");
         let allowed_egress = self.settings.allowed_egress.join(", ");
@@ -99,6 +99,10 @@ fn format_output(output: ExecResult) -> String {
     sections.join("\n\n")
 }
 
+fn guest_mount_point(host: &str) -> String {
+    format!("/mnt{host}")
+}
+
 fn vm_config(settings: &Settings) -> VmConfig {
     VmConfig {
         image: settings.image.clone(),
@@ -107,7 +111,7 @@ fn vm_config(settings: &Settings) -> VmConfig {
             .iter()
             .map(|host| Mount {
                 host: host.clone(),
-                guest: format!("/mnt{host}"),
+                guest: guest_mount_point(host),
                 readonly: true,
             })
             .collect(),
@@ -213,6 +217,15 @@ mod tests {
         assert_eq!(config.mounts[1].host, "/var/log");
         assert_eq!(config.mounts[1].guest, "/mnt/var/log");
         assert!(config.mounts[1].readonly);
+    }
+
+    #[test]
+    fn derives_guest_mount_points_from_absolute_host_paths() {
+        assert_eq!(
+            guest_mount_point("/Users/luiz/chap"),
+            "/mnt/Users/luiz/chap"
+        );
+        assert_eq!(guest_mount_point("/var/log"), "/mnt/var/log");
     }
 
     #[test]
