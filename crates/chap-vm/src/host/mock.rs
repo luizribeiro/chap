@@ -6,7 +6,10 @@ use std::{
     vec::Vec,
 };
 
-use super::{ExecOutcome, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmPrincipal, VmRef};
+use super::{
+    ExecOutcome, SecretSpec, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmPrincipal,
+    VmRef,
+};
 
 #[derive(Default)]
 pub struct MockVmBackend {
@@ -18,6 +21,7 @@ struct MockVm {
     config_hash: String,
     installation_id: String,
     session_epoch: u64,
+    secrets: Vec<SecretSpec>,
     files: HashMap<String, Vec<u8>>,
 }
 
@@ -29,6 +33,12 @@ impl MockVmBackend {
     fn lock(&self) -> MutexGuard<'_, HashMap<String, MockVm>> {
         self.vms.lock().unwrap_or_else(PoisonError::into_inner)
     }
+
+    pub fn secrets(&self, vm: &VmRef) -> Option<Vec<SecretSpec>> {
+        self.lock()
+            .get(vm.physical_label())
+            .map(|vm| vm.secrets.clone())
+    }
 }
 
 impl MockVm {
@@ -38,6 +48,7 @@ impl MockVm {
             config_hash: cfg.config_hash.clone(),
             installation_id: id.installation_id.clone(),
             session_epoch: id.session_epoch,
+            secrets: cfg.secrets.clone(),
             files: HashMap::new(),
         }
     }
@@ -154,7 +165,8 @@ mod tests {
 
     use super::MockVmBackend;
     use crate::host::{
-        ResolvedImage, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmPrincipal, VmSettings,
+        ResolvedImage, SecretSource, SecretSpec, VmBackend, VmCommand, VmConfig, VmError,
+        VmIdentity, VmPrincipal, VmSettings,
     };
 
     fn block_on<F: Future>(future: F) -> F::Output {
@@ -188,6 +200,7 @@ mod tests {
             mounts: vec![],
             egress: vec![],
             env: vec![],
+            secrets: vec![],
             cpus: 1,
             memory_mb: 512,
             max_lifetime_ms: 3_600_000,
@@ -214,6 +227,24 @@ mod tests {
 
             assert_eq!(created.physical_label(), id.physical_label());
             assert_eq!(backend.get(&id).await.unwrap(), Some(created));
+        });
+    }
+
+    #[test]
+    fn create_records_secret_specs() {
+        block_on(async {
+            let backend = MockVmBackend::new(&VmSettings::default());
+            let id = identity("installation-a", 7, "builder-grant-a", "build-env");
+            let mut config = config("hash-a");
+            config.secrets = vec![SecretSpec {
+                env: "GITHUB_TOKEN".into(),
+                source: SecretSource::HostEnv("CHAP_GITHUB_TOKEN".into()),
+                hosts: vec!["api.github.com".into(), "github.com".into()],
+            }];
+
+            let vm = backend.create(&id, &config).await.unwrap();
+
+            assert_eq!(backend.secrets(&vm), Some(config.secrets));
         });
     }
 

@@ -440,6 +440,7 @@ impl AgentBuilder {
             }],
             egress,
             Vec::new(),
+            Vec::new(),
         )
         .map_err(|source| ConsentError::InvalidWorkspaceConfig { source })?;
 

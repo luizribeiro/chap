@@ -102,8 +102,8 @@ pub(super) fn translate_requested_config(
         })
         .collect();
 
-    let requested =
-        RequestedVmConfig::normalized(image, mounts, egress, env).map_err(translate_host_error)?;
+    let requested = RequestedVmConfig::normalized(image, mounts, egress, env, Vec::new())
+        .map_err(translate_host_error)?;
     let mount_resources = requested
         .mounts
         .iter()

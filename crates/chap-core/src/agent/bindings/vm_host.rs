@@ -286,6 +286,7 @@ impl<B: VmBackend> VmHost<B> {
             mounts: requested.mounts,
             egress: requested.egress,
             env: requested.env,
+            secrets: requested.secrets,
             cpus: self.settings.instance.cpus,
             memory_mb: self.settings.instance.memory_mb,
             max_lifetime_ms: self.settings.instance.max_lifetime_ms,
@@ -950,6 +951,7 @@ mod tests {
             Vec::<MountSpec>::new(),
             Vec::new(),
             Vec::<EnvVar>::new(),
+            Vec::new(),
         )
         .unwrap()
     }
@@ -966,6 +968,7 @@ mod tests {
                 readonly: true,
             }],
             vec!["127.0.0.1:1".parse().unwrap()],
+            Vec::new(),
             Vec::new(),
         )
         .unwrap();
@@ -991,6 +994,7 @@ mod tests {
             mounts: Vec::new(),
             egress: Vec::new(),
             env: Vec::new(),
+            secrets: Vec::new(),
             cpus: 1,
             memory_mb: 512,
             max_lifetime_ms: 3_600_000,

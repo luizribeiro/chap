@@ -45,6 +45,7 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
         }],
         egress: vec![],
         env: vec![],
+        secrets: vec![],
         cpus: 1,
         memory_mb: 256,
         max_lifetime_ms: 60_000,

@@ -83,11 +83,24 @@ pub struct EnvVar {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SecretSource {
+    HostEnv(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SecretSpec {
+    pub env: String,
+    pub source: SecretSource,
+    pub hosts: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RequestedVmConfig {
     pub image: OciReference,
     pub mounts: Vec<MountSpec>,
     pub egress: Vec<Egress>,
     pub env: Vec<EnvVar>,
+    pub secrets: Vec<SecretSpec>,
 }
 
 impl RequestedVmConfig {
@@ -96,6 +109,7 @@ impl RequestedVmConfig {
         mut mounts: Vec<MountSpec>,
         mut egress: Vec<Egress>,
         mut env: Vec<EnvVar>,
+        mut secrets: Vec<SecretSpec>,
     ) -> Result<Self, VmError> {
         for mount in &mut mounts {
             mount.host = normalize_absolute_path(&mount.host)
@@ -146,18 +160,33 @@ impl RequestedVmConfig {
             normalized_env.push(variable);
         }
 
+        for secret in &mut secrets {
+            secret.hosts.sort();
+            secret.hosts.dedup();
+        }
+        secrets.sort_by(|left, right| left.env.cmp(&right.env));
+        for pair in secrets.windows(2) {
+            if pair[0].env == pair[1].env {
+                return Err(VmError::Failed(format!(
+                    "duplicate secret for environment variable `{}`",
+                    pair[0].env
+                )));
+            }
+        }
+
         Ok(Self {
             image,
             mounts: normalized_mounts,
             egress,
             env: normalized_env,
+            secrets,
         })
     }
 
     /// Returns hex SHA-256 over the canonical requested configuration.
     pub fn canonical_hash(&self) -> String {
         let mut hash = Sha256::new();
-        hash.update(b"chap-vm-requested-config-v0");
+        hash.update(b"chap-vm-requested-config-v1");
         hash_component(&mut hash, self.image.canonical().as_bytes());
         hash_len(&mut hash, self.mounts.len());
         for mount in &self.mounts {
@@ -174,6 +203,20 @@ impl RequestedVmConfig {
             hash_component(&mut hash, variable.name.as_bytes());
             hash_component(&mut hash, variable.value.as_bytes());
         }
+        hash_len(&mut hash, self.secrets.len());
+        for secret in &self.secrets {
+            hash_component(&mut hash, secret.env.as_bytes());
+            match &secret.source {
+                SecretSource::HostEnv(variable) => {
+                    hash_component(&mut hash, b"host-env");
+                    hash_component(&mut hash, variable.as_bytes());
+                }
+            }
+            hash_len(&mut hash, secret.hosts.len());
+            for host in &secret.hosts {
+                hash_component(&mut hash, host.as_bytes());
+            }
+        }
         hex_digest(hash.finalize())
     }
 }
@@ -184,6 +227,7 @@ pub struct VmConfig {
     pub mounts: Vec<MountSpec>,
     pub egress: Vec<Egress>,
     pub env: Vec<EnvVar>,
+    pub secrets: Vec<SecretSpec>,
     pub cpus: u32,
     pub memory_mb: u64,
     pub max_lifetime_ms: u64,
@@ -250,6 +294,8 @@ impl std::error::Error for VmError {}
     reason = "VM backends are selected statically and are never used through dyn"
 )]
 pub trait VmBackend: Send + Sync + 'static {
+    /// Creates a VM, sealing every secret at its network boundary so that the guest receives only
+    /// a placeholder. Backends that cannot provide that guarantee must fail the operation.
     async fn create(&self, id: &VmIdentity, cfg: &VmConfig) -> Result<VmRef, VmError>;
     async fn get(&self, id: &VmIdentity) -> Result<Option<VmRef>, VmError>;
     async fn get_or_create(&self, id: &VmIdentity, cfg: &VmConfig) -> Result<VmRef, VmError>;
@@ -530,8 +576,8 @@ mod tests {
     use std::{format, vec};
 
     use super::{
-        EnvVar, MountSpec, OciReference, RequestedVmConfig, VmCallSettings, VmError, VmIdentity,
-        VmInstanceSettings, VmLimits, VmPrincipal, VmSettings,
+        EnvVar, MountSpec, OciReference, RequestedVmConfig, SecretSource, SecretSpec,
+        VmCallSettings, VmError, VmIdentity, VmInstanceSettings, VmLimits, VmPrincipal, VmSettings,
     };
     use crate::vm::Egress;
 
@@ -566,6 +612,14 @@ mod tests {
         EnvVar {
             name: name.into(),
             value: value.into(),
+        }
+    }
+
+    fn secret(env: &str, source: &str, hosts: &[&str]) -> SecretSpec {
+        SecretSpec {
+            env: env.into(),
+            source: SecretSource::HostEnv(source.into()),
+            hosts: hosts.iter().map(|host| (*host).into()).collect(),
         }
     }
 
@@ -612,6 +666,11 @@ mod tests {
             ],
             vec![egress("199.232.0.0/16:443"), egress("10.0.0.1:80")],
             vec![env("RUST_LOG", "info"), env("CI", "true")],
+            vec![secret(
+                "GITHUB_TOKEN",
+                "CHAP_GITHUB_TOKEN",
+                &["github.com", "api.github.com", "github.com"],
+            )],
         )
         .unwrap();
         let shuffled = RequestedVmConfig::normalized(
@@ -622,6 +681,11 @@ mod tests {
             ],
             vec![egress("10.0.0.1:80"), egress("199.232.0.0/16:443")],
             vec![env("CI", "true"), env("RUST_LOG", "info")],
+            vec![secret(
+                "GITHUB_TOKEN",
+                "CHAP_GITHUB_TOKEN",
+                &["api.github.com", "github.com"],
+            )],
         )
         .unwrap();
 
@@ -636,6 +700,7 @@ mod tests {
             vec![mount("/project/src", "/work/src", true)],
             vec![egress("199.232.0.0/16:443")],
             vec![env("RUST_LOG", "info")],
+            vec![secret("GITHUB_TOKEN", "CHAP_GITHUB_TOKEN", &["github.com"])],
         )
         .unwrap();
         let changed = RequestedVmConfig::normalized(
@@ -643,6 +708,7 @@ mod tests {
             vec![mount("/project/src", "/work/src", true)],
             vec![egress("199.232.0.0/16:443")],
             vec![env("RUST_LOG", "debug")],
+            vec![secret("GITHUB_TOKEN", "CHAP_GITHUB_TOKEN", &["github.com"])],
         )
         .unwrap();
 
@@ -659,6 +725,7 @@ mod tests {
             ],
             vec![],
             vec![],
+            vec![],
         )
         .unwrap_err();
         assert!(matches!(mount_error, VmError::Failed(_)));
@@ -668,6 +735,7 @@ mod tests {
             vec![],
             vec![],
             vec![env("RUST_LOG", "info"), env("RUST_LOG", "debug")],
+            vec![],
         )
         .unwrap_err();
         assert!(matches!(env_error, VmError::Failed(_)));
@@ -683,12 +751,52 @@ mod tests {
             ],
             vec![egress("199.232.0.0/16:443"), egress("199.232.0.0/16:0443")],
             vec![env("CI", "true"), env("CI", "true")],
+            vec![],
         )
         .unwrap();
 
         assert_eq!(config.mounts.len(), 1);
         assert_eq!(config.egress.len(), 1);
         assert_eq!(config.env.len(), 1);
+    }
+
+    #[test]
+    fn requested_config_rejects_duplicate_secret_guest_names() {
+        let error = RequestedVmConfig::normalized(
+            image(),
+            vec![],
+            vec![],
+            vec![],
+            vec![
+                secret("TOKEN", "FIRST_TOKEN", &["first.example"]),
+                secret("TOKEN", "SECOND_TOKEN", &["second.example"]),
+            ],
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, VmError::Failed(message) if message.contains("`TOKEN`")));
+    }
+
+    #[test]
+    fn requested_config_hash_covers_secret_specification() {
+        let first = RequestedVmConfig::normalized(
+            image(),
+            vec![],
+            vec![],
+            vec![],
+            vec![secret("TOKEN", "HOST_TOKEN", &["api.example.com"])],
+        )
+        .unwrap();
+        let changed = RequestedVmConfig::normalized(
+            image(),
+            vec![],
+            vec![],
+            vec![],
+            vec![secret("TOKEN", "OTHER_TOKEN", &["api.example.com"])],
+        )
+        .unwrap();
+
+        assert_ne!(first.canonical_hash(), changed.canonical_hash());
     }
 
     #[test]
