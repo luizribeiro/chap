@@ -26,6 +26,7 @@ pub mod vm {
     pub enum InstanceScope {
         Any,
         CreatedByCaller,
+        Workspace,
     }
 
     impl FromStr for InstanceScope {
@@ -35,6 +36,7 @@ pub mod vm {
             match value {
                 "*" => Ok(Self::Any),
                 "created-by-caller" => Ok(Self::CreatedByCaller),
+                "workspace" => Ok(Self::Workspace),
                 value => Err(ScopeError::unknown(value)),
             }
         }
@@ -45,6 +47,7 @@ pub mod vm {
             match self {
                 Self::Any => "*".to_string(),
                 Self::CreatedByCaller => "created-by-caller".to_string(),
+                Self::Workspace => "workspace".to_string(),
             }
         }
     }
@@ -386,24 +389,34 @@ mod tests {
 
     #[test]
     fn instance_scope_samples_obey_the_scope_laws() {
-        check_scope_laws([instance("*"), instance("created-by-caller")]).unwrap();
+        check_scope_laws([
+            instance("*"),
+            instance("created-by-caller"),
+            instance("workspace"),
+        ])
+        .unwrap();
     }
 
     #[test]
     fn instance_scope_containment_matches_identity_and_any() {
         let any = instance("*");
         let caller = instance("created-by-caller");
+        let workspace = instance("workspace");
 
-        for inner in [&any, &caller] {
+        for inner in [&any, &caller, &workspace] {
             assert!(any.contains(inner));
         }
         assert!(caller.contains(&caller));
         assert!(!caller.contains(&any));
+        assert!(!caller.contains(&workspace));
+        assert!(workspace.contains(&workspace));
+        assert!(!workspace.contains(&any));
+        assert!(!workspace.contains(&caller));
     }
 
     #[test]
     fn instance_scope_canonical_forms_round_trip() {
-        for value in ["*", "created-by-caller"] {
+        for value in ["*", "created-by-caller", "workspace"] {
             let parsed = instance(value);
             assert_eq!(parsed.canonical(), value);
             assert_eq!(
