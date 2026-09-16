@@ -50,6 +50,13 @@ pub(crate) enum WorkspaceMountMode {
     Rw,
 }
 
+#[cfg(feature = "vm")]
+impl WorkspaceMountMode {
+    pub(crate) fn readonly(self) -> bool {
+        matches!(self, Self::Ro)
+    }
+}
+
 /// Host ceiling for every plugin HTTP request, independent of invocation budgets.
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]

@@ -16,6 +16,8 @@ use lockgate::{
 use plugin_tool::PluginTool;
 use provider::PluginBackend;
 use rustls::RootCertStore;
+#[cfg(feature = "vm")]
+use std::str::FromStr;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -302,6 +304,7 @@ impl ActivePlugin {
 pub struct AgentBuilder {
     config: Config,
     state_dir: Option<PathBuf>,
+    workspace_directory: Option<PathBuf>,
     tls_roots: Option<RootCertStore>,
     tools: ToolRegistry,
     budgets: PluginBudgets,
@@ -319,11 +322,20 @@ pub struct Agent {
     inner: Arc<AgentInner>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkspaceInfo {
+    pub directory: PathBuf,
+    pub readonly: bool,
+    pub image: String,
+    pub egress: Vec<String>,
+}
+
 pub(crate) struct AgentInner {
     lockgate: Arc<InnerHost>,
     plugins: BTreeMap<PluginId, ActivePlugin>,
     sessions: SessionManager,
     tools: ToolRegistry,
+    workspace: Option<WorkspaceInfo>,
     /// Agent-level scheduling settings; see [`crate::config`] for the settings layers.
     tool_execution: ToolExecutionSettings,
 }
@@ -336,6 +348,7 @@ impl AgentBuilder {
         Ok(Self {
             config,
             state_dir: None,
+            workspace_directory: None,
             tls_roots: None,
             tools: ToolRegistry::new(),
             budgets,
@@ -346,6 +359,71 @@ impl AgentBuilder {
     pub fn state_dir(mut self, state_dir: impl Into<PathBuf>) -> Self {
         self.state_dir = Some(state_dir.into());
         self
+    }
+
+    pub fn workspace_directory(mut self, directory: impl Into<PathBuf>) -> Self {
+        self.workspace_directory = Some(directory.into());
+        self
+    }
+
+    #[cfg(feature = "vm")]
+    fn resolve_workspace(&self) -> Result<Option<WorkspaceInfo>, ConsentError> {
+        let Some(settings) = self
+            .config
+            .workspace_settings()
+            .map_err(ConsentError::HostConfiguration)?
+        else {
+            return Ok(None);
+        };
+        let vm_settings = self
+            .config
+            .vm_settings()
+            .map_err(ConsentError::HostConfiguration)?;
+        chap_vm::host::OciReference::parse(&settings.image)
+            .and_then(|image| image.resolve(&vm_settings).map(|_| ()))
+            .map_err(|source| ConsentError::InvalidWorkspaceImage {
+                image: settings.image.clone(),
+                source,
+            })?;
+        for destination in &settings.egress {
+            chap_vm::vm::Egress::from_str(destination).map_err(|source| {
+                ConsentError::InvalidWorkspaceEgress {
+                    destination: destination.clone(),
+                    source,
+                }
+            })?;
+        }
+
+        let directory = match &self.workspace_directory {
+            Some(directory) => directory.clone(),
+            None => std::env::current_dir().map_err(|source| {
+                ConsentError::ResolveWorkspaceDirectory {
+                    path: PathBuf::from("."),
+                    source,
+                }
+            })?,
+        };
+        let directory = fs::canonicalize(&directory).map_err(|source| {
+            ConsentError::ResolveWorkspaceDirectory {
+                path: directory,
+                source,
+            }
+        })?;
+        if !directory.is_dir() {
+            return Err(ConsentError::WorkspacePathNotDirectory { path: directory });
+        }
+
+        Ok(Some(WorkspaceInfo {
+            directory,
+            readonly: settings.mount.readonly(),
+            image: settings.image,
+            egress: settings.egress,
+        }))
+    }
+
+    #[cfg(not(feature = "vm"))]
+    fn resolve_workspace(&self) -> Result<Option<WorkspaceInfo>, ConsentError> {
+        Ok(None)
     }
 
     /// Adds private TLS trust anchors for plugin HTTPS requests.
@@ -418,6 +496,7 @@ impl AgentBuilder {
     /// Required environment variables are reported with their current presence,
     /// but an unset variable does not make the coherence check fail.
     pub async fn check_plugins(&self) -> Result<Vec<PluginCheck>, StartError> {
+        self.resolve_workspace().map_err(StartError::Consent)?;
         let builder = preflight_host_builder(
             &self.config,
             self.budgets,
@@ -677,11 +756,13 @@ impl AgentBuilder {
     ///
     /// Refuses to start unless every configured plugin is admitted.
     pub async fn start(self) -> Result<Agent, StartError> {
+        let workspace = self.resolve_workspace().map_err(StartError::Consent)?;
         let consent = self.consent_store().map_err(StartError::Consent)?;
         let compiled_cache = self.compiled_cache_path();
         let Self {
             config,
             state_dir: _,
+            workspace_directory: _,
             tls_roots,
             tools,
             budgets,
@@ -719,6 +800,7 @@ impl AgentBuilder {
                 plugins,
                 sessions: SessionManager::new(),
                 tools,
+                workspace,
                 tool_execution,
             }),
         })
@@ -1049,6 +1131,10 @@ fn now_rfc3339() -> String {
 }
 
 impl Agent {
+    pub fn workspace(&self) -> Option<WorkspaceInfo> {
+        self.inner.workspace.clone()
+    }
+
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
         self.inner.tools.definitions()
     }

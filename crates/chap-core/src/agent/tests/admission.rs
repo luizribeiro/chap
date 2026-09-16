@@ -202,6 +202,125 @@ fn assert_runtime_limit_refusal(error: StartError) {
     assert!(source.to_string().contains("memory"), "{source}");
 }
 
+#[cfg(feature = "vm")]
+fn workspace_builder(directory: &tempfile::TempDir, workspace: &str) -> AgentBuilder {
+    let config_path = directory.path().join("chap.json");
+    fs::write(
+        &config_path,
+        format!(
+            r#"{{
+                "agent": {{
+                    "vm": {{"registries": ["docker.io"]}},
+                    "workspace": {workspace}
+                }}
+            }}"#
+        ),
+    )
+    .unwrap();
+    load_test_builder(&config_path)
+}
+
+#[cfg(feature = "vm")]
+#[tokio::test]
+async fn start_resolves_and_exposes_the_workspace_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path().join("project");
+    fs::create_dir(&workspace).unwrap();
+    let agent = workspace_builder(
+        &directory,
+        r#"{
+            "image": "docker.io/library/rust:1-alpine",
+            "mount": "ro",
+            "egress": ["0.0.0.0/0:443"]
+        }"#,
+    )
+    .workspace_directory(&workspace)
+    .start()
+    .await
+    .unwrap();
+
+    assert_eq!(
+        agent.workspace().unwrap(),
+        super::super::WorkspaceInfo {
+            directory: workspace.canonicalize().unwrap(),
+            readonly: true,
+            image: "docker.io/library/rust:1-alpine".into(),
+            egress: vec!["0.0.0.0/0:443".into()],
+        }
+    );
+}
+
+#[cfg(feature = "vm")]
+#[tokio::test]
+async fn start_defaults_the_workspace_directory_to_the_current_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    let agent = workspace_builder(
+        &directory,
+        r#"{
+            "image": "docker.io/library/alpine:3.20",
+            "mount": "rw"
+        }"#,
+    )
+    .start()
+    .await
+    .unwrap();
+
+    let expected = std::env::current_dir().unwrap().canonicalize().unwrap();
+    assert_eq!(agent.workspace().unwrap().directory, expected);
+}
+
+#[cfg(feature = "vm")]
+#[tokio::test]
+async fn plugin_check_rejects_a_missing_workspace_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("missing");
+    let error = workspace_builder(
+        &directory,
+        r#"{
+            "image": "docker.io/library/alpine:3.20",
+            "mount": "rw"
+        }"#,
+    )
+    .workspace_directory(&missing)
+    .check_plugins()
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(
+            &error,
+            StartError::Consent(ConsentError::ResolveWorkspaceDirectory { path, .. })
+                if path == &missing
+        ),
+        "{error}"
+    );
+    assert!(error.to_string().contains("agent.workspace"));
+}
+
+#[cfg(feature = "vm")]
+#[tokio::test]
+async fn workspace_validation_names_invalid_image_and_egress_fields() {
+    let directory = tempfile::tempdir().unwrap();
+    for (workspace, field) in [
+        (
+            r#"{"image":"alpine:3.20","mount":"rw"}"#,
+            "agent.workspace.image",
+        ),
+        (
+            r#"{"image":"docker.io/library/alpine:3.20","mount":"rw","egress":["example.com:443"]}"#,
+            "agent.workspace.egress",
+        ),
+    ] {
+        let error = workspace_builder(&directory, workspace)
+            .workspace_directory(directory.path())
+            .check_plugins()
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains(field), "{error}");
+    }
+}
+
 #[test]
 fn default_call_budgets_use_ten_minutes_for_provider_and_preserve_other_bounds() {
     let budgets = PluginBudgets::default();

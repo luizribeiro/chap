@@ -53,6 +53,33 @@ pub enum ConsentError {
         #[source]
         source: io::Error,
     },
+    #[cfg(feature = "vm")]
+    #[error(
+        "failed to resolve `agent.workspace` directory `{}`: {source}",
+        path.display()
+    )]
+    ResolveWorkspaceDirectory {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[cfg(feature = "vm")]
+    #[error("`agent.workspace` directory `{}` is not a directory", path.display())]
+    WorkspacePathNotDirectory { path: PathBuf },
+    #[cfg(feature = "vm")]
+    #[error("invalid `agent.workspace.image` value `{image}`: {source}")]
+    InvalidWorkspaceImage {
+        image: String,
+        #[source]
+        source: chap_vm::host::VmError,
+    },
+    #[cfg(feature = "vm")]
+    #[error("invalid `agent.workspace.egress` value `{destination}`: {source}")]
+    InvalidWorkspaceEgress {
+        destination: String,
+        #[source]
+        source: lockgate_policy::ScopeError,
+    },
     #[error("{0}")]
     HostConfiguration(#[source] LoadError),
     #[cfg(feature = "vm")]
