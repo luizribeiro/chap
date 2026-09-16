@@ -20,7 +20,7 @@ fn main() -> ExitCode {
                 "--exclude",
                 "chap-state-plugin",
                 "--exclude",
-                "chap-vm-plugin",
+                "chap-workspace-plugin",
                 "--exclude",
                 "chap-kagi",
                 "--exclude",
@@ -92,7 +92,7 @@ fn main() -> ExitCode {
         ),
         (&workspace.join("plugins/exec"), &["test", "--locked"]),
         (&workspace.join("plugins/state"), &["test", "--locked"]),
-        (&workspace.join("plugins/vm"), &["test", "--locked"]),
+        (&workspace.join("plugins/workspace"), &["test", "--locked"]),
         (&workspace.join("plugins/kagi"), &["test", "--locked"]),
         (&workspace.join("plugins/persona"), &["test", "--locked"]),
     ];

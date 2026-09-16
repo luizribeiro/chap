@@ -914,21 +914,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "chap-vm-plugin"
-version = "0.1.0"
-dependencies = [
- "chap-plugin",
- "futures",
- "schemars",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "chap-wit"
 version = "0.1.0"
 dependencies = [
  "wit-parser 0.255.0",
+]
+
+[[package]]
+name = "chap-workspace-plugin"
+version = "0.1.0"
+dependencies = [
+ "chap-plugin",
+ "futures",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -17,7 +17,7 @@ members = [
     "plugins/openai-compatible",
     "plugins/persona",
     "plugins/state",
-    "plugins/vm",
+    "plugins/workspace",
 ]
 default-members = ["crates/chap-cli"]
 resolver = "3"
