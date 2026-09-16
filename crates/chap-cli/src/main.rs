@@ -4,7 +4,7 @@ mod render;
 mod telemetry;
 mod tui;
 
-use args::{Cli, resolve_config_path};
+use args::{Cli, resolve_config_path, resolve_workspace_directory};
 use chap_core::AgentBuilder;
 use clap::Parser;
 use render::{render_load_error, render_session_error, render_start_error};
@@ -29,6 +29,9 @@ async fn async_main(tracing: telemetry::TracingRouter) -> ExitCode {
 }
 
 async fn run(cli: Cli, tracing: &telemetry::TracingRouter) -> Result<(), String> {
+    let current_directory = env::current_dir()
+        .map_err(|source| format!("failed to resolve the current directory: {source}"))?;
+    let workspace_directory = resolve_workspace_directory(cli.workspace, &current_directory)?;
     let xdg_config_home = env::var_os("XDG_CONFIG_HOME");
     let home = env::var_os("HOME");
     let config_path = resolve_config_path(
@@ -37,7 +40,9 @@ async fn run(cli: Cli, tracing: &telemetry::TracingRouter) -> Result<(), String>
         xdg_config_home.as_deref(),
         home.as_deref(),
     )?;
-    let builder = AgentBuilder::load(&config_path).map_err(render_load_error)?;
+    let builder = AgentBuilder::load(&config_path)
+        .map_err(render_load_error)?
+        .workspace_directory(workspace_directory);
     match cli.command {
         None => {
             let consent_path = builder.consent_path().map_err(render_load_error)?;

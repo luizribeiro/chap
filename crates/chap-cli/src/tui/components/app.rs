@@ -7,10 +7,18 @@ use iocraft::prelude::*;
 
 #[component]
 pub fn Chap(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
-    let session = hooks.use_context::<TuiContext>().session.clone();
+    let context = hooks.use_context::<TuiContext>();
+    let session = context.session.clone();
+    let workspace_status = context.workspace_status.clone();
     let provider = session.provider().to_string();
     let mut system = hooks.use_context_mut::<SystemContext>();
-    let mut transcript = hooks.use_state(TranscriptModel::default);
+    let mut transcript = hooks.use_state(move || TranscriptModel {
+        messages: workspace_status
+            .into_iter()
+            .map(ChatMessage::status)
+            .collect(),
+        ..TranscriptModel::default()
+    });
     let mut busy = hooks.use_state(|| false);
     let mut should_exit = hooks.use_state(|| false);
     let (terminal_width, terminal_height) = hooks.use_terminal_size();

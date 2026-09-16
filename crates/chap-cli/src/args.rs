@@ -14,8 +14,32 @@ pub(crate) struct Cli {
     #[arg(long, env = "CHAP_CONFIG", global = true)]
     pub(crate) config: Option<PathBuf>,
 
+    /// Directory mounted at /mnt/workspace when agent.workspace is configured.
+    #[arg(long, env = "CHAP_WORKSPACE", global = true, value_name = "DIR")]
+    pub(crate) workspace: Option<PathBuf>,
+
     #[command(subcommand)]
     pub(crate) command: Option<Command>,
+}
+
+pub(crate) fn resolve_workspace_directory(
+    configured: Option<PathBuf>,
+    current_directory: &Path,
+) -> Result<PathBuf, String> {
+    let path = configured.unwrap_or_else(|| current_directory.to_path_buf());
+    let resolved = path.canonicalize().map_err(|source| {
+        format!(
+            "failed to resolve workspace directory `{}`: {source}",
+            path.display()
+        )
+    })?;
+    if !resolved.is_dir() {
+        return Err(format!(
+            "workspace path `{}` is not a directory",
+            resolved.display()
+        ));
+    }
+    Ok(resolved)
 }
 
 pub(crate) fn resolve_config_path(
@@ -84,6 +108,53 @@ mod tests {
 
         let cli = Cli::try_parse_from(["chap", "--config", "explicit.json"]).unwrap();
         assert_eq!(cli.config, Some(PathBuf::from("explicit.json")));
+    }
+
+    #[test]
+    fn workspace_flag_is_paired_with_the_environment_without_a_static_default() {
+        let command = Cli::command();
+        let argument = command
+            .get_arguments()
+            .find(|argument| argument.get_id() == "workspace")
+            .unwrap();
+
+        assert_eq!(argument.get_env(), Some(OsStr::new("CHAP_WORKSPACE")));
+        assert!(argument.get_default_values().is_empty());
+
+        let cli = Cli::try_parse_from(["chap", "--workspace", "project"]).unwrap();
+        assert_eq!(cli.workspace, Some(PathBuf::from("project")));
+    }
+
+    #[test]
+    fn explicit_workspace_directory_is_canonicalized() {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = directory.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+
+        let resolved =
+            resolve_workspace_directory(Some(workspace.clone()), Path::new("/unused")).unwrap();
+
+        assert_eq!(resolved, workspace.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn workspace_directory_defaults_to_the_current_directory() {
+        let directory = tempfile::tempdir().unwrap();
+
+        let resolved = resolve_workspace_directory(None, directory.path()).unwrap();
+
+        assert_eq!(resolved, directory.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn missing_workspace_directory_error_names_the_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing-workspace");
+
+        let error =
+            resolve_workspace_directory(Some(missing.clone()), Path::new("/unused")).unwrap_err();
+
+        assert!(error.contains(&missing.display().to_string()));
     }
 
     #[test]

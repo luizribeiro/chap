@@ -3,7 +3,7 @@ mod diagnostics;
 mod editor;
 mod model;
 
-use chap_core::{Session, SessionOptions};
+use chap_core::{Session, SessionOptions, WorkspaceInfo};
 use components::Chap;
 use diagnostics::TuiDiagnostics;
 use iocraft::prelude::*;
@@ -17,6 +17,7 @@ const PROVIDER: &str = "openai";
 
 struct TuiContext {
     session: Session,
+    workspace_status: Option<String>,
 }
 
 pub async fn run(
@@ -28,6 +29,7 @@ pub async fn run(
         return Err("the terminal interface requires an interactive terminal".into());
     }
 
+    let workspace_status = agent.workspace().as_ref().map(format_workspace_status);
     let provider = PROVIDER
         .parse::<chap_core::PluginId>()
         .map_err(|error| error.to_string())?;
@@ -37,7 +39,7 @@ pub async fn run(
         .map_err(crate::render_session_error)?;
     let session_id = session.id();
     let mut element = element! {
-        ContextProvider(value: Context::owned(TuiContext { session })) {
+        ContextProvider(value: Context::owned(TuiContext { session, workspace_status })) {
             Chap
         }
     };
@@ -51,6 +53,19 @@ pub async fn run(
     .await;
     diagnostics.finish();
     result
+}
+
+fn format_workspace_status(workspace: &WorkspaceInfo) -> String {
+    let access = if workspace.readonly {
+        "read-only"
+    } else {
+        "read-write"
+    };
+    format!(
+        "workspace: {} ({access}) in {}",
+        workspace.directory.display(),
+        workspace.image
+    )
 }
 
 async fn await_terminal_task<E>(
@@ -77,6 +92,21 @@ mod tests {
     };
 
     struct RestoreOnDrop(Arc<AtomicBool>);
+
+    #[test]
+    fn formats_the_workspace_startup_status() {
+        let workspace = WorkspaceInfo {
+            directory: "/project".into(),
+            readonly: true,
+            image: "docker.io/library/alpine:3.20".into(),
+            egress: vec![],
+        };
+
+        assert_eq!(
+            format_workspace_status(&workspace),
+            "workspace: /project (read-only) in docker.io/library/alpine:3.20"
+        );
+    }
 
     impl Drop for RestoreOnDrop {
         fn drop(&mut self) {

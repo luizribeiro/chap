@@ -5,7 +5,9 @@ mod provider;
 mod session;
 mod tool;
 
-pub use agent::{Agent, AgentBuilder, PluginCheck, PluginRefusal, PluginRefusalReason, StartError};
+pub use agent::{
+    Agent, AgentBuilder, PluginCheck, PluginRefusal, PluginRefusalReason, StartError, WorkspaceInfo,
+};
 pub use config::LoadError;
 pub use consent::{ConsentError, ConsentStore, PluginConsentReview};
 pub use lockgate::{

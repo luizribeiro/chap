@@ -77,7 +77,7 @@ impl ChatMessage {
         }
     }
 
-    fn status(content: impl Into<String>) -> Self {
+    pub(super) fn status(content: impl Into<String>) -> Self {
         Self::Status(content.into())
     }
 
