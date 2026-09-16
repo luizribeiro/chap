@@ -6,7 +6,7 @@ use crate::{
 };
 use chap_vm::host::{
     Backend, ExecOutcome as VmExecOutcome, RequestedVmConfig, VmBackend, VmCommand, VmConfig,
-    VmIdentity, VmRef, VmSettings,
+    VmIdentity, VmPrincipal, VmRef, VmSettings,
 };
 use lockgate::{HostCtx, PermissionDenied, PluginId, PluginSubject, ResolveScopedResource};
 use std::{
@@ -140,7 +140,7 @@ impl<B: VmBackend> VmHost<B> {
         VmIdentity {
             installation_id: self.installation_id.clone(),
             session_epoch: self.session_epoch,
-            plugin_id: subject.plugin_id().clone(),
+            principal: VmPrincipal::Plugin(subject.plugin_id().clone()),
             logical_name: logical_name.to_owned(),
         }
     }
@@ -160,10 +160,11 @@ impl<B: VmBackend> VmHost<B> {
         plugin_id: &PluginId,
     ) -> Result<ManagedVm, vm::VmError> {
         let Some(vm_ref) = self.backend.get(id).await? else {
-            // Physical identity includes the caller plugin id, so absence reveals no other VM.
+            // Physical identity includes the caller principal, so absence reveals no other VM.
             return Err(vm::VmError::NoSuchVm);
         };
-        if self.backend.owner_of(&vm_ref).await?.as_ref() != Some(plugin_id) {
+        let principal = VmPrincipal::Plugin(plugin_id.clone());
+        if self.backend.owner_of(&vm_ref).await?.as_ref() != Some(&principal) {
             return Err(vm::VmError::NoSuchVm);
         }
         Ok(ManagedVm { vm_ref })
@@ -241,7 +242,12 @@ impl<B: VmBackend> VmHost<B> {
         {
             return Err(vm::VmError::AlreadyExists);
         }
-        let reservation = self.reserve_vm(&id.plugin_id)?;
+        let VmPrincipal::Plugin(plugin_id) = &id.principal else {
+            return Err(vm::VmError::Denied(
+                "host-owned VMs cannot be created through the plugin path".into(),
+            ));
+        };
+        let reservation = self.reserve_vm(plugin_id)?;
         let vm = self
             .backend_call(
                 self.settings.calls.create_timeout_ms,
@@ -265,7 +271,12 @@ impl<B: VmBackend> VmHost<B> {
         let reservation = if exists {
             None
         } else {
-            Some(self.reserve_vm(&id.plugin_id)?)
+            let VmPrincipal::Plugin(plugin_id) = &id.principal else {
+                return Err(vm::VmError::Denied(
+                    "host-owned VMs cannot be created through the plugin path".into(),
+                ));
+            };
+            Some(self.reserve_vm(plugin_id)?)
         };
         let vm = self
             .backend_call(
@@ -629,14 +640,18 @@ mod tests {
             id: &VmIdentity,
             cfg: &VmConfig,
         ) -> Result<VmRef, chap_vm::host::VmError> {
-            if self.blocked_plugin_ids.contains(&id.plugin_id) {
+            let plugin_id = match &id.principal {
+                VmPrincipal::Plugin(plugin_id) => Some(plugin_id),
+                VmPrincipal::Host => None,
+            };
+            if plugin_id.is_some_and(|plugin_id| self.blocked_plugin_ids.contains(plugin_id)) {
                 self.create_started.notify_one();
                 self.release_create.notified().await;
             }
-            if self
-                .failed_identities
-                .contains(&(id.plugin_id.clone(), id.logical_name.clone()))
-            {
+            if plugin_id.is_some_and(|plugin_id| {
+                self.failed_identities
+                    .contains(&(plugin_id.clone(), id.logical_name.clone()))
+            }) {
                 return Err(chap_vm::host::VmError::Failed(
                     "injected create failure".into(),
                 ));
@@ -689,7 +704,10 @@ mod tests {
             self.inner.destroy(vm).await
         }
 
-        async fn owner_of(&self, vm: &VmRef) -> Result<Option<PluginId>, chap_vm::host::VmError> {
+        async fn owner_of(
+            &self,
+            vm: &VmRef,
+        ) -> Result<Option<VmPrincipal>, chap_vm::host::VmError> {
             if self.vanish_on_owner.swap(false, Ordering::SeqCst) {
                 self.inner.destroy(vm).await?;
             }
@@ -744,7 +762,7 @@ mod tests {
         VmIdentity {
             installation_id: "test-installation".into(),
             session_epoch: 1,
-            plugin_id: plugin_id.parse().unwrap(),
+            principal: VmPrincipal::Plugin(plugin_id.parse().unwrap()),
             logical_name: logical_name.into(),
         }
     }
@@ -850,13 +868,16 @@ mod tests {
         let vm = host.create(&id, requested_config()).await.unwrap();
         backend.block_destroy();
         host.settings.calls.destroy_timeout_ms = 10;
+        let VmPrincipal::Plugin(plugin_id) = &id.principal else {
+            unreachable!()
+        };
 
         assert!(matches!(
-            host.destroy(&id.plugin_id, &vm).await,
+            host.destroy(plugin_id, &vm).await,
             Err(vm::VmError::TimedOut)
         ));
         assert_eq!(
-            host.vm_counts.lock().unwrap().get(&id.plugin_id).copied(),
+            host.vm_counts.lock().unwrap().get(plugin_id).copied(),
             Some(1)
         );
     }

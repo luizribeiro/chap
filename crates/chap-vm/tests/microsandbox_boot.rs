@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chap_vm::host::{
     Backend as MicrosandboxBackend, MountSpec, ResolvedImage, VmBackend, VmCallSettings, VmCommand,
-    VmConfig, VmError, VmIdentity, VmSettings,
+    VmConfig, VmError, VmIdentity, VmPrincipal, VmSettings,
 };
 use chap_vm::vm::Egress;
 
@@ -23,7 +23,7 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
     let identity = VmIdentity {
         installation_id: format!("chap-microsandbox-e2e-{nonce}"),
         session_epoch: 1,
-        plugin_id: "microsandbox-e2e".parse().unwrap(),
+        principal: VmPrincipal::Plugin("microsandbox-e2e".parse().unwrap()),
         logical_name: "alpine".into(),
     };
     let config = VmConfig {
@@ -61,9 +61,9 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
     let backend = MicrosandboxBackend::new(&settings);
 
     println!(
-        "microsandbox boot: creating {} as {}",
+        "microsandbox boot: creating {} as {:?}",
         identity.physical_label(),
-        identity.plugin_id
+        identity.principal
     );
     let vm = backend.create(&identity, &config).await.unwrap();
 
@@ -126,7 +126,7 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
     assert_eq!(backend.get(&identity).await.unwrap(), Some(vm.clone()));
     assert_eq!(
         backend.owner_of(&vm).await.unwrap(),
-        Some(identity.plugin_id.clone())
+        Some(identity.principal.clone())
     );
     backend
         .shutdown(&identity.installation_id, identity.session_epoch)

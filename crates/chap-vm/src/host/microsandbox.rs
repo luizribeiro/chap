@@ -7,21 +7,20 @@ use std::{
     vec::Vec,
 };
 
-use lockgate_policy::PluginId;
 use microsandbox::{
     ExecEvent, MicrosandboxError, NetworkPolicy, Sandbox,
     sandbox::{SandboxBuilder, SandboxHandle},
 };
 
 use super::{
-    Egress, ExecOutcome, ResolvedImage, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmRef,
-    VmSettings,
+    Egress, ExecOutcome, ResolvedImage, VmBackend, VmCommand, VmConfig, VmError, VmIdentity,
+    VmPrincipal, VmRef, VmSettings,
 };
 
 const NAME_PREFIX: &str = "chap-";
 const INSTALLATION_LABEL: &str = "chap.installation";
 const EPOCH_LABEL: &str = "chap.epoch";
-const PLUGIN_ID_LABEL: &str = "chap.principal";
+const PRINCIPAL_LABEL: &str = "chap.principal";
 const PHYSICAL_LABEL: &str = "chap.physical";
 const CONFIG_LABEL: &str = "chap.config";
 const LIST_PAGE_SIZE: u32 = 100;
@@ -180,7 +179,7 @@ impl VmBackend for MicrosandboxBackend {
         destroy_handle(Self::handle(vm).await?).await
     }
 
-    async fn owner_of(&self, vm: &VmRef) -> Result<Option<PluginId>, VmError> {
+    async fn owner_of(&self, vm: &VmRef) -> Result<Option<VmPrincipal>, VmError> {
         let handle = match Self::handle(vm).await {
             Ok(handle) => handle,
             Err(VmError::NoSuchVm) => return Ok(None),
@@ -192,11 +191,10 @@ impl VmBackend for MicrosandboxBackend {
         config
             .spec
             .labels
-            .get(PLUGIN_ID_LABEL)
-            .cloned()
-            .map(PluginId::try_from)
+            .get(PRINCIPAL_LABEL)
+            .map(String::as_str)
+            .map(VmPrincipal::from_label)
             .transpose()
-            .map_err(|error| VmError::Failed(format!("invalid VM owner metadata: {error}")))
     }
 
     async fn reap(&self, installation_id: &str, current_epoch: u64) -> Result<(), VmError> {
@@ -299,7 +297,7 @@ fn sandbox_builder(id: &VmIdentity, cfg: &VmConfig) -> Result<SandboxBuilder, Vm
         .idle_timeout(cfg.idle_timeout_ms.div_ceil(1_000))
         .label(INSTALLATION_LABEL, &id.installation_id)
         .label(EPOCH_LABEL, id.session_epoch.to_string())
-        .label(PLUGIN_ID_LABEL, id.plugin_id.as_str())
+        .label(PRINCIPAL_LABEL, id.principal.label())
         .label(PHYSICAL_LABEL, &physical_label)
         .label(CONFIG_LABEL, &cfg.config_hash);
 

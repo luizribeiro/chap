@@ -21,10 +21,38 @@ mod microsandbox;
 pub use microsandbox::MicrosandboxBackend as Backend;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VmPrincipal {
+    Plugin(PluginId),
+    Host,
+}
+
+impl VmPrincipal {
+    pub(crate) fn label(&self) -> String {
+        match self {
+            Self::Plugin(plugin_id) => format!("plugin:{}", plugin_id.as_str()),
+            Self::Host => "host".to_string(),
+        }
+    }
+
+    #[cfg(feature = "microsandbox")]
+    pub(crate) fn from_label(value: &str) -> Result<Self, VmError> {
+        if value == "host" {
+            return Ok(Self::Host);
+        }
+        value
+            .strip_prefix("plugin:")
+            .ok_or_else(|| VmError::Failed("invalid VM owner metadata".into()))?
+            .try_into()
+            .map(Self::Plugin)
+            .map_err(|error| VmError::Failed(format!("invalid VM owner metadata: {error}")))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VmIdentity {
     pub installation_id: String,
     pub session_epoch: u64,
-    pub plugin_id: PluginId,
+    pub principal: VmPrincipal,
     pub logical_name: String,
 }
 
@@ -32,10 +60,10 @@ impl VmIdentity {
     /// Returns hex SHA-256 over length-delimited identity components.
     pub fn physical_label(&self) -> String {
         let mut hash = Sha256::new();
-        hash.update(b"chap-vm-identity-v0");
+        hash.update(b"chap-vm-identity-v1");
         hash_component(&mut hash, self.installation_id.as_bytes());
         hash_component(&mut hash, &self.session_epoch.to_be_bytes());
-        hash_component(&mut hash, self.plugin_id.as_str().as_bytes());
+        hash_component(&mut hash, self.principal.label().as_bytes());
         hash_component(&mut hash, self.logical_name.as_bytes());
         hex_digest(hash.finalize())
     }
@@ -229,7 +257,7 @@ pub trait VmBackend: Send + Sync + 'static {
     async fn read_file(&self, vm: &VmRef, path: &str, max_bytes: u64) -> Result<Vec<u8>, VmError>;
     async fn write_file(&self, vm: &VmRef, path: &str, bytes: &[u8]) -> Result<(), VmError>;
     async fn destroy(&self, vm: &VmRef) -> Result<(), VmError>;
-    async fn owner_of(&self, vm: &VmRef) -> Result<Option<PluginId>, VmError>;
+    async fn owner_of(&self, vm: &VmRef) -> Result<Option<VmPrincipal>, VmError>;
     async fn reap(&self, installation_id: &str, current_epoch: u64) -> Result<(), VmError>;
     async fn shutdown(&self, installation_id: &str, session_epoch: u64) -> Result<(), VmError>;
 }
@@ -503,7 +531,7 @@ mod tests {
 
     use super::{
         EnvVar, MountSpec, OciReference, RequestedVmConfig, VmCallSettings, VmError, VmIdentity,
-        VmInstanceSettings, VmLimits, VmSettings,
+        VmInstanceSettings, VmLimits, VmPrincipal, VmSettings,
     };
     use crate::vm::Egress;
 
@@ -513,7 +541,7 @@ mod tests {
         VmIdentity {
             installation_id: "installation-a".into(),
             session_epoch: 7,
-            plugin_id: "build-plugin-grant-a".parse().unwrap(),
+            principal: VmPrincipal::Plugin("build-plugin-grant-a".parse().unwrap()),
             logical_name: "build-env".into(),
         }
     }
@@ -557,7 +585,11 @@ mod tests {
                 ..original.clone()
             },
             VmIdentity {
-                plugin_id: "build-plugin-grant-b".parse().unwrap(),
+                principal: VmPrincipal::Plugin("build-plugin-grant-b".parse().unwrap()),
+                ..original.clone()
+            },
+            VmIdentity {
+                principal: VmPrincipal::Host,
                 ..original.clone()
             },
             VmIdentity {

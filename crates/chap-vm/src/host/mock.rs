@@ -6,8 +6,7 @@ use std::{
     vec::Vec,
 };
 
-use super::{ExecOutcome, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmRef};
-use lockgate_policy::PluginId;
+use super::{ExecOutcome, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmPrincipal, VmRef};
 
 #[derive(Default)]
 pub struct MockVmBackend {
@@ -15,7 +14,7 @@ pub struct MockVmBackend {
 }
 
 struct MockVm {
-    owner: PluginId,
+    owner: VmPrincipal,
     config_hash: String,
     installation_id: String,
     session_epoch: u64,
@@ -35,7 +34,7 @@ impl MockVmBackend {
 impl MockVm {
     fn new(id: &VmIdentity, cfg: &VmConfig) -> Self {
         Self {
-            owner: id.plugin_id.clone(),
+            owner: id.principal.clone(),
             config_hash: cfg.config_hash.clone(),
             installation_id: id.installation_id.clone(),
             session_epoch: id.session_epoch,
@@ -121,7 +120,7 @@ impl VmBackend for MockVmBackend {
         }
     }
 
-    async fn owner_of(&self, vm: &VmRef) -> Result<Option<PluginId>, VmError> {
+    async fn owner_of(&self, vm: &VmRef) -> Result<Option<VmPrincipal>, VmError> {
         Ok(self
             .lock()
             .get(vm.physical_label())
@@ -155,7 +154,7 @@ mod tests {
 
     use super::MockVmBackend;
     use crate::host::{
-        ResolvedImage, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmSettings,
+        ResolvedImage, VmBackend, VmCommand, VmConfig, VmError, VmIdentity, VmPrincipal, VmSettings,
     };
 
     fn block_on<F: Future>(future: F) -> F::Output {
@@ -173,7 +172,7 @@ mod tests {
         VmIdentity {
             installation_id: installation_id.into(),
             session_epoch: epoch,
-            plugin_id: plugin_id.parse().unwrap(),
+            principal: VmPrincipal::Plugin(plugin_id.parse().unwrap()),
             logical_name: name.into(),
         }
     }
@@ -344,7 +343,7 @@ mod tests {
 
             assert_eq!(
                 backend.owner_of(&vm).await.unwrap(),
-                Some("builder-grant-a".parse().unwrap())
+                Some(VmPrincipal::Plugin("builder-grant-a".parse().unwrap()))
             );
         });
     }
@@ -355,10 +354,21 @@ mod tests {
             let backend = MockVmBackend::new(&VmSettings::default());
             let first = identity("installation-a", 7, "builder-grant-a", "build-env");
             let second = identity("installation-a", 7, "builder-grant-b", "build-env");
+            let host = VmIdentity {
+                principal: VmPrincipal::Host,
+                ..first.clone()
+            };
             let first_vm = backend.create(&first, &config("hash-a")).await.unwrap();
             let second_vm = backend.create(&second, &config("hash-a")).await.unwrap();
+            let host_vm = backend.create(&host, &config("hash-a")).await.unwrap();
 
             assert_ne!(first_vm, second_vm);
+            assert_ne!(first_vm, host_vm);
+            assert_ne!(second_vm, host_vm);
+            assert_eq!(
+                backend.owner_of(&host_vm).await.unwrap(),
+                Some(VmPrincipal::Host)
+            );
             backend
                 .write_file(&first_vm, "/work/owner", b"grant-a")
                 .await
