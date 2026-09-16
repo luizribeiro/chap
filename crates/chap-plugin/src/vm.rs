@@ -147,6 +147,7 @@ mod tests {
             }],
             egress: vec!["0.0.0.0/0:443".into()],
             secrets: vec![],
+            exec_timeout_ms: 30_000,
         };
 
         let (vm, workspace) = Vm::from_workspace(workspace);

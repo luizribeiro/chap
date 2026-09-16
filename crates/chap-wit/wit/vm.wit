@@ -39,6 +39,7 @@ interface vm {
     mounts: list<workspace-mount>,
     egress: list<string>,
     secrets: list<workspace-secret>,
+    exec-timeout-ms: u64,
   }
 
   variant vm-error {

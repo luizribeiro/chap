@@ -156,6 +156,7 @@ mod tests {
             }],
             egress: vec!["0.0.0.0/0:443".into(), "0.0.0.0/0:53".into()],
             secrets: vec![],
+            exec_timeout_ms: 30_000,
         }
     }
 

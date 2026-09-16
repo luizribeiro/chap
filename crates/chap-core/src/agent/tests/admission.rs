@@ -247,6 +247,7 @@ async fn start_resolves_and_exposes_the_workspace_directory() {
             image: "docker.io/library/rust:1-alpine".into(),
             egress: vec!["0.0.0.0/0:443".into()],
             secrets: Vec::new(),
+            exec_timeout_ms: 30_000,
         }
     );
 }

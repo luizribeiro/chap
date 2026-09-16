@@ -332,6 +332,7 @@ pub struct WorkspaceInfo {
     pub image: String,
     pub egress: Vec<String>,
     pub secrets: Vec<WorkspaceSecret>,
+    pub exec_timeout_ms: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -345,6 +346,16 @@ pub(crate) struct ResolvedWorkspace {
     pub(crate) info: WorkspaceInfo,
     #[cfg(feature = "vm")]
     pub(crate) requested: chap_vm::host::RequestedVmConfig,
+}
+
+#[cfg(feature = "vm")]
+pub(crate) fn workspace_exec_timeout_ms(
+    config: &Config,
+    settings: &chap_vm::host::VmSettings,
+) -> u64 {
+    let tools_deadline_ms = u64::try_from(config.plugin_budgets().tools.deadline.as_millis())
+        .expect("plugin deadline is bounded to u64 milliseconds");
+    tools_deadline_ms.min(settings.calls.exec_timeout_ceiling_ms)
 }
 
 pub(crate) struct AgentInner {
@@ -396,6 +407,7 @@ impl AgentBuilder {
             .config
             .vm_settings()
             .map_err(ConsentError::HostConfiguration)?;
+        let exec_timeout_ms = workspace_exec_timeout_ms(&self.config, &vm_settings);
         let image = chap_vm::host::OciReference::parse(&settings.image)
             .and_then(|image| image.resolve(&vm_settings).map(|_| image))
             .map_err(|source| ConsentError::InvalidWorkspaceImage {
@@ -474,6 +486,7 @@ impl AgentBuilder {
                         hosts: secret.hosts,
                     })
                     .collect(),
+                exec_timeout_ms,
             },
             requested,
         }))

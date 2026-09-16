@@ -236,6 +236,47 @@ async fn refuses_to_start_the_workspace_plugin_without_agent_workspace() {
     ));
 }
 
+#[tokio::test]
+async fn workspace_reports_the_lower_tools_or_exec_timeout() {
+    for (tools_deadline_ms, exec_ceiling_ms, expected_ms) in
+        [(20_000, 60_000, 20_000), (90_000, 40_000, 40_000)]
+    {
+        let directory = tempfile::tempdir().unwrap();
+        let config_path = directory.path().join("chap.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_vec_pretty(&json!({
+                "agent": {
+                    "budgets": {"tools": {"deadline_ms": tools_deadline_ms}},
+                    "vm": {
+                        "registries": ["docker.io"],
+                        "calls": {"exec_timeout_ceiling_ms": exec_ceiling_ms},
+                    },
+                    "workspace": {
+                        "image": "docker.io/library/alpine:3.20",
+                        "mount": "ro",
+                    },
+                },
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let agent = AgentBuilder::load(&config_path)
+            .unwrap()
+            .state_dir(directory.path())
+            .workspace_directory(directory.path())
+            .start()
+            .await
+            .unwrap();
+
+        assert_eq!(agent.workspace().unwrap().exec_timeout_ms, expected_ms);
+        tokio::task::spawn_blocking(move || drop(agent))
+            .await
+            .unwrap();
+    }
+}
+
 fn write_config(path: &Path, components: &Components, origin: &str, workspace: Option<Value>) {
     let mut agent = json!({
         "vm": {"registries": ["docker.io"]},

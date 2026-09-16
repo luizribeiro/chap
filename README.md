@@ -227,9 +227,9 @@ plugin instance separately. `instance` defines the CPU count, memory, maximum
 lifetime, and idle timeout that every new VM receives. `calls` bounds single
 host calls: `create_timeout_ms` covers each existence lookup and creation call,
 including the image pull and boot; `destroy_timeout_ms` covers destruction plus
-the startup and shutdown reaps; `exec_timeout_ceiling_ms` is both the default
-and the maximum for a command's `timeout-ms`; `exec_max_output_bytes` caps
-stdout and stderr together; and `read_file_max_bytes` caps one file read.
+the startup and shutdown reaps; `exec_timeout_ceiling_ms` caps a command's
+`timeout-ms`; `exec_max_output_bytes` caps stdout and stderr together; and
+`read_file_max_bytes` caps one file read.
 
 `registries` is empty by default, so even a fully qualified image is denied
 until the operator lists its registry. In particular, add `docker.io` to pull
@@ -328,6 +328,9 @@ The guarded `workspace` import returns the reserved handle plus its image,
 guest mount, and egress metadata without booting the VM. Calling it requires
 `vm.manage` with the `workspace` scope. The SDK exposes the import as
 `Vm::workspace`; the returned handle supports the normal exec and file calls.
+The workspace record also carries the effective command time limit: the smaller
+of `agent.budgets.tools.deadline_ms` and
+`agent.vm.calls.exec_timeout_ceiling_ms`.
 
 Before checking a mount grant or starting a VM, the host resolves every bind
 root to its canonical path and passes that same path to the backend. An empty

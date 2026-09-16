@@ -113,6 +113,7 @@ mod tests {
             image: "docker.io/library/alpine:3.20".into(),
             egress: vec![],
             secrets: vec![],
+            exec_timeout_ms: 30_000,
         };
 
         assert_eq!(

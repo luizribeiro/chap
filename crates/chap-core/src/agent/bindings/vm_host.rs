@@ -3,6 +3,7 @@ use crate::{
     agent::{
         ResolvedWorkspace,
         vm_host::{ManagedVm, WorkspaceResource, translate_host_error, translate_requested_config},
+        workspace_exec_timeout_ms,
     },
     config::Config,
     consent::ConsentError,
@@ -46,6 +47,7 @@ pub(crate) struct VmHost<B: VmBackend = Backend> {
     pub(crate) session_epoch: u64,
     pub(crate) vm_counts: Arc<Mutex<HashMap<PluginId, u32>>>,
     pub(crate) workspace: Option<ResolvedWorkspace>,
+    exec_timeout_ms: u64,
     workspace_vm: Arc<tokio::sync::OnceCell<VmRef>>,
     cleanup: Arc<VmCleanup<B>>,
 }
@@ -59,6 +61,7 @@ impl<B: VmBackend> Clone for VmHost<B> {
             session_epoch: self.session_epoch,
             vm_counts: Arc::clone(&self.vm_counts),
             workspace: self.workspace.clone(),
+            exec_timeout_ms: self.exec_timeout_ms,
             workspace_vm: Arc::clone(&self.workspace_vm),
             cleanup: Arc::clone(&self.cleanup),
         }
@@ -74,9 +77,11 @@ pub(in crate::agent) async fn new(
     let settings = config
         .vm_settings()
         .map_err(ConsentError::HostConfiguration)?;
+    let exec_timeout_ms = workspace_exec_timeout_ms(config, &settings);
     VmHost::with_backend(
         Arc::new(Backend::new(&settings)),
         settings,
+        exec_timeout_ms,
         project_root.to_string_lossy().into_owned(),
         session_epoch(),
         workspace,
@@ -97,9 +102,11 @@ pub(in crate::agent) fn preflight(
     let settings = config
         .vm_settings()
         .map_err(ConsentError::HostConfiguration)?;
+    let exec_timeout_ms = workspace_exec_timeout_ms(config, &settings);
     Ok(VmHost::without_lifecycle(
         Arc::new(Backend::new(&settings)),
         settings,
+        exec_timeout_ms,
         project_root.to_string_lossy().into_owned(),
         session_epoch(),
         workspace,
@@ -110,6 +117,7 @@ impl<B: VmBackend> VmHost<B> {
     async fn with_backend(
         backend: Arc<B>,
         settings: VmSettings,
+        exec_timeout_ms: u64,
         installation_id: String,
         session_epoch: u64,
         workspace: Option<ResolvedWorkspace>,
@@ -140,6 +148,7 @@ impl<B: VmBackend> VmHost<B> {
             session_epoch,
             vm_counts: Arc::default(),
             workspace,
+            exec_timeout_ms,
             workspace_vm: Arc::default(),
         })
     }
@@ -147,6 +156,7 @@ impl<B: VmBackend> VmHost<B> {
     fn without_lifecycle(
         backend: Arc<B>,
         settings: VmSettings,
+        exec_timeout_ms: u64,
         installation_id: String,
         session_epoch: u64,
         workspace: Option<ResolvedWorkspace>,
@@ -165,6 +175,7 @@ impl<B: VmBackend> VmHost<B> {
             session_epoch,
             vm_counts: Arc::default(),
             workspace,
+            exec_timeout_ms,
             workspace_vm: Arc::default(),
         }
     }
@@ -227,6 +238,7 @@ impl<B: VmBackend> VmHost<B> {
                     hosts: secret.hosts.clone(),
                 })
                 .collect(),
+            exec_timeout_ms: self.exec_timeout_ms,
         })
     }
 
@@ -926,17 +938,29 @@ mod tests {
         max_vms_per_plugin: u32,
         workspace: Option<ResolvedWorkspace>,
     ) -> VmHost<ControlledBackend> {
+        test_host_with_workspace_timeouts(backend, max_vms_per_plugin, workspace, 1_000, 1_000)
+            .await
+    }
+
+    async fn test_host_with_workspace_timeouts(
+        backend: Arc<ControlledBackend>,
+        max_vms_per_plugin: u32,
+        workspace: Option<ResolvedWorkspace>,
+        tools_deadline_ms: u64,
+        exec_ceiling_ms: u64,
+    ) -> VmHost<ControlledBackend> {
         VmHost::with_backend(
             backend,
             VmSettings {
                 registries: vec!["ghcr.io".into()],
                 limits: VmLimits { max_vms_per_plugin },
                 calls: VmCallSettings {
-                    exec_timeout_ceiling_ms: 1_000,
+                    exec_timeout_ceiling_ms: exec_ceiling_ms,
                     ..VmCallSettings::default()
                 },
                 ..VmSettings::default()
             },
+            tools_deadline_ms.min(exec_ceiling_ms),
             "test-installation".into(),
             1,
             workspace,
@@ -995,6 +1019,7 @@ mod tests {
                     env: "GITHUB_TOKEN".into(),
                     hosts: vec!["api.github.com".into(), "github.com".into()],
                 }],
+                exec_timeout_ms: 750,
             },
             requested,
         }
@@ -1052,24 +1077,35 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_record_reports_config_without_booting_the_vm() {
-        let backend = Arc::new(ControlledBackend::new(&[], &[]));
-        let host =
-            test_host_with_workspace(Arc::clone(&backend), 1, Some(resolved_workspace())).await;
+        for (tools_deadline_ms, exec_ceiling_ms, expected_ms) in
+            [(750, 1_000, 750), (2_000, 1_000, 1_000)]
+        {
+            let backend = Arc::new(ControlledBackend::new(&[], &[]));
+            let host = test_host_with_workspace_timeouts(
+                Arc::clone(&backend),
+                1,
+                Some(resolved_workspace()),
+                tools_deadline_ms,
+                exec_ceiling_ms,
+            )
+            .await;
 
-        let workspace = host.workspace_record().unwrap();
-        assert_eq!(workspace.vm, "@workspace");
-        assert_eq!(workspace.image, "ghcr.io/acme/build:1.2");
-        assert_eq!(workspace.mounts.len(), 1);
-        assert_eq!(workspace.mounts[0].guest, "/mnt/workspace");
-        assert!(workspace.mounts[0].readonly);
-        assert_eq!(workspace.egress, ["127.0.0.1:1"]);
-        assert_eq!(workspace.secrets.len(), 1);
-        assert_eq!(workspace.secrets[0].env, "GITHUB_TOKEN");
-        assert_eq!(workspace.secrets[0].hosts, ["api.github.com", "github.com"]);
-        assert_eq!(
-            backend.workspace_get_or_create_calls.load(Ordering::SeqCst),
-            0
-        );
+            let workspace = host.workspace_record().unwrap();
+            assert_eq!(workspace.vm, "@workspace");
+            assert_eq!(workspace.image, "ghcr.io/acme/build:1.2");
+            assert_eq!(workspace.mounts.len(), 1);
+            assert_eq!(workspace.mounts[0].guest, "/mnt/workspace");
+            assert!(workspace.mounts[0].readonly);
+            assert_eq!(workspace.egress, ["127.0.0.1:1"]);
+            assert_eq!(workspace.secrets.len(), 1);
+            assert_eq!(workspace.secrets[0].env, "GITHUB_TOKEN");
+            assert_eq!(workspace.secrets[0].hosts, ["api.github.com", "github.com"]);
+            assert_eq!(workspace.exec_timeout_ms, expected_ms);
+            assert_eq!(
+                backend.workspace_get_or_create_calls.load(Ordering::SeqCst),
+                0
+            );
+        }
     }
 
     #[tokio::test]
@@ -1312,6 +1348,7 @@ mod tests {
                 },
                 ..VmSettings::default()
             },
+            1_000,
             "test-installation".into(),
             2,
             None,
@@ -1359,6 +1396,7 @@ mod tests {
                 },
                 ..VmSettings::default()
             },
+            1_000,
             "test-installation".into(),
             current.session_epoch,
             None,
