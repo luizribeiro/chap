@@ -25,7 +25,10 @@ async fn runs_a_command_in_the_host_owned_workspace() {
     let mock = MockServer::start(&[ToolRequest {
         id: "workspace-call",
         name: "run",
-        arguments: json!({"command": "echo workspace-e2e-ok"}),
+        arguments: json!({
+            "command": "echo workspace-e2e-ok",
+            "timeout_secs": 7,
+        }),
     }]);
     let directory = tempfile::tempdir().unwrap();
     let config_path = directory.path().join("chap.json");
@@ -81,6 +84,7 @@ async fn runs_a_command_in_the_host_owned_workspace() {
             .any(|command| {
                 command.args == ["sh", "-c", "echo workspace-e2e-ok"]
                     && command.cwd.as_deref() == Some("/mnt/workspace")
+                    && command.timeout_ms == Some(7_000)
             })
     );
     let requests = mock.finish();

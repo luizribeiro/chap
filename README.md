@@ -348,6 +348,8 @@ description reports the working directory, image, guest mount mode, egress
 scopes, reuse behavior, and effective time limit. Results contain the exit code,
 stdout, stderr, and a note when the host's combined output cap truncated the
 streams.
+The optional integer `timeout_secs` defaults to 120 seconds or the effective
+limit when lower, and requests above that limit are clamped.
 
 The real backend uses microsandbox microVMs on Apple Silicon or Linux with KVM.
 A system Cargo build installs the microsandbox runtime under `~/.microsandbox`

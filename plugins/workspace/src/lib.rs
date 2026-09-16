@@ -1,9 +1,11 @@
 use chap_plugin::tools::{ToolDefinition, ToolError, Tools};
-use chap_plugin::vm::{ExecResult, Vm, Workspace, WorkspaceMount, WorkspaceSecret};
+use chap_plugin::vm::{ExecResult, Vm, VmError, Workspace, WorkspaceMount, WorkspaceSecret};
 use chap_plugin::{MetadataSource, Needs, NoSettings, Plugin, ScopeRef, capabilities};
 use serde::Deserialize;
+use std::num::NonZeroU64;
 
 const RUN: &str = "run";
+const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 
 struct WorkspacePlugin;
 
@@ -43,10 +45,16 @@ impl Tools for WorkspacePlugin {
         let arguments = parse_arguments(&arguments)?;
         let (vm, workspace) = Vm::workspace().await.map_err(ToolError::from)?;
         let cwd = working_directory(&workspace)?;
+        let timeout_ms = command_timeout_ms(arguments.timeout_secs, workspace.exec_timeout_ms);
         let output = vm
-            .exec(&["sh", "-c", &arguments.command], Some(cwd), None, None)
+            .exec(
+                &["sh", "-c", &arguments.command],
+                Some(cwd),
+                None,
+                Some(timeout_ms),
+            )
             .await
-            .map_err(ToolError::from)?;
+            .map_err(|error| run_error(error, timeout_ms))?;
         Ok(format_output(output))
     }
 }
@@ -69,6 +77,7 @@ fn run_definition(workspace: &Workspace) -> Result<ToolDefinition, ToolError> {
         .collect::<Vec<_>>()
         .join(", ");
     let egress = workspace.egress.join(", ");
+    let default_timeout_ms = command_timeout_ms(None, workspace.exec_timeout_ms);
     let secrets = if workspace.secrets.is_empty() {
         String::new()
     } else {
@@ -85,14 +94,16 @@ fn run_definition(workspace: &Workspace) -> Result<ToolDefinition, ToolError> {
     Ok(ToolDefinition {
         name: RUN.to_owned(),
         description: format!(
-            "Run a shell command with sh -c in the agent's workspace VM. The working directory is {cwd}. The image is {}. Guest mount points: [{mounts}]. Configured egress scopes: [{egress}]. The VM is reused across calls. Commands are killed after {}.{secrets}",
+            "Run a shell command with sh -c in the agent's workspace VM. The working directory is {cwd}. The image is {}. Guest mount points: [{mounts}]. Configured egress scopes: [{egress}]. The VM is reused across calls. Commands are killed when their timeout expires. The default timeout is {} and the maximum is {}.{secrets}",
             workspace.image,
+            describe_seconds(default_timeout_ms),
             describe_seconds(workspace.exec_timeout_ms),
         ),
         parameters: r#"{
             "type":"object",
             "properties":{
-                "command":{"type":"string","description":"Shell command to run with sh -c."}
+                "command":{"type":"string","description":"Shell command to run with sh -c."},
+                "timeout_secs":{"type":"integer","minimum":1,"description":"Command timeout in seconds. Values above the reported maximum are clamped."}
             },
             "required":["command"],
             "additionalProperties":false
@@ -116,6 +127,24 @@ fn describe_seconds(milliseconds: u64) -> String {
         format!("{seconds} seconds")
     } else {
         format!("{seconds}.{remainder:03} seconds")
+    }
+}
+
+fn command_timeout_ms(requested: Option<NonZeroU64>, maximum_ms: u64) -> u64 {
+    requested
+        .map_or(DEFAULT_TIMEOUT_MS, |seconds| {
+            seconds.get().saturating_mul(1_000)
+        })
+        .min(maximum_ms)
+}
+
+fn run_error(error: VmError, timeout_ms: u64) -> ToolError {
+    match error {
+        VmError::TimedOut => ToolError::Failed(format!(
+            "workspace command timed out and was killed after {}",
+            describe_seconds(timeout_ms)
+        )),
+        error => error.into(),
     }
 }
 
@@ -158,6 +187,7 @@ fn parse_arguments(arguments: &str) -> Result<RunArguments, ToolError> {
 #[serde(deny_unknown_fields)]
 struct RunArguments {
     command: String,
+    timeout_secs: Option<NonZeroU64>,
 }
 
 #[cfg(test)]
@@ -201,7 +231,8 @@ mod tests {
         assert!(description.contains("/mnt/workspace (read-write)"));
         assert!(description.contains("0.0.0.0/0:443, 0.0.0.0/0:53"));
         assert!(description.contains("reused across calls"));
-        assert!(description.contains("killed after 30 seconds"));
+        assert!(description.contains("default timeout is 30 seconds"));
+        assert!(description.contains("maximum is 30 seconds"));
         assert!(
             run_definition(&workspace(true))
                 .unwrap()
@@ -232,6 +263,7 @@ mod tests {
             parse_arguments(r#"{"command":"echo hello\npwd"}"#).unwrap(),
             RunArguments {
                 command: "echo hello\npwd".to_owned(),
+                timeout_secs: None,
             }
         );
         assert!(matches!(
@@ -239,6 +271,8 @@ mod tests {
             Err(ToolError::InvalidInput(message)) if message.starts_with("invalid `run` arguments:")
         ));
         assert!(parse_arguments(r#"{"command":["pwd"]}"#).is_err());
+        assert!(parse_arguments(r#"{"command":"pwd","timeout_secs":0}"#).is_err());
+        assert!(parse_arguments(r#"{"command":"pwd","timeout_secs":1.5}"#).is_err());
     }
 
     #[test]
@@ -251,6 +285,44 @@ mod tests {
         assert_eq!(parameters["additionalProperties"], false);
         assert_eq!(parameters["required"], serde_json::json!(["command"]));
         assert_eq!(parameters["properties"]["command"]["type"], "string");
+        assert_eq!(parameters["properties"]["timeout_secs"]["type"], "integer");
+        assert_eq!(parameters["properties"]["timeout_secs"]["minimum"], 1);
+    }
+
+    #[test]
+    fn defaults_to_120_seconds_when_the_reported_limit_is_higher() {
+        assert_eq!(command_timeout_ms(None, 180_000), 120_000);
+    }
+
+    #[test]
+    fn defaults_to_the_reported_limit_when_it_is_lower() {
+        assert_eq!(command_timeout_ms(None, 30_000), 30_000);
+    }
+
+    #[test]
+    fn uses_an_explicit_timeout_below_the_reported_limit() {
+        assert_eq!(
+            command_timeout_ms(Some(NonZeroU64::new(17).unwrap()), 30_000),
+            17_000
+        );
+    }
+
+    #[test]
+    fn clamps_an_explicit_timeout_to_the_reported_limit() {
+        assert_eq!(
+            command_timeout_ms(Some(NonZeroU64::new(60).unwrap()), 30_000),
+            30_000
+        );
+    }
+
+    #[test]
+    fn timeout_errors_name_the_applied_limit_in_seconds() {
+        assert_eq!(
+            run_error(VmError::TimedOut, 1_500),
+            ToolError::Failed(
+                "workspace command timed out and was killed after 1.500 seconds".to_owned()
+            )
+        );
     }
 
     #[test]
