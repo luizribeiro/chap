@@ -253,7 +253,6 @@ fn assert_default_runtime_limits_except_timeout_ceiling(
     assert_eq!(limits.instantiation_fuel, default.instantiation_fuel);
     assert_eq!(limits.max_memory_bytes, default.max_memory_bytes);
     assert_eq!(limits.max_detached_jobs, default.max_detached_jobs);
-    assert_eq!(limits.max_host_import_calls, default.max_host_import_calls);
 }
 
 #[cfg(not(feature = "exec"))]

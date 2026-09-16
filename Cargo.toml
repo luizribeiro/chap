@@ -32,10 +32,10 @@ clap = { version = "4.6.6", features = ["derive", "env"] }
 futures = "0.3.31"
 iocraft = { git = "https://github.com/luizribeiro/iocraft.git", rev = "619ee083dd84dc0070758221dee6a3936c7897de" }
 jsonschema = { version = "0.49.2", default-features = false }
-lockgate = { git = "https://github.com/luizribeiro/lockgate.git", rev = "4c9686f5ace22fd6342263df39c0879eab5dee4b" }
-lockgate-http = { git = "https://github.com/luizribeiro/lockgate.git", rev = "4c9686f5ace22fd6342263df39c0879eab5dee4b" }
-lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", rev = "4c9686f5ace22fd6342263df39c0879eab5dee4b", default-features = false }
-lockgate-policy = { git = "https://github.com/luizribeiro/lockgate.git", rev = "4c9686f5ace22fd6342263df39c0879eab5dee4b" }
+lockgate = { git = "https://github.com/luizribeiro/lockgate.git", rev = "7ca4d55b1a58873fcd2b65b7e84b612ea76525fa" }
+lockgate-http = { git = "https://github.com/luizribeiro/lockgate.git", rev = "7ca4d55b1a58873fcd2b65b7e84b612ea76525fa" }
+lockgate-plugin = { git = "https://github.com/luizribeiro/lockgate.git", rev = "7ca4d55b1a58873fcd2b65b7e84b612ea76525fa", default-features = false }
+lockgate-policy = { git = "https://github.com/luizribeiro/lockgate.git", rev = "7ca4d55b1a58873fcd2b65b7e84b612ea76525fa" }
 microsandbox = { version = "0.6.16", default-features = false, features = ["net", "prebuilt"] }
 chap-plugin = { path = "crates/chap-plugin", default-features = false }
 chap-plugin-macros = { path = "crates/chap-plugin-macros" }
