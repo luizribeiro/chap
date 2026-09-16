@@ -433,13 +433,12 @@
           name = "example-vm";
           package = chap.override { withVm = true; };
           settings.agent.vm.registries = [ "docker.io" ];
-          plugins.sandbox = {
-            plugin = pluginWorkspace;
-            settings = {
-              workspace = "ro:/project";
-              allowed_egress = [ "127.0.0.1:1" ];
-            };
+          settings.agent.workspace = {
+            image = "docker.io/library/alpine:3.20";
+            mount = "ro";
+            egress = [ "127.0.0.1:1" ];
           };
+          plugins.workspace.plugin = pluginWorkspace;
         };
         mkChapFormsExample = mkChap {
           name = "example-forms";

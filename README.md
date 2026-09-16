@@ -43,15 +43,25 @@ An existing local `./chap.json` is authoritative. If it cannot be read or
 parsed, CHAP reports that error instead of falling through to the personal
 configuration.
 
+CHAP resolves the workspace directory separately, in this order:
+
+1. The path passed to `--workspace`.
+2. The path in `CHAP_WORKSPACE`.
+3. The directory where CHAP was started.
+
+The selected directory is canonicalized before the agent starts.
+
 The repository includes an OpenAI-compatible Chat Completions provider, Kagi
-web tools, a persona context contributor, and exec, state, and VM sandbox tools.
+web tools, a persona context contributor, and exec, state, and workspace tools.
 The exec plugin exposes an argv-style host process tool mediated by
-command-prefix grants; the sandbox plugin runs argv commands in a microVM.
+command-prefix grants; the workspace plugin runs argv commands in a microVM.
 
 Build the configured release components with the system Cargo:
 
 ```console
-cargo build -p chap-openai-compatible -p chap-exec-plugin -p chap-state-plugin -p chap-vm-plugin -p chap-kagi -p chap-persona --release --target wasm32-wasip2
+cargo build -p chap-openai-compatible -p chap-exec-plugin \
+  -p chap-state-plugin -p chap-workspace-plugin -p chap-kagi \
+  -p chap-persona --release --target wasm32-wasip2
 ```
 
 Each plugin is keyed by an operator-assigned instance id and maps directly to
@@ -241,35 +251,66 @@ VM authority is split into four permissions:
   `addr:port`, `addr/prefix:port`, `[v6]:port`, or `[v6]/prefix:port`. The CIDR
   address must be the network address, and `*` in the port position permits any
   port.
-- `vm.manage` with the `created-by-caller` scope permits get, exec, file reads
-  and writes, and destroy for VMs created by that caller.
+- `vm.manage` with the `created-by-caller` scope permits get, exec, file reads,
+  file writes, and destroy for VMs created by that caller. The `workspace`
+  scope permits access to the host-owned workspace VM instead.
 
-VM identities include the plugin instance and session. Each plugin can see and
-manage only its own namespace, even when another plugin uses the same logical VM
-name. The backend labels each sandbox with an installation and process epoch,
-reaps older epochs for that installation at startup, and destroys only its own
-epoch on graceful shutdown. The epoch combines the process start second with
-the process ID, so two processes started in the same directory and second do
-not collide unless the operating system also reuses a PID in that second.
+Caller-owned VM identities include the plugin instance and session. Each
+plugin can see and manage only its own namespace, even when another plugin uses
+the same logical name. Names beginning with `@` are reserved for host-owned
+VMs, so plugins cannot create them. The reserved `@workspace` handle identifies
+the agent's workspace VM and cannot be destroyed by a plugin.
+
+The optional `agent.workspace` section defines that host-owned VM:
+
+```json
+{
+  "agent": {
+    "vm": {
+      "registries": ["docker.io"]
+    },
+    "workspace": {
+      "image": "docker.io/library/alpine:3.20",
+      "mount": "ro",
+      "egress": ["127.0.0.1:1"]
+    }
+  }
+}
+```
+
+`image` is required and follows the registry policy in `agent.vm`. `mount` is
+`"ro"` or `"rw"` and defaults to `"rw"`. `egress` uses the same scopes as
+`vm.egress` and defaults to an empty list. The directory selected by
+`--workspace`, `CHAP_WORKSPACE`, or the startup directory is mounted at
+`/mnt/workspace` with the configured mode.
+
+There is one workspace VM per agent process. It boots lazily on first use, is
+shared by approved plugins, and does not count against
+`limits.max_vms_per_plugin`. The backend labels every VM with an installation
+and process epoch, reaps older epochs for that installation at startup, and
+destroys the current epoch on graceful shutdown. The epoch combines the process
+start second with the process ID.
+
+The guarded `workspace` import returns the reserved handle plus its image,
+guest mount, and egress metadata without booting the VM. Calling it requires
+`vm.manage` with the `workspace` scope. The SDK exposes the import as
+`Vm::workspace`; the returned handle supports the normal exec and file calls.
 
 Before checking a mount grant or starting a VM, the host resolves every bind
 root to its canonical path and passes that same path to the backend. An empty
 egress list disables the network interface; otherwise the backend installs a
-default-deny policy for the granted destinations. DNS is
-also explicit: only a whole-family port-53 grant such as `0.0.0.0/0:53` (or
-`[::]/0:53`) enables the gateway resolver. A narrower port-53 grant does not,
-so operations such as Alpine's `apk add` need the whole-family grant as well as
-the relevant HTTP or HTTPS egress.
+default-deny policy for the configured destinations. DNS is also explicit:
+only a whole-family port-53 scope such as `0.0.0.0/0:53` or `[::]/0:53` enables
+the gateway resolver. A narrower port-53 scope does not, so operations such as
+Alpine's `apk add` need the whole-family scope as well as the relevant HTTP or
+HTTPS egress.
 
-The bundled sandbox plugin has one `run` tool. Its `command` argument is an argv
-array executed directly, without a shell. The plugin defaults `image` to
-`docker.io/library/alpine:3.20`. Mounts are optional and use the `vm.mount`
-scope grammar, so `ro:/path` mounts read-only and `rw:/path` mounts read-write:
-`workspace` is one host path mounted at `/mnt/workspace`, and every entry in
-`allowed_mounts` is mounted at `/mnt/host<host path>`. `allowed_egress`
-supplies the network scopes. The plugin names its VM `workspace` and reuses it
-across calls within a session. Results contain the exit code, stdout, stderr,
-and a note when the host's combined output cap truncated the streams.
+The bundled workspace plugin has no settings and requests exactly `vm.manage`
+with the `workspace` scope. Its one `run` tool accepts an argv array and
+executes it directly, without a shell, in the reused workspace VM. The tool
+description reports the configured image, guest mount mode, egress scopes, and
+reuse behavior. Results contain the exit code, stdout, stderr, and a note when
+the host's combined output cap truncated the streams.
 
 The real backend uses microsandbox microVMs on Apple Silicon or Linux with KVM.
 A system Cargo build installs the microsandbox runtime under `~/.microsandbox`
@@ -278,38 +319,39 @@ runtime bundle: `nix run .#chap-vm` selects the VM-enabled package, and the
 `mkchap-vm-example` check exercises a declarative VM instance.
 
 For a worked personal configuration, merge the following fragment into a
-configuration that already contains an approved provider and persona. Replace
-the two `/absolute/path/to/...` prefixes with real absolute paths; because this
-is a personal file, component paths relative to the repository would resolve
-from the personal configuration directory. The persona text shown here is the
-complete hint to append to an existing persona:
+configuration that already contains an approved provider and persona. Copy the
+built components to the paths shown or replace those paths with their installed
+locations. The project directory stays out of the personal file; select it with
+`--workspace`, `CHAP_WORKSPACE`, or the directory where CHAP starts. The
+persona text shown here is the complete hint to append to an existing persona:
 
 ```json
 {
   "agent": {
     "vm": {
       "registries": ["docker.io"]
+    },
+    "workspace": {
+      "image": "docker.io/library/alpine:3.20",
+      "mount": "ro",
+      "egress": [
+        "0.0.0.0/0:443",
+        "0.0.0.0/0:80",
+        "0.0.0.0/0:53"
+      ]
     }
   },
   "plugins": {
-    "sandbox": {
-      "component": "/absolute/path/to/chap/target/wasm32-wasip2/release/chap_vm_plugin.wasm",
-      "settings": {
-        "workspace": "ro:/absolute/path/to/project",
-        "allowed_egress": [
-          "0.0.0.0/0:443",
-          "0.0.0.0/0:80",
-          "0.0.0.0/0:53"
-        ]
-      }
+    "workspace": {
+      "component": "/opt/chap/chap_workspace_plugin.wasm"
     },
     "persona": {
-      "component": "/absolute/path/to/chap/target/wasm32-wasip2/release/chap_persona.wasm",
+      "component": "/opt/chap/chap_persona.wasm",
       "context": {
         "channel": "system"
       },
       "settings": {
-        "persona": "A reusable microVM sandbox is available through the sandbox plugin's run tool. The host project is mounted read-only at /mnt/workspace."
+        "persona": "Use the workspace run tool for files in /mnt/workspace."
       }
     }
   }
@@ -321,27 +363,35 @@ personal file explicitly. This matters in the repository because its
 `./chap.json` takes precedence over the default personal path. With Cargo:
 
 ```console
-cargo build -p chap-vm-plugin -p chap-persona --release --target wasm32-wasip2
-cargo run -p chap-cli --features vm -- --config "$HOME/.config/chap/chap.json" grants review sandbox
-cargo run -p chap-cli --features vm -- --config "$HOME/.config/chap/chap.json" grants approve sandbox
-cargo run -p chap-cli --features vm -- --config "$HOME/.config/chap/chap.json" plugins check
-cargo run -p chap-cli --features vm -- --config "$HOME/.config/chap/chap.json"
+config="$HOME/.config/chap/chap.json"
+cargo build -p chap-workspace-plugin -p chap-persona \
+  --release --target wasm32-wasip2
+cargo run -p chap-cli --features vm -- --workspace . --config "$config" \
+  grants review workspace
+cargo run -p chap-cli --features vm -- --workspace . --config "$config" \
+  grants approve workspace
+cargo run -p chap-cli --features vm -- --workspace . --config "$config" \
+  plugins check
+cargo run -p chap-cli --features vm -- --workspace . --config "$config"
 ```
 
 Or use the VM-enabled Nix package after the same component build:
 
 ```console
-nix run .#chap-vm -- --config "$HOME/.config/chap/chap.json" grants review sandbox
-nix run .#chap-vm -- --config "$HOME/.config/chap/chap.json" grants approve sandbox
-nix run .#chap-vm -- --config "$HOME/.config/chap/chap.json" plugins check
-nix run .#chap-vm -- --config "$HOME/.config/chap/chap.json"
+config="$HOME/.config/chap/chap.json"
+nix run .#chap-vm -- --workspace . --config "$config" \
+  grants review workspace
+nix run .#chap-vm -- --workspace . --config "$config" \
+  grants approve workspace
+nix run .#chap-vm -- --workspace . --config "$config" plugins check
+nix run .#chap-vm -- --workspace . --config "$config"
 ```
 
 These paths use the fallback personal location; substitute
 `$XDG_CONFIG_HOME/chap/chap.json` when `XDG_CONFIG_HOME` is set. The entire
 stack must be compiled in with Cargo's `vm` feature or the `chap-vm` Nix
-package. A build without it rejects `agent.vm` at startup and refuses plugins
-that require VM permissions at admission.
+package. A build without it rejects `agent.vm` and `agent.workspace` at startup
+and refuses plugins that require VM permissions at admission.
 
 The real, booting backend test is marked ignored because it needs the host
 hypervisor and network access:
@@ -466,9 +516,9 @@ effective port are part of the origin. Kagi declares the literal origin
 `https://kagi.com` and therefore needs no configurable origin. Persona exports
 only the context role and requests no capabilities; it contributes its
 configured text at session creation without storing it in session history.
-For the sandbox plugin, a whole-family port-53 egress scope (`0.0.0.0/0:53` or
-`[::]/0:53`) explicitly enables gateway DNS; without one, name resolution
-stays blocked.
+For `agent.workspace`, a whole-family port-53 egress scope such as
+`0.0.0.0/0:53` or `[::]/0:53` explicitly enables gateway DNS. Without one,
+name resolution stays blocked.
 
 Context plugins use the `context` channel by default, contributing one leading
 user message. Set a plugin's `context.channel` to `system` when that plugin
