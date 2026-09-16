@@ -146,6 +146,7 @@ mod tests {
                 readonly: false,
             }],
             egress: vec!["0.0.0.0/0:443".into()],
+            secrets: vec![],
         };
 
         let (vm, workspace) = Vm::from_workspace(workspace);

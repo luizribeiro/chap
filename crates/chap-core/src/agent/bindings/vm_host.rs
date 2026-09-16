@@ -218,6 +218,15 @@ impl<B: VmBackend> VmHost<B> {
                 })
                 .collect(),
             egress: workspace.info.egress.clone(),
+            secrets: workspace
+                .info
+                .secrets
+                .iter()
+                .map(|secret| vm::WorkspaceSecret {
+                    env: secret.env.clone(),
+                    hosts: secret.hosts.clone(),
+                })
+                .collect(),
         })
     }
 
@@ -969,7 +978,11 @@ mod tests {
             }],
             vec!["127.0.0.1:1".parse().unwrap()],
             Vec::new(),
-            Vec::new(),
+            vec![chap_vm::host::SecretSpec {
+                env: "GITHUB_TOKEN".into(),
+                source: chap_vm::host::SecretSource::HostEnv("CHAP_GITHUB_TOKEN".into()),
+                hosts: vec!["api.github.com".into(), "github.com".into()],
+            }],
         )
         .unwrap();
         ResolvedWorkspace {
@@ -978,7 +991,10 @@ mod tests {
                 readonly: true,
                 image: "ghcr.io/acme/build:1.2".into(),
                 egress: vec!["127.0.0.1:1".into()],
-                secrets: Vec::new(),
+                secrets: vec![crate::agent::WorkspaceSecret {
+                    env: "GITHUB_TOKEN".into(),
+                    hosts: vec!["api.github.com".into(), "github.com".into()],
+                }],
             },
             requested,
         }
@@ -1047,6 +1063,9 @@ mod tests {
         assert_eq!(workspace.mounts[0].guest, "/mnt/workspace");
         assert!(workspace.mounts[0].readonly);
         assert_eq!(workspace.egress, ["127.0.0.1:1"]);
+        assert_eq!(workspace.secrets.len(), 1);
+        assert_eq!(workspace.secrets[0].env, "GITHUB_TOKEN");
+        assert_eq!(workspace.secrets[0].hosts, ["api.github.com", "github.com"]);
         assert_eq!(
             backend.workspace_get_or_create_calls.load(Ordering::SeqCst),
             0
@@ -1142,6 +1161,14 @@ mod tests {
             assert_eq!(configs[0].image.repository, "acme/build");
             assert_eq!(configs[0].egress, vec!["127.0.0.1:1".parse().unwrap()]);
             assert!(configs[0].env.is_empty());
+            assert_eq!(
+                configs[0].secrets,
+                [chap_vm::host::SecretSpec {
+                    env: "GITHUB_TOKEN".into(),
+                    source: chap_vm::host::SecretSource::HostEnv("CHAP_GITHUB_TOKEN".into()),
+                    hosts: vec!["api.github.com".into(), "github.com".into()],
+                }]
+            );
             assert_eq!(configs[0].cpus, 1);
             assert_eq!(configs[0].memory_mb, 512);
             assert_eq!(configs[0].max_lifetime_ms, 3_600_000);

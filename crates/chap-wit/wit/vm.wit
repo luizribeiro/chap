@@ -28,11 +28,17 @@ interface vm {
     readonly: bool,
   }
 
+  record workspace-secret {
+    env: string,
+    hosts: list<string>,
+  }
+
   record workspace-info {
     vm: string,
     image: string,
     mounts: list<workspace-mount>,
     egress: list<string>,
+    secrets: list<workspace-secret>,
   }
 
   variant vm-error {

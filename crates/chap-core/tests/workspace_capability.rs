@@ -84,6 +84,127 @@ async fn runs_a_command_in_the_host_owned_workspace() {
 }
 
 #[tokio::test]
+async fn exposes_sealed_secret_metadata_and_passes_the_spec_to_the_workspace_vm() {
+    const HOST_ENV: &str = "CHAP_WORKSPACE_CAPABILITY_SECRET";
+    const DUMMY_VALUE: &str = "workspace-capability-dummy-value";
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let components = components(&repository);
+    let mock = MockServer::start(&[ToolRequest {
+        id: "workspace-secret-call",
+        name: "run",
+        arguments: json!({"command": ["true"]}),
+    }]);
+    let directory = tempfile::tempdir().unwrap();
+    let config_path = directory.path().join("chap.json");
+    write_config(
+        &config_path,
+        components,
+        &mock.origin,
+        Some(json!({
+            "image": "docker.io/library/alpine:3.20",
+            "mount": "ro",
+            "egress": ["127.0.0.1:1"],
+            "secrets": {
+                "GITHUB_TOKEN": {
+                    "from_env": HOST_ENV,
+                    "hosts": ["api.github.com", "github.com"]
+                }
+            }
+        })),
+    );
+    unsafe { std::env::set_var(HOST_ENV, DUMMY_VALUE) };
+    let builder = AgentBuilder::load(&config_path)
+        .unwrap()
+        .state_dir(directory.path())
+        .workspace_directory(directory.path());
+    builder
+        .approve_plugin(&"workspace".parse().unwrap())
+        .await
+        .unwrap();
+    builder
+        .approve_plugin(&"openai".parse().unwrap())
+        .await
+        .unwrap();
+    let agent = builder.start().await.unwrap();
+    let definition = agent
+        .tool_definitions()
+        .into_iter()
+        .find(|definition| definition.name == "run")
+        .unwrap();
+    assert!(definition.description.contains("GITHUB_TOKEN"));
+    assert!(
+        definition
+            .description
+            .contains("api.github.com, github.com")
+    );
+    assert!(!definition.description.contains(HOST_ENV));
+    assert!(!definition.description.contains(DUMMY_VALUE));
+
+    let session = agent
+        .session(SessionOptions::new("openai".parse().unwrap()))
+        .await
+        .unwrap();
+    tokio::time::timeout(INVOCATION_TIMEOUT, session.send("run the command"))
+        .await
+        .expect("agent invocation timed out")
+        .expect("agent invocation failed");
+    assert!(chap_vm::host::MockVmBackend::recorded_secrets().contains(
+        &chap_vm::host::SecretSpec {
+            env: "GITHUB_TOKEN".into(),
+            source: chap_vm::host::SecretSource::HostEnv(HOST_ENV.into()),
+            hosts: vec!["api.github.com".into(), "github.com".into()],
+        }
+    ));
+    assert!(
+        !format!("{:?}", chap_vm::host::MockVmBackend::recorded_secrets()).contains(DUMMY_VALUE)
+    );
+    mock.finish();
+    tokio::task::spawn_blocking(move || drop((session, agent)))
+        .await
+        .unwrap();
+    unsafe { std::env::remove_var(HOST_ENV) };
+}
+
+#[tokio::test]
+async fn refuses_to_start_when_a_workspace_secret_source_is_missing() {
+    const HOST_ENV: &str = "CHAP_MISSING_WORKSPACE_CAPABILITY_SECRET";
+    const UNRELATED_VALUE: &str = "must-not-appear";
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let components = components(&repository);
+    let directory = tempfile::tempdir().unwrap();
+    let config_path = directory.path().join("chap.json");
+    write_config(
+        &config_path,
+        components,
+        "http://127.0.0.1:1",
+        Some(json!({
+            "image": "docker.io/library/alpine:3.20",
+            "mount": "ro",
+            "secrets": {
+                "GUEST_TOKEN": {
+                    "from_env": HOST_ENV,
+                    "hosts": ["api.example.com"]
+                }
+            }
+        })),
+    );
+    unsafe { std::env::remove_var(HOST_ENV) };
+
+    let error = AgentBuilder::load(&config_path)
+        .unwrap()
+        .state_dir(directory.path())
+        .workspace_directory(directory.path())
+        .start()
+        .await
+        .err()
+        .expect("start must fail");
+    let message = error.to_string();
+    assert!(message.contains("GUEST_TOKEN"), "{message}");
+    assert!(message.contains(HOST_ENV), "{message}");
+    assert!(!message.contains(UNRELATED_VALUE), "{message}");
+}
+
+#[tokio::test]
 async fn refuses_to_start_the_workspace_plugin_without_agent_workspace() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let components = components(&repository);

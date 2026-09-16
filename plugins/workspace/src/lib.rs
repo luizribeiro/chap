@@ -1,5 +1,5 @@
 use chap_plugin::tools::{ToolDefinition, ToolError, Tools};
-use chap_plugin::vm::{ExecResult, Vm, Workspace, WorkspaceMount};
+use chap_plugin::vm::{ExecResult, Vm, Workspace, WorkspaceMount, WorkspaceSecret};
 use chap_plugin::{MetadataSource, Needs, NoSettings, Plugin, ScopeRef, capabilities};
 use serde::Deserialize;
 
@@ -70,11 +70,24 @@ fn run_definition(workspace: &Workspace) -> ToolDefinition {
         .collect::<Vec<_>>()
         .join(", ");
     let egress = workspace.egress.join(", ");
+    let secrets = if workspace.secrets.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " Secrets are available as environment variables whose placeholders the network gateway substitutes only for their allowed hosts: {}.",
+            workspace
+                .secrets
+                .iter()
+                .map(describe_secret)
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    };
     ToolDefinition {
         name: RUN.to_owned(),
         description: format!(
-            "Run a command in the agent's workspace VM using image {}. Guest mount points: [{mounts}]. Configured egress scopes: [{egress}]. The VM is reused across calls.",
-            workspace.image
+            "Run a command in the agent's workspace VM using image {}. Guest mount points: [{mounts}]. Configured egress scopes: [{egress}]. The VM is reused across calls.{secrets}",
+            workspace.image,
         ),
         parameters: r#"{
             "type":"object",
@@ -86,6 +99,10 @@ fn run_definition(workspace: &Workspace) -> ToolDefinition {
         }"#
         .to_owned(),
     }
+}
+
+fn describe_secret(secret: &WorkspaceSecret) -> String {
+    format!("{} ({})", secret.env, secret.hosts.join(", "))
 }
 
 fn describe_mount(mount: &WorkspaceMount) -> String {
@@ -138,6 +155,7 @@ mod tests {
                 readonly,
             }],
             egress: vec!["0.0.0.0/0:443".into(), "0.0.0.0/0:53".into()],
+            secrets: vec![],
         }
     }
 
@@ -168,6 +186,22 @@ mod tests {
                 .description
                 .contains("/mnt/workspace (read-only)")
         );
+    }
+
+    #[test]
+    fn describes_secret_names_and_hosts_only_when_configured() {
+        let empty_description = run_definition(&workspace(false)).description;
+        let mut configured = workspace(false);
+        configured.secrets = vec![WorkspaceSecret {
+            env: "GITHUB_TOKEN".into(),
+            hosts: vec!["api.github.com".into(), "github.com".into()],
+        }];
+
+        let description = run_definition(&configured).description;
+
+        assert!(description.contains("GITHUB_TOKEN (api.github.com, github.com)"));
+        assert!(description.contains("placeholders"));
+        assert!(!empty_description.contains("Secrets"));
     }
 
     #[test]

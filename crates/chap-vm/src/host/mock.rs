@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     format,
     string::String,
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{Mutex, MutexGuard, OnceLock, PoisonError},
     vec::Vec,
 };
 
@@ -39,6 +39,27 @@ impl MockVmBackend {
             .get(vm.physical_label())
             .map(|vm| vm.secrets.clone())
     }
+
+    pub fn recorded_secrets() -> Vec<SecretSpec> {
+        recorded_secrets()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn record_host_secrets(id: &VmIdentity, cfg: &VmConfig) {
+        if id.principal == VmPrincipal::Host {
+            recorded_secrets()
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .extend(cfg.secrets.clone());
+        }
+    }
+}
+
+fn recorded_secrets() -> &'static Mutex<Vec<SecretSpec>> {
+    static SECRETS: OnceLock<Mutex<Vec<SecretSpec>>> = OnceLock::new();
+    SECRETS.get_or_init(Mutex::default)
 }
 
 impl MockVm {
@@ -61,6 +82,7 @@ impl VmBackend for MockVmBackend {
         if vms.contains_key(&physical_label) {
             return Err(VmError::AlreadyExists);
         }
+        Self::record_host_secrets(id, cfg);
         vms.insert(physical_label.clone(), MockVm::new(id, cfg));
         Ok(VmRef { physical_label })
     }
@@ -82,6 +104,7 @@ impl VmBackend for MockVmBackend {
             }
             return Ok(VmRef { physical_label });
         }
+        Self::record_host_secrets(id, cfg);
         vms.insert(physical_label.clone(), MockVm::new(id, cfg));
         Ok(VmRef { physical_label })
     }
