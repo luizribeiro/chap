@@ -436,7 +436,7 @@
           plugins.sandbox = {
             plugin = pluginVm;
             settings = {
-              allowed_mounts = [ "/project" ];
+              allowed_mounts = [ "ro:/project" ];
               allowed_egress = [ "127.0.0.1:1" ];
             };
           };

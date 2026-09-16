@@ -1,3 +1,4 @@
+use chap_plugin::capabilities::vm::Mount as MountScope;
 use chap_plugin::tools::{ToolDefinition, ToolError, Tools};
 use chap_plugin::vm::{ExecResult, Mount, Vm, VmConfig};
 use chap_plugin::{MetadataSource, Needs, Plugin, ScopeRef, capabilities};
@@ -37,14 +38,14 @@ impl Tools for Sandbox {
             .settings
             .allowed_mounts
             .iter()
-            .map(|host| guest_mount_point(host))
+            .map(describe_mount)
             .collect::<Vec<_>>()
             .join(", ");
         let allowed_egress = self.settings.allowed_egress.join(", ");
         Ok(vec![ToolDefinition {
             name: RUN.to_owned(),
             description: format!(
-                "Run a command in a reusable microVM with network access for configured egress scopes. Read-only guest mount points: [{guest_mounts}]. Configured egress scopes: [{allowed_egress}]."
+                "Run a command in a reusable microVM with network access for configured egress scopes. Guest mount points: [{guest_mounts}]. Configured egress scopes: [{allowed_egress}]."
             ),
             parameters: r#"{
                 "type":"object",
@@ -103,16 +104,25 @@ fn guest_mount_point(host: &str) -> String {
     format!("/mnt{host}")
 }
 
+fn describe_mount(mount: &MountScope) -> String {
+    let access = if mount.readonly() {
+        "read-only"
+    } else {
+        "read-write"
+    };
+    format!("{} ({access})", guest_mount_point(mount.path()))
+}
+
 fn vm_config(settings: &Settings) -> VmConfig {
     VmConfig {
         image: settings.image.clone(),
         mounts: settings
             .allowed_mounts
             .iter()
-            .map(|host| Mount {
-                host: host.clone(),
-                guest: guest_mount_point(host),
-                readonly: true,
+            .map(|mount| Mount {
+                host: mount.path().to_owned(),
+                guest: guest_mount_point(mount.path()),
+                readonly: mount.readonly(),
             })
             .collect(),
         egress: settings.allowed_egress.clone(),
@@ -131,9 +141,11 @@ struct Settings {
     /// OCI image reference used for the sandbox VM.
     #[serde(default = "default_image")]
     image: String,
-    /// Host paths the plugin may mount into a VM.
+    /// Host paths mounted into the VM at `/mnt<path>`: `ro:/path` mounts
+    /// read-only and `/path` mounts read-write.
     #[serde(deserialize_with = "deserialize_allowed_mounts")]
-    allowed_mounts: Vec<String>,
+    #[schemars(with = "Vec<String>")]
+    allowed_mounts: Vec<MountScope>,
     /// Network destinations the plugin may expose to a VM.
     allowed_egress: Vec<String>,
 }
@@ -142,19 +154,20 @@ fn default_image() -> String {
     "docker.io/library/alpine:3.20".to_owned()
 }
 
-fn deserialize_allowed_mounts<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+fn deserialize_allowed_mounts<'de, D>(deserializer: D) -> Result<Vec<MountScope>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let mounts = Vec::<String>::deserialize(deserializer)?;
-    for mount in &mounts {
-        if mount.is_empty() || mount.starts_with("ro:") || !mount.starts_with('/') {
-            return Err(serde::de::Error::custom(format!(
-                "allowed mount {mount:?} must be a non-empty plain absolute path starting with `/`"
-            )));
-        }
-    }
-    Ok(mounts)
+    Vec::<String>::deserialize(deserializer)?
+        .iter()
+        .map(|mount| {
+            mount.parse::<MountScope>().map_err(|_| {
+                serde::de::Error::custom(format!(
+                    "allowed mount {mount:?} must be an absolute path, optionally prefixed with `ro:`"
+                ))
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -167,10 +180,14 @@ struct RunArguments {
 mod tests {
     use super::*;
 
+    fn mounts(values: &[&str]) -> Vec<MountScope> {
+        values.iter().map(|value| value.parse().unwrap()).collect()
+    }
+
     fn plugin() -> Sandbox {
         <Sandbox as Plugin>::new(Settings {
             image: default_image(),
-            allowed_mounts: vec!["/project".to_owned()],
+            allowed_mounts: mounts(&["/project"]),
             allowed_egress: vec![],
         })
     }
@@ -210,7 +227,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_allowed_mounts_when_settings_load() {
-        for mount in ["project", "ro:/project", ""] {
+        for mount in ["project", "ro:", "", "/project/../secret", "rw:/project"] {
             let error = serde_json::from_value::<Settings>(serde_json::json!({
                 "allowed_mounts": [mount],
                 "allowed_egress": [],
@@ -219,26 +236,31 @@ mod tests {
             let message = error.to_string();
 
             assert!(message.contains(&format!("{mount:?}")), "{message}");
-            assert!(message.contains("plain absolute path"), "{message}");
+            assert!(message.contains("absolute path"), "{message}");
         }
     }
 
     #[test]
-    fn accepts_absolute_allowed_mounts_when_settings_load() {
+    fn parses_mount_scopes_when_settings_load() {
         let settings: Settings = serde_json::from_value(serde_json::json!({
-            "allowed_mounts": ["/project", "/var/log"],
+            "allowed_mounts": ["ro:/project", "/var//log/"],
             "allowed_egress": [],
         }))
         .unwrap();
 
-        assert_eq!(settings.allowed_mounts, ["/project", "/var/log"]);
+        assert_eq!(
+            settings.allowed_mounts,
+            mounts(&["ro:/project", "/var/log"])
+        );
+        assert!(settings.allowed_mounts[0].readonly());
+        assert!(!settings.allowed_mounts[1].readonly());
     }
 
     #[test]
     fn configures_the_vm_with_allowed_egress() {
         let settings = Settings {
             image: default_image(),
-            allowed_mounts: vec![],
+            allowed_mounts: mounts(&[]),
             allowed_egress: vec!["0.0.0.0/0:443".to_owned(), "10.0.0.0/8:80".to_owned()],
         };
 
@@ -251,7 +273,7 @@ mod tests {
     fn configures_the_vm_with_all_allowed_mounts() {
         let settings = Settings {
             image: default_image(),
-            allowed_mounts: vec!["/project".to_owned(), "/var/log".to_owned()],
+            allowed_mounts: mounts(&["ro:/project", "/var/log"]),
             allowed_egress: vec![],
         };
 
@@ -263,7 +285,26 @@ mod tests {
         assert!(config.mounts[0].readonly);
         assert_eq!(config.mounts[1].host, "/var/log");
         assert_eq!(config.mounts[1].guest, "/mnt/var/log");
-        assert!(config.mounts[1].readonly);
+        assert!(!config.mounts[1].readonly);
+    }
+
+    #[test]
+    fn describes_each_mount_with_its_access_mode() {
+        let plugin = <Sandbox as Plugin>::new(Settings {
+            image: default_image(),
+            allowed_mounts: mounts(&["ro:/project", "/var/log"]),
+            allowed_egress: vec![],
+        });
+
+        let definitions = <Sandbox as Tools>::definitions(&plugin).unwrap();
+
+        assert!(
+            definitions[0].description.contains(
+                "Guest mount points: [/mnt/project (read-only), /mnt/var/log (read-write)]"
+            ),
+            "{}",
+            definitions[0].description
+        );
     }
 
     #[test]
