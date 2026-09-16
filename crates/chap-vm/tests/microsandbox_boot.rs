@@ -3,13 +3,15 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chap_vm::host::{
-    Backend as MicrosandboxBackend, MountSpec, ResolvedImage, VmBackend, VmCallSettings, VmCommand,
-    VmConfig, VmError, VmIdentity, VmPrincipal, VmSettings,
+    Backend as MicrosandboxBackend, MountSpec, ResolvedImage, SecretSource, SecretSpec, VmBackend,
+    VmCallSettings, VmCommand, VmConfig, VmError, VmIdentity, VmPrincipal, VmSettings,
 };
 use chap_vm::vm::Egress;
 
 const HOST_CONTENTS: &[u8] = b"hello from the host bind mount\n";
 const GUEST_CONTENTS: &[u8] = b"written through the guest filesystem";
+const HOST_SECRET_VAR: &str = "CHAP_MICROSANDBOX_TEST_SECRET";
+const DUMMY_SECRET: &str = "chap-microsandbox-dummy-secret";
 
 #[tokio::test]
 #[ignore = "boots a microsandbox vm and pulls docker.io/library/alpine:3.20; run with -- --ignored"]
@@ -150,12 +152,39 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
     let mut dns_config = config.clone();
     dns_config.mounts.clear();
     dns_config.egress = egress(&["0.0.0.0/0:443", "0.0.0.0/0:80", "0.0.0.0/0:53"]);
+    dns_config.secrets = vec![SecretSpec {
+        env: "GUEST".into(),
+        source: SecretSource::HostEnv(HOST_SECRET_VAR.into()),
+        hosts: vec!["example.com".into()],
+    }];
     dns_config.config_hash = "microsandbox-e2e-dns-v1".into();
     dns_config.max_lifetime_ms = 120_000;
+    unsafe { std::env::set_var(HOST_SECRET_VAR, DUMMY_SECRET) };
     let dns_vm = network_backend
         .create(&dns_identity, &dns_config)
         .await
         .unwrap();
+    let guest_secret = network_backend
+        .exec(&dns_vm, command(&["printenv", "GUEST"], None))
+        .await
+        .unwrap();
+    assert_eq!(guest_secret.stdout, b"$MSB_GUEST\n");
+    assert!(
+        !guest_secret
+            .stdout
+            .windows(DUMMY_SECRET.len())
+            .any(|value| value == DUMMY_SECRET.as_bytes())
+    );
+    let guest_env = network_backend
+        .exec(&dns_vm, command(&["env"], None))
+        .await
+        .unwrap();
+    assert!(
+        !guest_env
+            .stdout
+            .windows(DUMMY_SECRET.len())
+            .any(|value| value == DUMMY_SECRET.as_bytes())
+    );
     let apk_with_dns = network_backend
         .exec(
             &dns_vm,
@@ -191,6 +220,7 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
         .shutdown(&identity.installation_id, identity.session_epoch)
         .await
         .unwrap();
+    unsafe { std::env::remove_var(HOST_SECRET_VAR) };
     assert_eq!(network_backend.get(&dns_identity).await.unwrap(), None);
     assert_eq!(network_backend.get(&no_dns_identity).await.unwrap(), None);
 

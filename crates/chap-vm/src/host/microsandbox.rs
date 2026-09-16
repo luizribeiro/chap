@@ -8,7 +8,7 @@ use std::{
 };
 
 use microsandbox::{
-    ExecEvent, MicrosandboxError, NetworkPolicy, Sandbox,
+    ExecEvent, MicrosandboxError, NetworkPolicy, Sandbox, SecretSource as MicrosandboxSecretSource,
     sandbox::{SandboxBuilder, SandboxHandle},
 };
 
@@ -315,12 +315,29 @@ fn sandbox_builder(id: &VmIdentity, cfg: &VmConfig) -> Result<SandboxBuilder, Vm
         });
     }
 
-    if cfg.egress.is_empty() {
-        return Ok(builder.disable_network());
+    builder = if cfg.egress.is_empty() {
+        builder.disable_network()
+    } else {
+        let policy = network_policy(&cfg.egress)?;
+        builder.network(|network| network.policy(policy))
+    };
+
+    for secret in &cfg.secrets {
+        let super::SecretSource::HostEnv(variable) = &secret.source;
+        builder = builder.secret(|builder| {
+            let mut builder = builder
+                .env(&secret.env)
+                .source(MicrosandboxSecretSource::Env {
+                    var: variable.clone(),
+                });
+            for host in &secret.hosts {
+                builder = builder.allow_host(host);
+            }
+            builder
+        });
     }
 
-    let policy = network_policy(&cfg.egress)?;
-    Ok(builder.network(|network| network.policy(policy)))
+    Ok(builder)
 }
 
 fn network_policy(egress: &[Egress]) -> Result<NetworkPolicy, VmError> {
