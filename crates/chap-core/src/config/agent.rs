@@ -29,6 +29,25 @@ pub(crate) struct AgentSettings {
     exec: Option<Value>,
     state: Option<Value>,
     vm: Option<Value>,
+    workspace: Option<Value>,
+}
+
+#[cfg(feature = "vm")]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkspaceSettings {
+    pub(crate) image: String,
+    pub(crate) mount: WorkspaceMountMode,
+    #[serde(default)]
+    pub(crate) egress: Vec<String>,
+}
+
+#[cfg(feature = "vm")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum WorkspaceMountMode {
+    Ro,
+    Rw,
 }
 
 /// Host ceiling for every plugin HTTP request, independent of invocation budgets.
@@ -135,12 +154,15 @@ impl Config {
         #[cfg(feature = "state")]
         self.state_settings()?;
 
-        if self.agent.vm.is_some() && !cfg!(feature = "vm") {
+        if (self.agent.vm.is_some() || self.agent.workspace.is_some()) && !cfg!(feature = "vm") {
             return Err(LoadError::CapabilityUnsupported { capability: "vm" });
         }
 
         #[cfg(feature = "vm")]
-        self.vm_settings()?;
+        {
+            self.vm_settings()?;
+            self.workspace_settings()?;
+        }
 
         Ok(())
     }
@@ -183,6 +205,19 @@ impl Config {
             .map(Option::unwrap_or_default)
             .map_err(|source| LoadError::InvalidAgentConfigSection {
                 section: "agent.vm",
+                source,
+            })
+    }
+
+    #[cfg(feature = "vm")]
+    pub(crate) fn workspace_settings(&self) -> Result<Option<WorkspaceSettings>, LoadError> {
+        self.agent
+            .workspace
+            .clone()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|source| LoadError::InvalidAgentConfigSection {
+                section: "agent.workspace",
                 source,
             })
     }
@@ -729,6 +764,28 @@ mod tests {
         ));
     }
 
+    #[cfg(not(feature = "vm"))]
+    #[test]
+    fn rejects_workspace_settings_when_the_capability_is_unavailable() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "workspace": {
+                        "image": "docker.io/library/rust:1-alpine",
+                        "mount": "rw"
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let error = config.validate_agent_settings().unwrap_err();
+        assert!(matches!(
+            error,
+            LoadError::CapabilityUnsupported { capability: "vm" }
+        ));
+    }
+
     #[cfg(feature = "vm")]
     #[test]
     fn parses_vm_settings() {
@@ -802,5 +859,93 @@ mod tests {
             panic!("expected invalid vm config");
         };
         assert!(source.to_string().contains("invalid type"));
+    }
+
+    #[cfg(feature = "vm")]
+    #[test]
+    fn parses_workspace_settings_without_agent_vm_settings() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "workspace": {
+                        "image": "docker.io/library/rust:1-alpine",
+                        "mount": "ro",
+                        "egress": ["0.0.0.0/0:443", "0.0.0.0/0:80"]
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let workspace = config.workspace_settings().unwrap().unwrap();
+        assert_eq!(workspace.image, "docker.io/library/rust:1-alpine");
+        assert_eq!(workspace.mount, WorkspaceMountMode::Ro);
+        assert_eq!(workspace.egress, ["0.0.0.0/0:443", "0.0.0.0/0:80"]);
+        assert_eq!(
+            config.vm_settings().unwrap(),
+            chap_vm::host::VmSettings::default()
+        );
+    }
+
+    #[cfg(feature = "vm")]
+    #[test]
+    fn workspace_egress_defaults_to_empty() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "agent": {
+                    "workspace": {
+                        "image": "docker.io/library/rust:1-alpine",
+                        "mount": "rw"
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let workspace = config.workspace_settings().unwrap().unwrap();
+        assert_eq!(workspace.mount, WorkspaceMountMode::Rw);
+        assert!(workspace.egress.is_empty());
+    }
+
+    #[cfg(feature = "vm")]
+    #[test]
+    fn absent_workspace_settings_remain_absent() {
+        let config: Config = serde_json::from_str("{}").unwrap();
+
+        assert_eq!(config.workspace_settings().unwrap(), None);
+    }
+
+    #[cfg(feature = "vm")]
+    #[test]
+    fn names_the_agent_workspace_section_for_invalid_shapes() {
+        for (workspace, expected) in [
+            (r#"{"mount":"rw"}"#, "missing field `image`"),
+            (
+                r#"{"image":"docker.io/library/alpine:3.20"}"#,
+                "missing field `mount`",
+            ),
+            (
+                r#"{"image":"docker.io/library/alpine:3.20","mount":"write"}"#,
+                "unknown variant `write`",
+            ),
+            (
+                r#"{"image":"docker.io/library/alpine:3.20","mount":"ro","path":"/tmp"}"#,
+                "unknown field `path`",
+            ),
+        ] {
+            let config: Config =
+                serde_json::from_str(&format!(r#"{{"agent":{{"workspace":{workspace}}}}}"#))
+                    .unwrap();
+
+            let error = config.validate_agent_settings().unwrap_err();
+            let LoadError::InvalidAgentConfigSection {
+                section: "agent.workspace",
+                source,
+            } = error
+            else {
+                panic!("expected invalid workspace config");
+            };
+            assert!(source.to_string().contains(expected), "{source}");
+        }
     }
 }
