@@ -6,7 +6,8 @@ mod session;
 mod tool;
 
 pub use agent::{
-    Agent, AgentBuilder, PluginCheck, PluginRefusal, PluginRefusalReason, StartError, WorkspaceInfo,
+    Agent, AgentBuilder, PluginCheck, PluginRefusal, PluginRefusalReason, StartError,
+    WorkspaceInfo, WorkspaceSecret,
 };
 pub use config::LoadError;
 pub use consent::{ConsentError, ConsentStore, PluginConsentReview};

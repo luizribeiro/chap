@@ -84,6 +84,9 @@ pub enum ConsentError {
         source: lockgate_policy::ScopeError,
     },
     #[cfg(feature = "vm")]
+    #[error("workspace secret `{env}` requires non-empty host environment variable `{from_env}`")]
+    WorkspaceSecretSourceUnavailable { env: String, from_env: String },
+    #[cfg(feature = "vm")]
     #[error("invalid `agent.workspace` configuration: {source}")]
     InvalidWorkspaceConfig {
         #[source]

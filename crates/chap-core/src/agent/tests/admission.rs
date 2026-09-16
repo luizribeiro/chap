@@ -246,6 +246,7 @@ async fn start_resolves_and_exposes_the_workspace_directory() {
             readonly: true,
             image: "docker.io/library/rust:1-alpine".into(),
             egress: vec!["0.0.0.0/0:443".into()],
+            secrets: Vec::new(),
         }
     );
 }
@@ -295,6 +296,103 @@ async fn plugin_check_rejects_a_missing_workspace_directory() {
         "{error}"
     );
     assert!(error.to_string().contains("agent.workspace"));
+}
+
+#[cfg(feature = "vm")]
+#[tokio::test]
+async fn only_start_requires_nonempty_workspace_secret_sources() {
+    const HOST_ENV: &str = "CHAP_TEST_MISSING_WORKSPACE_SECRET";
+    const VALUE: &str = "must-not-appear";
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = r#"{
+        "image": "docker.io/library/alpine:3.20",
+        "mount": "rw",
+        "secrets": {
+            "GUEST_TOKEN": {
+                "from_env": "CHAP_TEST_MISSING_WORKSPACE_SECRET",
+                "hosts": ["api.example.com"]
+            }
+        }
+    }"#;
+    unsafe { std::env::remove_var(HOST_ENV) };
+
+    workspace_builder(&directory, workspace)
+        .workspace_directory(directory.path())
+        .check_plugins()
+        .await
+        .unwrap();
+    let start_error = workspace_builder(&directory, workspace)
+        .workspace_directory(directory.path())
+        .start()
+        .await
+        .err()
+        .unwrap();
+    let message = start_error.to_string();
+    assert!(message.contains("GUEST_TOKEN"), "{message}");
+    assert!(message.contains(HOST_ENV), "{message}");
+    assert!(!message.contains(VALUE), "{message}");
+
+    unsafe { std::env::set_var(HOST_ENV, "") };
+    let empty_error = workspace_builder(&directory, workspace)
+        .workspace_directory(directory.path())
+        .start()
+        .await
+        .err()
+        .unwrap();
+    assert!(empty_error.to_string().contains("GUEST_TOKEN"));
+    assert!(empty_error.to_string().contains(HOST_ENV));
+
+    unsafe { std::env::set_var(HOST_ENV, VALUE) };
+    let result = workspace_builder(&directory, workspace)
+        .workspace_directory(directory.path())
+        .start()
+        .await;
+    unsafe { std::env::remove_var(HOST_ENV) };
+    result.unwrap();
+}
+
+#[cfg(feature = "vm")]
+#[test]
+fn workspace_secret_sources_are_wired_without_their_values() {
+    const HOST_ENV: &str = "CHAP_TEST_AVAILABLE_WORKSPACE_SECRET";
+    const VALUE: &str = "must-not-appear";
+    let directory = tempfile::tempdir().unwrap();
+    unsafe { std::env::set_var(HOST_ENV, VALUE) };
+    let resolved = workspace_builder(
+        &directory,
+        r#"{
+            "image": "docker.io/library/alpine:3.20",
+            "mount": "rw",
+            "secrets": {
+                "GUEST_TOKEN": {
+                    "from_env": "CHAP_TEST_AVAILABLE_WORKSPACE_SECRET",
+                    "hosts": ["API.EXAMPLE.COM"]
+                }
+            }
+        }"#,
+    )
+    .workspace_directory(directory.path())
+    .resolve_workspace()
+    .unwrap()
+    .unwrap();
+    unsafe { std::env::remove_var(HOST_ENV) };
+
+    assert_eq!(
+        resolved.info.secrets,
+        [super::super::WorkspaceSecret {
+            env: "GUEST_TOKEN".into(),
+            hosts: vec!["api.example.com".into()],
+        }]
+    );
+    assert_eq!(
+        resolved.requested.secrets,
+        [chap_vm::host::SecretSpec {
+            env: "GUEST_TOKEN".into(),
+            source: chap_vm::host::SecretSource::HostEnv(HOST_ENV.into()),
+            hosts: vec!["api.example.com".into()],
+        }]
+    );
+    assert!(!format!("{:?}", resolved.requested).contains(VALUE));
 }
 
 #[cfg(feature = "vm")]

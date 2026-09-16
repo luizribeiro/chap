@@ -978,6 +978,7 @@ mod tests {
                 readonly: true,
                 image: "ghcr.io/acme/build:1.2".into(),
                 egress: vec!["127.0.0.1:1".into()],
+                secrets: Vec::new(),
             },
             requested,
         }

@@ -331,6 +331,13 @@ pub struct WorkspaceInfo {
     pub readonly: bool,
     pub image: String,
     pub egress: Vec<String>,
+    pub secrets: Vec<WorkspaceSecret>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkspaceSecret {
+    pub env: String,
+    pub hosts: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -407,6 +414,15 @@ impl AgentBuilder {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let secrets = settings
+            .secrets
+            .iter()
+            .map(|(env, secret)| chap_vm::host::SecretSpec {
+                env: env.clone(),
+                source: chap_vm::host::SecretSource::HostEnv(secret.from_env.clone()),
+                hosts: secret.hosts.clone(),
+            })
+            .collect();
 
         let directory = match &self.workspace_directory {
             Some(directory) => directory.clone(),
@@ -440,7 +456,7 @@ impl AgentBuilder {
             }],
             egress,
             Vec::new(),
-            Vec::new(),
+            secrets,
         )
         .map_err(|source| ConsentError::InvalidWorkspaceConfig { source })?;
 
@@ -450,9 +466,36 @@ impl AgentBuilder {
                 readonly: settings.mount.readonly(),
                 image: settings.image,
                 egress: settings.egress,
+                secrets: settings
+                    .secrets
+                    .into_iter()
+                    .map(|(env, secret)| WorkspaceSecret {
+                        env,
+                        hosts: secret.hosts,
+                    })
+                    .collect(),
             },
             requested,
         }))
+    }
+
+    #[cfg(feature = "vm")]
+    fn require_workspace_secret_sources(
+        workspace: Option<&ResolvedWorkspace>,
+    ) -> Result<(), ConsentError> {
+        let Some(workspace) = workspace else {
+            return Ok(());
+        };
+        for secret in &workspace.requested.secrets {
+            let chap_vm::host::SecretSource::HostEnv(from_env) = &secret.source;
+            if std::env::var_os(from_env).is_none_or(|value| value.is_empty()) {
+                return Err(ConsentError::WorkspaceSecretSourceUnavailable {
+                    env: secret.env.clone(),
+                    from_env: from_env.clone(),
+                });
+            }
+        }
+        Ok(())
     }
 
     #[cfg(not(feature = "vm"))]
@@ -794,6 +837,8 @@ impl AgentBuilder {
     /// Refuses to start unless every configured plugin is admitted.
     pub async fn start(self) -> Result<Agent, StartError> {
         let workspace = self.resolve_workspace().map_err(StartError::Consent)?;
+        #[cfg(feature = "vm")]
+        Self::require_workspace_secret_sources(workspace.as_ref()).map_err(StartError::Consent)?;
         let consent = self.consent_store().map_err(StartError::Consent)?;
         let compiled_cache = self.compiled_cache_path();
         let Self {

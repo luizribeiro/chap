@@ -100,6 +100,7 @@ mod tests {
             readonly: true,
             image: "docker.io/library/alpine:3.20".into(),
             egress: vec![],
+            secrets: vec![],
         };
 
         assert_eq!(
