@@ -27,9 +27,9 @@ struct ScenarioResult {
 async fn runs_a_command_in_a_vm_with_a_granted_mount() {
     let result = run_scenario(
         "granted",
-        &["/"],
-        "///////////////////////",
-        "/",
+        &["rw:/"],
+        "rw:////////////////////",
+        "rw:/",
         json!({"command": ["echo", "vm-e2e-ok"]}),
     )
     .await;
@@ -43,9 +43,9 @@ async fn runs_a_command_in_a_vm_with_a_granted_mount() {
 async fn denies_a_mount_outside_the_grant() {
     let result = run_scenario(
         "denied",
-        &["/", "/etc"],
-        "/project///////////////",
-        "/project",
+        &["rw:/", "rw:/etc"],
+        "rw:/project////////////",
+        "rw:/project",
         json!({"command": ["echo", "x"]}),
     )
     .await;

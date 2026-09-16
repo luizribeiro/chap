@@ -231,11 +231,12 @@ names are lowercase, and the registry must exactly match an allowed entry.
 VM authority is split into four permissions:
 
 - `vm.create` is the flag that permits creation and get-or-create.
-- `vm.mount` scopes expose absolute host paths. `/path` permits either access
-  mode within that path, while `ro:/path` requires the mount to be read-only.
-  Colons elsewhere are legal path characters; only the leading `ro:` is the
-  read-only marker. Grants are matched against the canonical host path: on
-  macOS, for example, grant `/private/tmp/project`, not `/tmp/project`.
+- `vm.mount` scopes expose absolute host paths as `ro:/path` or `rw:/path`.
+  `rw:` permits either access mode within that path, while `ro:` requires the
+  mount to be read-only. Colons elsewhere are legal path characters; only the
+  leading `ro:` or `rw:` is the mode marker. Grants are matched against the
+  canonical host path: on macOS, for example, grant `rw:/private/tmp/project`,
+  not `rw:/tmp/project`.
 - `vm.egress` scopes contain an IP address or strict CIDR plus a port:
   `addr:port`, `addr/prefix:port`, `[v6]:port`, or `[v6]/prefix:port`. The CIDR
   address must be the network address, and `*` in the port position permits any
@@ -264,7 +265,7 @@ The bundled sandbox plugin has one `run` tool. Its `command` argument is an argv
 array executed directly, without a shell. The plugin defaults `image` to
 `docker.io/library/alpine:3.20`; every entry in `allowed_mounts` uses the
 `vm.mount` scope grammar and is mounted at `/mnt<host path>` on every call, so
-`ro:/path` mounts read-only and `/path` mounts read-write; `allowed_egress`
+`ro:/path` mounts read-only and `rw:/path` mounts read-write; `allowed_egress`
 supplies the network scopes. It names its VM `workspace` and reuses it across
 calls within a session. Results contain the exit code, stdout, stderr, and a
 note when the host's combined output cap truncated the streams.

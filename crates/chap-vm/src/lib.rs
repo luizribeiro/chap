@@ -100,9 +100,12 @@ pub mod vm {
         type Err = ScopeError;
 
         fn from_str(value: &str) -> Result<Self, Self::Err> {
-            let (path, readonly_required) = match value.strip_prefix("ro:") {
-                Some(path) => (path, true),
-                None => (value, false),
+            let (path, readonly_required) = if let Some(path) = value.strip_prefix("ro:") {
+                (path, true)
+            } else if let Some(path) = value.strip_prefix("rw:") {
+                (path, false)
+            } else {
+                return Err(ScopeError::unknown(value));
             };
             Self::new(path, readonly_required).map_err(|_| ScopeError::unknown(value))
         }
@@ -113,7 +116,7 @@ pub mod vm {
             if self.readonly_required {
                 format!("ro:{}", self.path)
             } else {
-                self.path.clone()
+                format!("rw:{}", self.path)
             }
         }
     }
@@ -419,13 +422,13 @@ mod tests {
     #[test]
     fn mount_samples_obey_the_scope_laws() {
         check_scope_laws([
-            mount("/"),
+            mount("rw:/"),
             mount("ro:/"),
-            mount("/project"),
+            mount("rw:/project"),
             mount("ro:/project"),
-            mount("/project/src"),
+            mount("rw:/project/src"),
             mount("ro:/project/src"),
-            mount("/data"),
+            mount("rw:/data"),
         ])
         .unwrap();
     }
@@ -433,21 +436,21 @@ mod tests {
     #[test]
     fn mount_containment_respects_boundaries_and_modes() {
         let cases = [
-            ("/project", "/project", true),
-            ("/project", "/project/x", true),
-            ("/project", "/projectx", false),
-            ("/project", "/Project", false),
-            ("/project", "/", false),
-            ("/", "/project/src", true),
+            ("rw:/project", "rw:/project", true),
+            ("rw:/project", "rw:/project/x", true),
+            ("rw:/project", "rw:/projectx", false),
+            ("rw:/project", "rw:/Project", false),
+            ("rw:/project", "rw:/", false),
+            ("rw:/", "rw:/project/src", true),
             ("ro:/project", "ro:/project/x", true),
-            ("ro:/project", "/project/x", false),
-            ("/project", "ro:/project/x", true),
-            ("/project／src", "/project／src", true),
-            ("/project／src", "/project/src", false),
-            ("/project/src", "/project／src", false),
-            ("/caf\u{e9}", "/caf\u{e9}", true),
-            ("/cafe\u{301}", "/cafe\u{301}", true),
-            ("/caf\u{e9}", "/cafe\u{301}", false),
+            ("ro:/project", "rw:/project/x", false),
+            ("rw:/project", "ro:/project/x", true),
+            ("rw:/project／src", "rw:/project／src", true),
+            ("rw:/project／src", "rw:/project/src", false),
+            ("rw:/project/src", "rw:/project／src", false),
+            ("rw:/caf\u{e9}", "rw:/caf\u{e9}", true),
+            ("rw:/cafe\u{301}", "rw:/cafe\u{301}", true),
+            ("rw:/caf\u{e9}", "rw:/cafe\u{301}", false),
         ];
         for (granted, requested, expected) in cases {
             assert_eq!(
@@ -461,9 +464,14 @@ mod tests {
     #[test]
     fn mount_parsing_normalizes_and_is_idempotent() {
         let cases = [
-            ("/", "/", "/", false),
-            ("///", "/", "/", false),
-            ("//project///src//", "/project/src", "/project/src", false),
+            ("rw:/", "rw:/", "/", false),
+            ("rw:///", "rw:/", "/", false),
+            (
+                "rw://project///src//",
+                "rw:/project/src",
+                "/project/src",
+                false,
+            ),
             (
                 "ro://project///src//",
                 "ro:/project/src",
@@ -471,8 +479,8 @@ mod tests {
                 true,
             ),
             (
-                "/Volumes/Backup 2024-01-01T10:00",
-                "/Volumes/Backup 2024-01-01T10:00",
+                "rw:/Volumes/Backup 2024-01-01T10:00",
+                "rw:/Volumes/Backup 2024-01-01T10:00",
                 "/Volumes/Backup 2024-01-01T10:00",
                 false,
             ),
@@ -482,8 +490,13 @@ mod tests {
                 "/Volumes/Backup 2024-01-01T10:00",
                 true,
             ),
-            ("/project／src", "/project／src", "/project／src", false),
-            ("/cafe\u{301}", "/cafe\u{301}", "/cafe\u{301}", false),
+            (
+                "rw:/project／src",
+                "rw:/project／src",
+                "/project／src",
+                false,
+            ),
+            ("rw:/cafe\u{301}", "rw:/cafe\u{301}", "/cafe\u{301}", false),
         ];
         for (input, canonical, path, readonly) in cases {
             let parsed = mount(input);
@@ -504,15 +517,19 @@ mod tests {
         for invalid in [
             "",
             "project/src",
+            "/",
+            "/project/src",
             "/project/../secret",
             "/project/./src",
-            "rw:/project",
             "RO:/project",
+            "write:/project",
             concat!("ro:", "ro:/x"),
             "ro:",
+            "rw:",
             "ro:relative",
-            "/project/\0",
-            "/project\0",
+            "rw:relative",
+            "rw:/project/\0",
+            "rw:/project\0",
         ] {
             assert!(Mount::from_str(invalid).is_err(), "accepted {invalid:?}");
         }
@@ -546,9 +563,13 @@ mod tests {
 
     #[test]
     fn mount_constructor_canonical_form_round_trips() {
-        let mount = Mount::new("/a//b/", true).unwrap();
+        for readonly in [true, false] {
+            let mount = Mount::new("/a//b/", readonly).unwrap();
+            let canonical = if readonly { "ro:/a/b" } else { "rw:/a/b" };
 
-        assert_eq!(Mount::from_str(&mount.canonical()).unwrap(), mount);
+            assert_eq!(mount.canonical(), canonical);
+            assert_eq!(Mount::from_str(canonical).unwrap(), mount);
+        }
     }
 
     #[test]

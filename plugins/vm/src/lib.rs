@@ -142,7 +142,7 @@ struct Settings {
     #[serde(default = "default_image")]
     image: String,
     /// Host paths mounted into the VM at `/mnt<path>`: `ro:/path` mounts
-    /// read-only and `/path` mounts read-write.
+    /// read-only and `rw:/path` mounts read-write.
     #[serde(deserialize_with = "deserialize_allowed_mounts")]
     #[schemars(with = "Vec<String>")]
     allowed_mounts: Vec<MountScope>,
@@ -163,7 +163,7 @@ where
         .map(|mount| {
             mount.parse::<MountScope>().map_err(|_| {
                 serde::de::Error::custom(format!(
-                    "allowed mount {mount:?} must be an absolute path, optionally prefixed with `ro:`"
+                    "allowed mount {mount:?} must be an absolute path prefixed with `ro:` or `rw:`"
                 ))
             })
         })
@@ -187,7 +187,7 @@ mod tests {
     fn plugin() -> Sandbox {
         <Sandbox as Plugin>::new(Settings {
             image: default_image(),
-            allowed_mounts: mounts(&["/project"]),
+            allowed_mounts: mounts(&["rw:/project"]),
             allowed_egress: vec![],
         })
     }
@@ -227,7 +227,14 @@ mod tests {
 
     #[test]
     fn rejects_invalid_allowed_mounts_when_settings_load() {
-        for mount in ["project", "ro:", "", "/project/../secret", "rw:/project"] {
+        for mount in [
+            "project",
+            "/project",
+            "ro:",
+            "rw:",
+            "",
+            "rw:/project/../secret",
+        ] {
             let error = serde_json::from_value::<Settings>(serde_json::json!({
                 "allowed_mounts": [mount],
                 "allowed_egress": [],
@@ -243,14 +250,14 @@ mod tests {
     #[test]
     fn parses_mount_scopes_when_settings_load() {
         let settings: Settings = serde_json::from_value(serde_json::json!({
-            "allowed_mounts": ["ro:/project", "/var//log/"],
+            "allowed_mounts": ["ro:/project", "rw:/var//log/"],
             "allowed_egress": [],
         }))
         .unwrap();
 
         assert_eq!(
             settings.allowed_mounts,
-            mounts(&["ro:/project", "/var/log"])
+            mounts(&["ro:/project", "rw:/var/log"])
         );
         assert!(settings.allowed_mounts[0].readonly());
         assert!(!settings.allowed_mounts[1].readonly());
@@ -273,7 +280,7 @@ mod tests {
     fn configures_the_vm_with_all_allowed_mounts() {
         let settings = Settings {
             image: default_image(),
-            allowed_mounts: mounts(&["ro:/project", "/var/log"]),
+            allowed_mounts: mounts(&["ro:/project", "rw:/var/log"]),
             allowed_egress: vec![],
         };
 
@@ -292,7 +299,7 @@ mod tests {
     fn describes_each_mount_with_its_access_mode() {
         let plugin = <Sandbox as Plugin>::new(Settings {
             image: default_image(),
-            allowed_mounts: mounts(&["ro:/project", "/var/log"]),
+            allowed_mounts: mounts(&["ro:/project", "rw:/var/log"]),
             allowed_egress: vec![],
         });
 

@@ -209,7 +209,7 @@ mod tests {
                 .map(|scope| scope.canonical())
                 .collect::<Vec<_>>(),
             [
-                tests.to_string_lossy().into_owned(),
+                format!("rw:{}", tests.display()),
                 format!("ro:{}", source.display()),
             ]
         );
@@ -314,7 +314,7 @@ mod tests {
         std::fs::create_dir(&subdirectory).unwrap();
         symlink(&sibling, granted.join("link")).unwrap();
         let granted = granted.canonicalize().unwrap();
-        let grant = Mount::from_str(granted.to_str().unwrap()).unwrap();
+        let grant = Mount::from_str(&format!("rw:{}", granted.to_str().unwrap())).unwrap();
 
         let mut escaped = config();
         escaped.mounts = vec![vm::Mount {
