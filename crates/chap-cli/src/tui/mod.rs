@@ -61,11 +61,23 @@ fn format_workspace_status(workspace: &WorkspaceInfo) -> String {
     } else {
         "read-write"
     };
-    format!(
+    let mut status = format!(
         "workspace: {} ({access}) in {}",
         workspace.directory.display(),
         workspace.image
-    )
+    );
+    if !workspace.secrets.is_empty() {
+        status.push_str(", secrets: ");
+        status.push_str(
+            &workspace
+                .secrets
+                .iter()
+                .map(|secret| format!("{} → {}", secret.env, secret.hosts.join(", ")))
+                .collect::<Vec<_>>()
+                .join("; "),
+        );
+    }
+    status
 }
 
 async fn await_terminal_task<E>(
@@ -106,6 +118,18 @@ mod tests {
         assert_eq!(
             format_workspace_status(&workspace),
             "workspace: /project (read-only) in docker.io/library/alpine:3.20"
+        );
+
+        let with_secrets = WorkspaceInfo {
+            secrets: vec![chap_core::WorkspaceSecret {
+                env: "GITHUB_TOKEN".into(),
+                hosts: vec!["api.github.com".into(), "github.com".into()],
+            }],
+            ..workspace
+        };
+        assert_eq!(
+            format_workspace_status(&with_secrets),
+            "workspace: /project (read-only) in docker.io/library/alpine:3.20, secrets: GITHUB_TOKEN → api.github.com, github.com"
         );
     }
 
