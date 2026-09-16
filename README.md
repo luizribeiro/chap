@@ -263,12 +263,13 @@ the relevant HTTP or HTTPS egress.
 
 The bundled sandbox plugin has one `run` tool. Its `command` argument is an argv
 array executed directly, without a shell. The plugin defaults `image` to
-`docker.io/library/alpine:3.20`; every entry in `allowed_mounts` uses the
-`vm.mount` scope grammar and is mounted at `/mnt<host path>` on every call, so
-`ro:/path` mounts read-only and `rw:/path` mounts read-write; `allowed_egress`
-supplies the network scopes. It names its VM `workspace` and reuses it across
-calls within a session. Results contain the exit code, stdout, stderr, and a
-note when the host's combined output cap truncated the streams.
+`docker.io/library/alpine:3.20`. Mounts are optional and use the `vm.mount`
+scope grammar, so `ro:/path` mounts read-only and `rw:/path` mounts read-write:
+`workspace` is one host path mounted at `/mnt/workspace`, and every entry in
+`allowed_mounts` is mounted at `/mnt/host<host path>`. `allowed_egress`
+supplies the network scopes. The plugin names its VM `workspace` and reuses it
+across calls within a session. Results contain the exit code, stdout, stderr,
+and a note when the host's combined output cap truncated the streams.
 
 The real backend uses microsandbox microVMs on Apple Silicon or Linux with KVM.
 A system Cargo build installs the microsandbox runtime under `~/.microsandbox`
@@ -294,7 +295,7 @@ complete hint to append to an existing persona:
     "sandbox": {
       "component": "/absolute/path/to/chap/target/wasm32-wasip2/release/chap_vm_plugin.wasm",
       "settings": {
-        "allowed_mounts": ["ro:/absolute/path/to/project"],
+        "workspace": "ro:/absolute/path/to/project",
         "allowed_egress": [
           "0.0.0.0/0:443",
           "0.0.0.0/0:80",
@@ -308,7 +309,7 @@ complete hint to append to an existing persona:
         "channel": "system"
       },
       "settings": {
-        "persona": "A reusable microVM sandbox is available through the sandbox plugin's run tool. The host project is mounted read-only at /mnt/absolute/path/to/project."
+        "persona": "A reusable microVM sandbox is available through the sandbox plugin's run tool. The host project is mounted read-only at /mnt/workspace."
       }
     }
   }

@@ -6,6 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer};
 
 const RUN: &str = "run";
+const WORKSPACE_MOUNT_POINT: &str = "/mnt/workspace";
 
 struct Sandbox {
     settings: Settings,
@@ -21,10 +22,13 @@ impl Plugin for Sandbox {
     const HOMEPAGE: MetadataSource = MetadataSource::Absent;
     const NEEDS: Needs = Needs::required(&[
         capabilities::vm::CREATE.need(),
-        capabilities::vm::MOUNT.need(&[ScopeRef::setting("/allowed_mounts")]),
         capabilities::vm::EGRESS.need(&[ScopeRef::setting("/allowed_egress")]),
         capabilities::vm::MANAGE.need(&[ScopeRef::literal("created-by-caller")]),
-    ]);
+    ])
+    .optional(&[capabilities::vm::MOUNT.need(&[
+        ScopeRef::setting("/workspace"),
+        ScopeRef::setting("/allowed_mounts"),
+    ])]);
     type Settings = Settings;
 
     fn new(settings: Self::Settings) -> Self {
@@ -34,11 +38,8 @@ impl Plugin for Sandbox {
 
 impl Tools for Sandbox {
     fn definitions(&self) -> Result<Vec<ToolDefinition>, String> {
-        let guest_mounts = self
-            .settings
-            .allowed_mounts
-            .iter()
-            .map(describe_mount)
+        let guest_mounts = guest_mounts(&self.settings)
+            .map(|(guest, mount)| describe_mount(&guest, mount))
             .collect::<Vec<_>>()
             .join(", ");
         let allowed_egress = self.settings.allowed_egress.join(", ");
@@ -100,28 +101,38 @@ fn format_output(output: ExecResult) -> String {
     sections.join("\n\n")
 }
 
-fn guest_mount_point(host: &str) -> String {
-    format!("/mnt{host}")
+fn host_mount_point(host: &str) -> String {
+    format!("/mnt/host{host}")
 }
 
-fn describe_mount(mount: &MountScope) -> String {
+fn guest_mounts(settings: &Settings) -> impl Iterator<Item = (String, &MountScope)> {
+    let workspace = settings
+        .workspace
+        .iter()
+        .map(|mount| (WORKSPACE_MOUNT_POINT.to_owned(), mount));
+    let host_paths = settings
+        .allowed_mounts
+        .iter()
+        .map(|mount| (host_mount_point(mount.path()), mount));
+    workspace.chain(host_paths)
+}
+
+fn describe_mount(guest: &str, mount: &MountScope) -> String {
     let access = if mount.readonly() {
         "read-only"
     } else {
         "read-write"
     };
-    format!("{} ({access})", guest_mount_point(mount.path()))
+    format!("{guest} ({access})")
 }
 
 fn vm_config(settings: &Settings) -> VmConfig {
     VmConfig {
         image: settings.image.clone(),
-        mounts: settings
-            .allowed_mounts
-            .iter()
-            .map(|mount| Mount {
+        mounts: guest_mounts(settings)
+            .map(|(guest, mount)| Mount {
                 host: mount.path().to_owned(),
-                guest: guest_mount_point(mount.path()),
+                guest,
                 readonly: mount.readonly(),
             })
             .collect(),
@@ -141,9 +152,14 @@ struct Settings {
     /// OCI image reference used for the sandbox VM.
     #[serde(default = "default_image")]
     image: String,
-    /// Host paths mounted into the VM at `/mnt<path>`: `ro:/path` mounts
+    /// Host path mounted into the VM at `/mnt/workspace`: `ro:/path` mounts
     /// read-only and `rw:/path` mounts read-write.
-    #[serde(deserialize_with = "deserialize_allowed_mounts")]
+    #[serde(default, deserialize_with = "deserialize_workspace")]
+    #[schemars(with = "Option<String>")]
+    workspace: Option<MountScope>,
+    /// Further host paths mounted into the VM at `/mnt/host<path>`, with the
+    /// same `ro:` and `rw:` prefixes.
+    #[serde(default, deserialize_with = "deserialize_allowed_mounts")]
     #[schemars(with = "Vec<String>")]
     allowed_mounts: Vec<MountScope>,
     /// Network destinations the plugin may expose to a VM.
@@ -154,20 +170,33 @@ fn default_image() -> String {
     "docker.io/library/alpine:3.20".to_owned()
 }
 
+fn deserialize_workspace<'de, D>(deserializer: D) -> Result<Option<MountScope>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)?
+        .as_deref()
+        .map(parse_mount)
+        .transpose()
+}
+
 fn deserialize_allowed_mounts<'de, D>(deserializer: D) -> Result<Vec<MountScope>, D::Error>
 where
     D: Deserializer<'de>,
 {
     Vec::<String>::deserialize(deserializer)?
         .iter()
-        .map(|mount| {
-            mount.parse::<MountScope>().map_err(|_| {
-                serde::de::Error::custom(format!(
-                    "allowed mount {mount:?} must be an absolute path prefixed with `ro:` or `rw:`"
-                ))
-            })
-        })
+        .map(String::as_str)
+        .map(parse_mount)
         .collect()
+}
+
+fn parse_mount<E: serde::de::Error>(mount: &str) -> Result<MountScope, E> {
+    mount.parse::<MountScope>().map_err(|_| {
+        E::custom(format!(
+            "mount {mount:?} must be an absolute path prefixed with `ro:` or `rw:`"
+        ))
+    })
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -184,12 +213,21 @@ mod tests {
         values.iter().map(|value| value.parse().unwrap()).collect()
     }
 
-    fn plugin() -> Sandbox {
-        <Sandbox as Plugin>::new(Settings {
+    fn settings(workspace: Option<&str>, allowed_mounts: &[&str]) -> Settings {
+        Settings {
             image: default_image(),
-            allowed_mounts: mounts(&["rw:/project"]),
+            workspace: workspace.map(|value| value.parse().unwrap()),
+            allowed_mounts: mounts(allowed_mounts),
             allowed_egress: vec![],
-        })
+        }
+    }
+
+    fn plugin() -> Sandbox {
+        <Sandbox as Plugin>::new(settings(Some("rw:/project"), &[]))
+    }
+
+    fn definition(plugin: &Sandbox) -> ToolDefinition {
+        <Sandbox as Tools>::definitions(plugin).unwrap().remove(0)
     }
 
     #[test]
@@ -199,13 +237,14 @@ mod tests {
 
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["unevaluatedProperties"], false);
-        assert_eq!(
-            schema["required"],
-            serde_json::json!(["allowed_mounts", "allowed_egress"])
-        );
+        assert_eq!(schema["required"], serde_json::json!(["allowed_egress"]));
         assert_eq!(
             schema["properties"]["image"]["default"],
             "docker.io/library/alpine:3.20"
+        );
+        assert_eq!(
+            schema["properties"]["workspace"]["type"],
+            serde_json::json!(["string", "null"])
         );
         assert_eq!(schema["properties"]["allowed_mounts"]["type"], "array");
         assert_eq!(
@@ -217,7 +256,6 @@ mod tests {
     #[test]
     fn defaults_the_image_to_alpine() {
         let settings: Settings = serde_json::from_value(serde_json::json!({
-            "allowed_mounts": [],
             "allowed_egress": [],
         }))
         .unwrap();
@@ -226,7 +264,24 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_allowed_mounts_when_settings_load() {
+    fn accepts_settings_without_any_mount() {
+        let settings: Settings = serde_json::from_value(serde_json::json!({
+            "allowed_egress": [],
+        }))
+        .unwrap();
+
+        assert_eq!(settings.workspace, None);
+        assert!(settings.allowed_mounts.is_empty());
+        assert!(vm_config(&settings).mounts.is_empty());
+        let description = definition(&<Sandbox as Plugin>::new(settings)).description;
+        assert!(
+            description.contains("Guest mount points: []"),
+            "{description}"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_mounts_when_settings_load() {
         for mount in [
             "project",
             "/project",
@@ -235,29 +290,33 @@ mod tests {
             "",
             "rw:/project/../secret",
         ] {
-            let error = serde_json::from_value::<Settings>(serde_json::json!({
-                "allowed_mounts": [mount],
-                "allowed_egress": [],
-            }))
-            .unwrap_err();
-            let message = error.to_string();
+            for settings in [
+                serde_json::json!({ "workspace": mount, "allowed_egress": [] }),
+                serde_json::json!({ "allowed_mounts": [mount], "allowed_egress": [] }),
+            ] {
+                let message = serde_json::from_value::<Settings>(settings)
+                    .unwrap_err()
+                    .to_string();
 
-            assert!(message.contains(&format!("{mount:?}")), "{message}");
-            assert!(message.contains("absolute path"), "{message}");
+                assert!(message.contains(&format!("{mount:?}")), "{message}");
+                assert!(message.contains("absolute path"), "{message}");
+            }
         }
     }
 
     #[test]
     fn parses_mount_scopes_when_settings_load() {
         let settings: Settings = serde_json::from_value(serde_json::json!({
-            "allowed_mounts": ["ro:/project", "rw:/var//log/"],
+            "workspace": "rw:/project//",
+            "allowed_mounts": ["ro:/srv/data", "rw:/var//log/"],
             "allowed_egress": [],
         }))
         .unwrap();
 
+        assert_eq!(settings.workspace, Some("rw:/project".parse().unwrap()));
         assert_eq!(
             settings.allowed_mounts,
-            mounts(&["ro:/project", "rw:/var/log"])
+            mounts(&["ro:/srv/data", "rw:/var/log"])
         );
         assert!(settings.allowed_mounts[0].readonly());
         assert!(!settings.allowed_mounts[1].readonly());
@@ -266,9 +325,8 @@ mod tests {
     #[test]
     fn configures_the_vm_with_allowed_egress() {
         let settings = Settings {
-            image: default_image(),
-            allowed_mounts: mounts(&[]),
             allowed_egress: vec!["0.0.0.0/0:443".to_owned(), "10.0.0.0/8:80".to_owned()],
+            ..settings(None, &[])
         };
 
         let config = vm_config(&settings);
@@ -277,50 +335,36 @@ mod tests {
     }
 
     #[test]
-    fn configures_the_vm_with_all_allowed_mounts() {
-        let settings = Settings {
-            image: default_image(),
-            allowed_mounts: mounts(&["ro:/project", "rw:/var/log"]),
-            allowed_egress: vec![],
-        };
-
-        let config = vm_config(&settings);
+    fn mounts_the_workspace_before_the_other_host_paths() {
+        let config = vm_config(&settings(Some("ro:/project"), &["rw:/var/log"]));
 
         assert_eq!(config.mounts.len(), 2);
         assert_eq!(config.mounts[0].host, "/project");
-        assert_eq!(config.mounts[0].guest, "/mnt/project");
+        assert_eq!(config.mounts[0].guest, "/mnt/workspace");
         assert!(config.mounts[0].readonly);
         assert_eq!(config.mounts[1].host, "/var/log");
-        assert_eq!(config.mounts[1].guest, "/mnt/var/log");
+        assert_eq!(config.mounts[1].guest, "/mnt/host/var/log");
         assert!(!config.mounts[1].readonly);
     }
 
     #[test]
     fn describes_each_mount_with_its_access_mode() {
-        let plugin = <Sandbox as Plugin>::new(Settings {
-            image: default_image(),
-            allowed_mounts: mounts(&["ro:/project", "rw:/var/log"]),
-            allowed_egress: vec![],
-        });
+        let plugin = <Sandbox as Plugin>::new(settings(Some("ro:/project"), &["rw:/var/log"]));
 
-        let definitions = <Sandbox as Tools>::definitions(&plugin).unwrap();
+        let description = definition(&plugin).description;
 
         assert!(
-            definitions[0].description.contains(
-                "Guest mount points: [/mnt/project (read-only), /mnt/var/log (read-write)]"
+            description.contains(
+                "Guest mount points: [/mnt/workspace (read-only), /mnt/host/var/log (read-write)]"
             ),
-            "{}",
-            definitions[0].description
+            "{description}"
         );
     }
 
     #[test]
-    fn derives_guest_mount_points_from_absolute_host_paths() {
-        assert_eq!(
-            guest_mount_point("/Users/luiz/chap"),
-            "/mnt/Users/luiz/chap"
-        );
-        assert_eq!(guest_mount_point("/var/log"), "/mnt/var/log");
+    fn keeps_host_paths_out_of_the_workspace_mount_point() {
+        assert_eq!(host_mount_point("/workspace"), "/mnt/host/workspace");
+        assert_eq!(host_mount_point("/var/log"), "/mnt/host/var/log");
     }
 
     #[test]
@@ -349,7 +393,7 @@ mod tests {
         assert_eq!(parameters["additionalProperties"], false);
         assert_eq!(parameters["required"], serde_json::json!(["command"]));
         assert!(parameters["properties"].get("mounts").is_none());
-        assert!(definitions[0].description.contains("/mnt/project"));
+        assert!(definitions[0].description.contains("/mnt/workspace"));
     }
 
     #[test]
