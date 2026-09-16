@@ -5,6 +5,9 @@ use serde::{Deserialize, Deserializer, de};
 use serde_json::Value;
 use std::{num::NonZeroUsize, time::Duration};
 
+#[cfg(feature = "vm")]
+use std::collections::BTreeMap;
+
 const DEFAULT_PLUGIN_FUEL: u64 = 25_000_000;
 const DEFAULT_ADMISSION_DEADLINE_MS: u64 = 30_000;
 const DEFAULT_PROVIDER_DEADLINE_MS: u64 = 600_000;
@@ -40,6 +43,16 @@ pub(crate) struct WorkspaceSettings {
     pub(crate) mount: WorkspaceMountMode,
     #[serde(default)]
     pub(crate) egress: Vec<String>,
+    #[serde(default, deserialize_with = "deserialize_workspace_secrets")]
+    pub(crate) secrets: BTreeMap<String, WorkspaceSecretSettings>,
+}
+
+#[cfg(feature = "vm")]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkspaceSecretSettings {
+    pub(crate) from_env: String,
+    pub(crate) hosts: Vec<String>,
 }
 
 #[cfg(feature = "vm")]
@@ -55,6 +68,71 @@ impl WorkspaceMountMode {
     pub(crate) fn readonly(self) -> bool {
         matches!(self, Self::Ro)
     }
+}
+
+#[cfg(feature = "vm")]
+fn deserialize_workspace_secrets<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<String, WorkspaceSecretSettings>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let mut secrets = BTreeMap::<String, WorkspaceSecretSettings>::deserialize(deserializer)?;
+    for (guest, secret) in &mut secrets {
+        if !valid_environment_name(guest) {
+            return Err(de::Error::custom(format!(
+                "secret `{guest}` has an invalid guest environment variable name"
+            )));
+        }
+        if !valid_environment_name(&secret.from_env) {
+            return Err(de::Error::custom(format!(
+                "secret `{guest}` has invalid host environment variable `{}`",
+                secret.from_env
+            )));
+        }
+        if secret.hosts.is_empty() {
+            return Err(de::Error::custom(format!(
+                "secret `{guest}` must allow at least one host"
+            )));
+        }
+        for host in &mut secret.hosts {
+            if !valid_secret_host(host) {
+                return Err(de::Error::custom(format!(
+                    "secret `{guest}` has invalid host `{host}`"
+                )));
+            }
+            host.make_ascii_lowercase();
+        }
+    }
+    Ok(secrets)
+}
+
+#[cfg(feature = "vm")]
+fn valid_environment_name(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    bytes
+        .next()
+        .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+#[cfg(feature = "vm")]
+fn valid_secret_host(value: &str) -> bool {
+    !value.is_empty()
+        && value.is_ascii()
+        && value.split('.').all(|label| {
+            label
+                .bytes()
+                .next()
+                .is_some_and(|byte| byte.is_ascii_alphanumeric())
+                && label
+                    .bytes()
+                    .last()
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric())
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
 }
 
 /// Host ceiling for every plugin HTTP request, independent of invocation budgets.
@@ -348,6 +426,8 @@ fn default_max_concurrency() -> NonZeroUsize {
 mod tests {
     use super::*;
     use crate::config::load_config;
+    #[cfg(feature = "vm")]
+    use serde_json::json;
 
     #[test]
     fn defaults_http_ceiling_when_sections_or_field_are_absent() {
@@ -877,7 +957,13 @@ mod tests {
                     "workspace": {
                         "image": "docker.io/library/rust:1-alpine",
                         "mount": "ro",
-                        "egress": ["0.0.0.0/0:443", "0.0.0.0/0:80"]
+                        "egress": ["0.0.0.0/0:443", "0.0.0.0/0:80"],
+                        "secrets": {
+                            "GITHUB_TOKEN": {
+                                "from_env": "CHAP_GITHUB_TOKEN",
+                                "hosts": ["API.GITHUB.COM", "github.com"]
+                            }
+                        }
                     }
                 }
             }"#,
@@ -888,6 +974,13 @@ mod tests {
         assert_eq!(workspace.image, "docker.io/library/rust:1-alpine");
         assert_eq!(workspace.mount, WorkspaceMountMode::Ro);
         assert_eq!(workspace.egress, ["0.0.0.0/0:443", "0.0.0.0/0:80"]);
+        assert_eq!(
+            workspace.secrets["GITHUB_TOKEN"],
+            WorkspaceSecretSettings {
+                from_env: "CHAP_GITHUB_TOKEN".into(),
+                hosts: vec!["api.github.com".into(), "github.com".into()],
+            }
+        );
         assert_eq!(
             config.vm_settings().unwrap(),
             chap_vm::host::VmSettings::default()
@@ -912,6 +1005,7 @@ mod tests {
         let workspace = config.workspace_settings().unwrap().unwrap();
         assert_eq!(workspace.mount, WorkspaceMountMode::Rw);
         assert!(workspace.egress.is_empty());
+        assert!(workspace.secrets.is_empty());
     }
 
     #[cfg(feature = "vm")]
@@ -939,6 +1033,10 @@ mod tests {
                 r#"{"image":"docker.io/library/alpine:3.20","mount":"ro","path":"/tmp"}"#,
                 "unknown field `path`",
             ),
+            (
+                r#"{"image":"docker.io/library/alpine:3.20","mount":"ro","secrets":{"TOKEN":{"from_env":"HOST_TOKEN","hosts":["example.com"],"value":"hidden"}}}"#,
+                "unknown field `value`",
+            ),
         ] {
             let config: Config =
                 serde_json::from_str(&format!(r#"{{"agent":{{"workspace":{workspace}}}}}"#))
@@ -953,6 +1051,71 @@ mod tests {
                 panic!("expected invalid workspace config");
             };
             assert!(source.to_string().contains(expected), "{source}");
+        }
+    }
+
+    #[cfg(feature = "vm")]
+    #[test]
+    fn rejects_invalid_workspace_secret_names_and_hosts() {
+        for (guest, from_env, hosts, expected) in [
+            (
+                "BAD-NAME",
+                "HOST_TOKEN",
+                vec!["example.com"],
+                "secret `BAD-NAME`",
+            ),
+            (
+                "TOKEN",
+                "BAD-NAME",
+                vec!["example.com"],
+                "secret `TOKEN` has invalid host environment variable `BAD-NAME`",
+            ),
+            (
+                "TOKEN",
+                "HOST_TOKEN",
+                vec![],
+                "secret `TOKEN` must allow at least one host",
+            ),
+        ] {
+            let config: Config = serde_json::from_value(json!({
+                "agent": {"workspace": {
+                    "image": "docker.io/library/alpine:3.20",
+                    "mount": "ro",
+                    "secrets": {(guest): {"from_env": from_env, "hosts": hosts}}
+                }}
+            }))
+            .unwrap();
+            let error = config.validate_agent_settings().unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+
+        for host in [
+            "https://example.com",
+            "example.com:443",
+            "example.com/path",
+            "example .com",
+            ".example.com",
+            "example..com",
+            "example.com.",
+            "-example.com",
+            "example-.com",
+            "café.example",
+        ] {
+            let config: Config = serde_json::from_value(json!({
+                "agent": {"workspace": {
+                    "image": "docker.io/library/alpine:3.20",
+                    "mount": "ro",
+                    "secrets": {"TOKEN": {"from_env": "HOST_TOKEN", "hosts": [host]}}
+                }}
+            }))
+            .unwrap();
+            let error = config.validate_agent_settings().unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("secret `TOKEN` has invalid host"),
+                "{host}: {error}"
+            );
         }
     }
 }
