@@ -23,6 +23,18 @@ interface vm {
     truncated: bool,
   }
 
+  record workspace-mount {
+    guest: string,
+    readonly: bool,
+  }
+
+  record workspace-info {
+    vm: string,
+    image: string,
+    mounts: list<workspace-mount>,
+    egress: list<string>,
+  }
+
   variant vm-error {
     denied(string),
     already-exists,
@@ -32,6 +44,8 @@ interface vm {
     failed(string),
   }
 
+  /// The host-owned workspace VM, booted lazily on first use.
+  workspace: async func() -> result<workspace-info, vm-error>;
   create: async func(name: string, config: vm-config) -> result<string, vm-error>;
   get: async func(name: string) -> result<option<string>, vm-error>;
   get-or-create: async func(name: string, config: vm-config) -> result<string, vm-error>;

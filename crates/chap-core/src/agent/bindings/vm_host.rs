@@ -2,7 +2,7 @@ use super::{CapabilityHost, vm};
 use crate::{
     agent::{
         ResolvedWorkspace,
-        vm_host::{ManagedVm, translate_host_error, translate_requested_config},
+        vm_host::{ManagedVm, WorkspaceResource, translate_host_error, translate_requested_config},
     },
     config::Config,
     consent::ConsentError,
@@ -201,6 +201,24 @@ impl<B: VmBackend> VmHost<B> {
         Err(vm::VmError::Denied(
             "the workspace is owned by the host".into(),
         ))
+    }
+
+    fn workspace_record(&self) -> Result<vm::WorkspaceInfo, vm::VmError> {
+        let workspace = self.workspace_config()?;
+        Ok(vm::WorkspaceInfo {
+            vm: WORKSPACE_HANDLE.into(),
+            image: workspace.info.image.clone(),
+            mounts: workspace
+                .requested
+                .mounts
+                .iter()
+                .map(|mount| vm::WorkspaceMount {
+                    guest: mount.guest.clone(),
+                    readonly: mount.readonly,
+                })
+                .collect(),
+            egress: workspace.info.egress.clone(),
+        })
     }
 
     fn resolve_workspace(&self) -> Result<ManagedVm, vm::VmError> {
@@ -541,6 +559,15 @@ impl ResolveScopedResource<chap_vm::vm::InstanceScope, String> for CapabilityHos
 
 #[lockgate::guarded]
 impl vm::Host for CapabilityHost {
+    #[lockgate::no_capability_required(
+        reason = "answers from config without booting and performs its scoped vm.manage check by hand"
+    )]
+    async fn workspace(&mut self, cx: HostCtx<'_, ()>) -> Result<vm::WorkspaceInfo, vm::VmError> {
+        let workspace = self.vm.workspace_record()?;
+        cx.require_scoped(chap_vm::vm::MANAGE, &WorkspaceResource)?;
+        Ok(workspace)
+    }
+
     #[lockgate::no_capability_required(
         reason = "needs vm::create plus per-element vm::mount and vm::egress checks; the guard admits one classification per method (lockgate#21)"
     )]
@@ -996,6 +1023,29 @@ mod tests {
             host.validate_get_name(WORKSPACE_HANDLE),
             Err(vm::VmError::Failed(message)) if message.contains("no workspace is configured")
         ));
+        assert!(matches!(
+            host.workspace_record(),
+            Err(vm::VmError::Failed(message)) if message.contains("no workspace is configured")
+        ));
+    }
+
+    #[tokio::test]
+    async fn workspace_record_reports_config_without_booting_the_vm() {
+        let backend = Arc::new(ControlledBackend::new(&[], &[]));
+        let host =
+            test_host_with_workspace(Arc::clone(&backend), 1, Some(resolved_workspace())).await;
+
+        let workspace = host.workspace_record().unwrap();
+        assert_eq!(workspace.vm, "@workspace");
+        assert_eq!(workspace.image, "ghcr.io/acme/build:1.2");
+        assert_eq!(workspace.mounts.len(), 1);
+        assert_eq!(workspace.mounts[0].guest, "/mnt/workspace");
+        assert!(workspace.mounts[0].readonly);
+        assert_eq!(workspace.egress, ["127.0.0.1:1"]);
+        assert_eq!(
+            backend.workspace_get_or_create_calls.load(Ordering::SeqCst),
+            0
+        );
     }
 
     #[tokio::test]

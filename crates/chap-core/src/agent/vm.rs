@@ -41,6 +41,14 @@ pub(super) enum ManagedVm {
     Workspace,
 }
 
+pub(super) struct WorkspaceResource;
+
+impl ScopedResource<InstanceScope> for WorkspaceResource {
+    fn scopes_for(&self, _subject: &PluginSubject<'_>) -> Vec<InstanceScope> {
+        vec![InstanceScope::Workspace]
+    }
+}
+
 impl ScopedResource<InstanceScope> for ManagedVm {
     fn scopes_for(&self, _subject: &PluginSubject<'_>) -> Vec<InstanceScope> {
         vec![match self {

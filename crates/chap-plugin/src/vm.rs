@@ -11,6 +11,8 @@ mod bindings {
 // The plugin's `with:` mapping targets this module, so raw host calls stay public.
 pub use bindings::chap::agent::vm::*;
 
+pub type Workspace = WorkspaceInfo;
+
 use crate::roles::tools::ToolError;
 
 pub struct Vm {
@@ -18,6 +20,19 @@ pub struct Vm {
 }
 
 impl Vm {
+    pub async fn workspace() -> Result<(Self, Workspace), VmError> {
+        bindings::chap::agent::vm::workspace()
+            .await
+            .map(Self::from_workspace)
+    }
+
+    fn from_workspace(workspace: Workspace) -> (Self, Workspace) {
+        let vm = Self {
+            name: workspace.vm.clone(),
+        };
+        (vm, workspace)
+    }
+
     pub async fn create(name: &str, config: VmConfig) -> Result<Self, VmError> {
         bindings::chap::agent::vm::create(name.to_owned(), config)
             .await
@@ -119,5 +134,23 @@ mod tests {
             ToolError::from(VmError::Failed("agent unavailable".to_owned())),
             ToolError::Failed("vm operation failed: agent unavailable".to_owned())
         );
+    }
+
+    #[test]
+    fn workspace_handle_comes_from_the_host_record() {
+        let workspace = Workspace {
+            vm: "@workspace".into(),
+            image: "docker.io/library/alpine:3.20".into(),
+            mounts: vec![WorkspaceMount {
+                guest: "/mnt/workspace".into(),
+                readonly: false,
+            }],
+            egress: vec!["0.0.0.0/0:443".into()],
+        };
+
+        let (vm, workspace) = Vm::from_workspace(workspace);
+
+        assert_eq!(vm.name(), "@workspace");
+        assert_eq!(workspace.vm, vm.name());
     }
 }
