@@ -270,19 +270,52 @@ The optional `agent.workspace` section defines that host-owned VM:
       "registries": ["docker.io"]
     },
     "workspace": {
-      "image": "docker.io/library/alpine:3.20",
-      "mount": "ro",
-      "egress": ["127.0.0.1:1"]
+      "image": "docker.io/library/rust:1-alpine",
+      "mount": "rw",
+      "egress": [
+        "0.0.0.0/0:443",
+        "0.0.0.0/0:80",
+        "0.0.0.0/0:53"
+      ],
+      "secrets": {
+        "GITHUB_TOKEN": {
+          "from_env": "CHAP_GITHUB_TOKEN",
+          "hosts": ["api.github.com", "github.com"]
+        }
+      }
     }
   }
 }
 ```
 
 `image` is required and follows the registry policy in `agent.vm`. `mount` is
-`"ro"` or `"rw"` and defaults to `"rw"`. `egress` uses the same scopes as
+required and is either `"ro"` or `"rw"`. `egress` uses the same scopes as
 `vm.egress` and defaults to an empty list. The directory selected by
 `--workspace`, `CHAP_WORKSPACE`, or the startup directory is mounted at
 `/mnt/workspace` with the configured mode.
+
+`secrets` maps a guest environment variable to a host environment variable and
+an exact hostname allowlist. It defaults to an empty map. `plugins check`
+validates the names and hosts without requiring source variables to be present.
+At agent startup, CHAP checks that each source variable is set and non-empty,
+but never reads, stores, hashes, logs, or prints its value. The microsandbox SDK
+reads the value from the host environment itself. The guest receives a
+placeholder, not the value, and the network gateway substitutes the value only
+in requests to an allowed host. A request that carries the placeholder to any
+other host is blocked. The VM configuration hash covers the guest name,
+source-variable name, and hosts, never the value. VMs created by plugins through
+`vm.create` do not receive workspace secrets.
+
+Once any secret is configured, the sandbox gateway terminates TLS for every
+host, although substitution remains limited to that secret's allowlist. The
+sandbox installs its CA in the guest trust store and sets the common TLS trust
+environment variables before commands run, so no manual CA setup is needed in
+images with a normal trust-store layout.
+
+For GitHub access, the image must contain `gh` and `git`; on Alpine, install the
+`github-cli` and `git` packages. Run `gh auth setup-git` once in the workspace
+VM so Git uses the credential helper. Prefer a fine-grained GitHub token whose
+repository access and permissions are limited to the repository being used.
 
 There is one workspace VM per agent process. It boots lazily on first use, is
 shared by approved plugins, and does not count against
