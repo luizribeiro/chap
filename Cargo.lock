@@ -914,6 +914,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "chap-vm-guest-fixture"
+version = "0.1.0"
+dependencies = [
+ "chap-plugin",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "chap-wit"
 version = "0.1.0"
 dependencies = [

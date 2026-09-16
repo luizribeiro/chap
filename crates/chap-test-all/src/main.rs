@@ -22,6 +22,8 @@ fn main() -> ExitCode {
                 "--exclude",
                 "chap-workspace-plugin",
                 "--exclude",
+                "chap-vm-guest-fixture",
+                "--exclude",
                 "chap-kagi",
                 "--exclude",
                 "chap-persona",

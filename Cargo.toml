@@ -9,6 +9,7 @@ members = [
     "crates/chap-state",
     "crates/chap-test-all",
     "crates/chap-wit",
+    "crates/chap-core/tests/fixtures/vm-guest",
     "crates/chap-plugin/tests/fixtures/multi-role",
     "crates/chap-plugin/tests/fixtures/context",
     "crates/chap-plugin/tests/fixtures/provider",
