@@ -11,9 +11,9 @@ use lockgate_policy::{PluginId, ScopeRepr};
 
 use crate::vm::{Egress, normalize_absolute_path};
 
-#[cfg(feature = "mock")]
+#[cfg(all(feature = "mock", not(feature = "microsandbox")))]
 mod mock;
-#[cfg(feature = "mock")]
+#[cfg(all(feature = "mock", not(feature = "microsandbox")))]
 pub use mock::MockVmBackend as Backend;
 #[cfg(feature = "microsandbox")]
 mod microsandbox;
