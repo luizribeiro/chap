@@ -36,13 +36,17 @@ impl ScopedResource<Egress> for EgressResource {
     }
 }
 
-pub(super) struct ManagedVm {
-    pub(super) vm_ref: VmRef,
+pub(super) enum ManagedVm {
+    CreatedByCaller { vm_ref: VmRef },
+    Workspace,
 }
 
 impl ScopedResource<InstanceScope> for ManagedVm {
     fn scopes_for(&self, _subject: &PluginSubject<'_>) -> Vec<InstanceScope> {
-        vec![InstanceScope::CreatedByCaller]
+        vec![match self {
+            Self::CreatedByCaller { .. } => InstanceScope::CreatedByCaller,
+            Self::Workspace => InstanceScope::Workspace,
+        }]
     }
 }
 

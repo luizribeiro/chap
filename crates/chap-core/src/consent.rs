@@ -67,6 +67,9 @@ pub enum ConsentError {
     #[error("`agent.workspace` directory `{}` is not a directory", path.display())]
     WorkspacePathNotDirectory { path: PathBuf },
     #[cfg(feature = "vm")]
+    #[error("`agent.workspace` directory `{}` is not valid UTF-8", path.display())]
+    WorkspaceDirectoryNotUtf8 { path: PathBuf },
+    #[cfg(feature = "vm")]
     #[error("invalid `agent.workspace.image` value `{image}`: {source}")]
     InvalidWorkspaceImage {
         image: String,
@@ -79,6 +82,12 @@ pub enum ConsentError {
         destination: String,
         #[source]
         source: lockgate_policy::ScopeError,
+    },
+    #[cfg(feature = "vm")]
+    #[error("invalid `agent.workspace` configuration: {source}")]
+    InvalidWorkspaceConfig {
+        #[source]
+        source: chap_vm::host::VmError,
     },
     #[error("{0}")]
     HostConfiguration(#[source] LoadError),

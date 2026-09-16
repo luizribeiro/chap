@@ -520,6 +520,7 @@ async fn reviews_multiple_plugins_with_one_caller_owned_host() {
     let consent = builder.consent_store().unwrap();
     let mut host = host_builder(
         &builder.config,
+        None,
         builder.budgets,
         builder.compiled_cache_path(),
         builder.tls_roots.clone(),

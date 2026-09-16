@@ -164,24 +164,27 @@ type StartDropResources = (
 
 async fn host_builder(
     config: &Config,
+    workspace: Option<ResolvedWorkspace>,
     budgets: PluginBudgets,
     compiled_cache: Option<PathBuf>,
     tls_roots: Option<RootCertStore>,
 ) -> Result<HostBuilder<()>, ConsentError> {
-    configured_host_builder(config, false, budgets, compiled_cache, tls_roots).await
+    configured_host_builder(config, workspace, false, budgets, compiled_cache, tls_roots).await
 }
 
 async fn preflight_host_builder(
     config: &Config,
+    workspace: Option<ResolvedWorkspace>,
     budgets: PluginBudgets,
     compiled_cache: Option<PathBuf>,
     tls_roots: Option<RootCertStore>,
 ) -> Result<HostBuilder<()>, ConsentError> {
-    configured_host_builder(config, true, budgets, compiled_cache, tls_roots).await
+    configured_host_builder(config, workspace, true, budgets, compiled_cache, tls_roots).await
 }
 
 async fn configured_host_builder(
     _config: &Config,
+    _workspace: Option<ResolvedWorkspace>,
     _preflight: bool,
     budgets: PluginBudgets,
     compiled_cache: Option<PathBuf>,
@@ -189,9 +192,9 @@ async fn configured_host_builder(
 ) -> Result<HostBuilder<()>, ConsentError> {
     #[cfg(feature = "vm")]
     let vm = if _preflight {
-        bindings::vm_host::preflight(_config)?
+        bindings::vm_host::preflight(_config, _workspace)?
     } else {
-        bindings::vm_host::new(_config).await?
+        bindings::vm_host::new(_config, _workspace).await?
     };
     let imports: HostImports = bindings::CapabilityHost {
         #[cfg(feature = "exec")]
@@ -330,6 +333,13 @@ pub struct WorkspaceInfo {
     pub egress: Vec<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ResolvedWorkspace {
+    pub(crate) info: WorkspaceInfo,
+    #[cfg(feature = "vm")]
+    pub(crate) requested: chap_vm::host::RequestedVmConfig,
+}
+
 pub(crate) struct AgentInner {
     lockgate: Arc<InnerHost>,
     plugins: BTreeMap<PluginId, ActivePlugin>,
@@ -367,7 +377,7 @@ impl AgentBuilder {
     }
 
     #[cfg(feature = "vm")]
-    fn resolve_workspace(&self) -> Result<Option<WorkspaceInfo>, ConsentError> {
+    fn resolve_workspace(&self) -> Result<Option<ResolvedWorkspace>, ConsentError> {
         let Some(settings) = self
             .config
             .workspace_settings()
@@ -379,20 +389,24 @@ impl AgentBuilder {
             .config
             .vm_settings()
             .map_err(ConsentError::HostConfiguration)?;
-        chap_vm::host::OciReference::parse(&settings.image)
-            .and_then(|image| image.resolve(&vm_settings).map(|_| ()))
+        let image = chap_vm::host::OciReference::parse(&settings.image)
+            .and_then(|image| image.resolve(&vm_settings).map(|_| image))
             .map_err(|source| ConsentError::InvalidWorkspaceImage {
                 image: settings.image.clone(),
                 source,
             })?;
-        for destination in &settings.egress {
-            chap_vm::vm::Egress::from_str(destination).map_err(|source| {
-                ConsentError::InvalidWorkspaceEgress {
-                    destination: destination.clone(),
-                    source,
-                }
-            })?;
-        }
+        let egress = settings
+            .egress
+            .iter()
+            .map(|destination| {
+                chap_vm::vm::Egress::from_str(destination).map_err(|source| {
+                    ConsentError::InvalidWorkspaceEgress {
+                        destination: destination.clone(),
+                        source,
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         let directory = match &self.workspace_directory {
             Some(directory) => directory.clone(),
@@ -412,17 +426,36 @@ impl AgentBuilder {
         if !directory.is_dir() {
             return Err(ConsentError::WorkspacePathNotDirectory { path: directory });
         }
+        let host = directory
+            .to_str()
+            .ok_or_else(|| ConsentError::WorkspaceDirectoryNotUtf8 {
+                path: directory.clone(),
+            })?;
+        let requested = chap_vm::host::RequestedVmConfig::normalized(
+            image,
+            vec![chap_vm::host::MountSpec {
+                host: host.to_owned(),
+                guest: "/mnt/workspace".into(),
+                readonly: settings.mount.readonly(),
+            }],
+            egress,
+            Vec::new(),
+        )
+        .map_err(|source| ConsentError::InvalidWorkspaceConfig { source })?;
 
-        Ok(Some(WorkspaceInfo {
-            directory,
-            readonly: settings.mount.readonly(),
-            image: settings.image,
-            egress: settings.egress,
+        Ok(Some(ResolvedWorkspace {
+            info: WorkspaceInfo {
+                directory,
+                readonly: settings.mount.readonly(),
+                image: settings.image,
+                egress: settings.egress,
+            },
+            requested,
         }))
     }
 
     #[cfg(not(feature = "vm"))]
-    fn resolve_workspace(&self) -> Result<Option<WorkspaceInfo>, ConsentError> {
+    fn resolve_workspace(&self) -> Result<Option<ResolvedWorkspace>, ConsentError> {
         Ok(None)
     }
 
@@ -496,9 +529,10 @@ impl AgentBuilder {
     /// Required environment variables are reported with their current presence,
     /// but an unset variable does not make the coherence check fail.
     pub async fn check_plugins(&self) -> Result<Vec<PluginCheck>, StartError> {
-        self.resolve_workspace().map_err(StartError::Consent)?;
+        let workspace = self.resolve_workspace().map_err(StartError::Consent)?;
         let builder = preflight_host_builder(
             &self.config,
+            workspace,
             self.budgets,
             self.compiled_cache_path(),
             self.tls_roots.clone(),
@@ -587,6 +621,7 @@ impl AgentBuilder {
             ToolRegistry::new(),
             host_builder(
                 &self.config,
+                self.resolve_workspace()?,
                 self.budgets,
                 self.compiled_cache_path(),
                 self.tls_roots.clone(),
@@ -651,6 +686,7 @@ impl AgentBuilder {
             ToolRegistry::new(),
             host_builder(
                 &self.config,
+                self.resolve_workspace()?,
                 self.budgets,
                 self.compiled_cache_path(),
                 self.tls_roots.clone(),
@@ -768,9 +804,15 @@ impl AgentBuilder {
             budgets,
             runtime_limits,
         } = self;
-        let builder = host_builder(&config, budgets, compiled_cache, tls_roots)
-            .await
-            .map_err(StartError::Consent)?;
+        let builder = host_builder(
+            &config,
+            workspace.clone(),
+            budgets,
+            compiled_cache,
+            tls_roots,
+        )
+        .await
+        .map_err(StartError::Consent)?;
         let mut resources = StartResources::new(tools, builder);
         let plugins = match Self::initialize_plugins(
             &mut resources,
@@ -800,7 +842,7 @@ impl AgentBuilder {
                 plugins,
                 sessions: SessionManager::new(),
                 tools,
-                workspace,
+                workspace: workspace.map(|workspace| workspace.info),
                 tool_execution,
             }),
         })

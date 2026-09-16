@@ -1,6 +1,9 @@
 use super::{CapabilityHost, vm};
 use crate::{
-    agent::vm_host::{ManagedVm, translate_host_error, translate_requested_config},
+    agent::{
+        ResolvedWorkspace,
+        vm_host::{ManagedVm, translate_host_error, translate_requested_config},
+    },
     config::Config,
     consent::ConsentError,
 };
@@ -19,6 +22,18 @@ use std::{
 
 const STARTUP_REAP_OPERATION: &str = "reap stale VMs at startup";
 const SHUTDOWN_REAP_OPERATION: &str = "reap session VMs at shutdown";
+const WORKSPACE_HANDLE: &str = "@workspace";
+const WORKSPACE_LOGICAL_NAME: &str = "workspace";
+
+fn reject_reserved_name(name: &str) -> Result<(), vm::VmError> {
+    if name.starts_with('@') {
+        Err(vm::VmError::Denied(
+            "VM names starting with `@` use a reserved prefix".into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
 
 fn warn_lifecycle_failure(operation: &'static str, error: impl fmt::Display) {
     tracing::warn!(operation, error = %error, "VM lifecycle operation failed");
@@ -30,6 +45,8 @@ pub(crate) struct VmHost<B: VmBackend = Backend> {
     pub(crate) installation_id: String,
     pub(crate) session_epoch: u64,
     pub(crate) vm_counts: Arc<Mutex<HashMap<PluginId, u32>>>,
+    pub(crate) workspace: Option<ResolvedWorkspace>,
+    workspace_vm: Arc<tokio::sync::OnceCell<VmRef>>,
     cleanup: Arc<VmCleanup<B>>,
 }
 
@@ -41,12 +58,17 @@ impl<B: VmBackend> Clone for VmHost<B> {
             installation_id: self.installation_id.clone(),
             session_epoch: self.session_epoch,
             vm_counts: Arc::clone(&self.vm_counts),
+            workspace: self.workspace.clone(),
+            workspace_vm: Arc::clone(&self.workspace_vm),
             cleanup: Arc::clone(&self.cleanup),
         }
     }
 }
 
-pub(in crate::agent) async fn new(config: &Config) -> Result<VmHost, ConsentError> {
+pub(in crate::agent) async fn new(
+    config: &Config,
+    workspace: Option<ResolvedWorkspace>,
+) -> Result<VmHost, ConsentError> {
     let project_root = std::env::current_dir()
         .map_err(|source| ConsentError::CurrentDirectoryUnavailable { source })?;
     let settings = config
@@ -57,6 +79,7 @@ pub(in crate::agent) async fn new(config: &Config) -> Result<VmHost, ConsentErro
         settings,
         project_root.to_string_lossy().into_owned(),
         session_epoch(),
+        workspace,
     )
     .await
     .map_err(|source| ConsentError::VmLifecycle {
@@ -65,7 +88,10 @@ pub(in crate::agent) async fn new(config: &Config) -> Result<VmHost, ConsentErro
     })
 }
 
-pub(in crate::agent) fn preflight(config: &Config) -> Result<VmHost, ConsentError> {
+pub(in crate::agent) fn preflight(
+    config: &Config,
+    workspace: Option<ResolvedWorkspace>,
+) -> Result<VmHost, ConsentError> {
     let project_root = std::env::current_dir()
         .map_err(|source| ConsentError::CurrentDirectoryUnavailable { source })?;
     let settings = config
@@ -76,6 +102,7 @@ pub(in crate::agent) fn preflight(config: &Config) -> Result<VmHost, ConsentErro
         settings,
         project_root.to_string_lossy().into_owned(),
         session_epoch(),
+        workspace,
     ))
 }
 
@@ -85,6 +112,7 @@ impl<B: VmBackend> VmHost<B> {
         settings: VmSettings,
         installation_id: String,
         session_epoch: u64,
+        workspace: Option<ResolvedWorkspace>,
     ) -> Result<Self, chap_vm::host::VmError> {
         let destroy_timeout = Duration::from_millis(settings.calls.destroy_timeout_ms);
         if let Err(error) = match tokio::time::timeout(
@@ -111,6 +139,8 @@ impl<B: VmBackend> VmHost<B> {
             installation_id,
             session_epoch,
             vm_counts: Arc::default(),
+            workspace,
+            workspace_vm: Arc::default(),
         })
     }
 
@@ -119,6 +149,7 @@ impl<B: VmBackend> VmHost<B> {
         settings: VmSettings,
         installation_id: String,
         session_epoch: u64,
+        workspace: Option<ResolvedWorkspace>,
     ) -> Self {
         Self {
             cleanup: Arc::new(VmCleanup {
@@ -133,6 +164,8 @@ impl<B: VmBackend> VmHost<B> {
             installation_id,
             session_epoch,
             vm_counts: Arc::default(),
+            workspace,
+            workspace_vm: Arc::default(),
         }
     }
 
@@ -142,6 +175,60 @@ impl<B: VmBackend> VmHost<B> {
             session_epoch: self.session_epoch,
             principal: VmPrincipal::Plugin(subject.plugin_id().clone()),
             logical_name: logical_name.to_owned(),
+        }
+    }
+
+    fn workspace_identity(&self) -> VmIdentity {
+        VmIdentity {
+            installation_id: self.installation_id.clone(),
+            session_epoch: self.session_epoch,
+            principal: VmPrincipal::Host,
+            logical_name: WORKSPACE_LOGICAL_NAME.into(),
+        }
+    }
+
+    fn workspace_config(&self) -> Result<&ResolvedWorkspace, vm::VmError> {
+        self.workspace
+            .as_ref()
+            .ok_or_else(|| vm::VmError::Failed("no workspace is configured for this agent".into()))
+    }
+
+    fn validate_get_name(&self, name: &str) -> Result<(), vm::VmError> {
+        if name != WORKSPACE_HANDLE {
+            return Ok(());
+        }
+        self.workspace_config()?;
+        Err(vm::VmError::Denied(
+            "the workspace is owned by the host".into(),
+        ))
+    }
+
+    fn resolve_workspace(&self) -> Result<ManagedVm, vm::VmError> {
+        self.workspace_config()?;
+        Ok(ManagedVm::Workspace)
+    }
+
+    async fn workspace_ref(&self) -> Result<VmRef, vm::VmError> {
+        let workspace = self.workspace_config()?;
+        Ok(self
+            .workspace_vm
+            .get_or_try_init(|| async {
+                let id = self.workspace_identity();
+                let config = self.backend_config(workspace.requested.clone())?;
+                self.backend_call(
+                    self.settings.calls.create_timeout_ms,
+                    self.backend.get_or_create(&id, &config),
+                )
+                .await
+            })
+            .await?
+            .clone())
+    }
+
+    async fn live_ref(&self, vm: &ManagedVm) -> Result<VmRef, vm::VmError> {
+        match vm {
+            ManagedVm::CreatedByCaller { vm_ref } => Ok(vm_ref.clone()),
+            ManagedVm::Workspace => self.workspace_ref().await,
         }
     }
 
@@ -167,7 +254,7 @@ impl<B: VmBackend> VmHost<B> {
         if self.backend.owner_of(&vm_ref).await?.as_ref() != Some(&principal) {
             return Err(vm::VmError::NoSuchVm);
         }
-        Ok(ManagedVm { vm_ref })
+        Ok(ManagedVm::CreatedByCaller { vm_ref })
     }
 
     fn backend_config(&self, requested: RequestedVmConfig) -> Result<VmConfig, vm::VmError> {
@@ -331,10 +418,15 @@ impl<B: VmBackend> VmHost<B> {
             .map_err(Into::into)
     }
 
-    async fn destroy(&self, plugin_id: &PluginId, vm: &VmRef) -> Result<(), vm::VmError> {
+    async fn destroy(&self, plugin_id: &PluginId, vm: &ManagedVm) -> Result<(), vm::VmError> {
+        let ManagedVm::CreatedByCaller { vm_ref } = vm else {
+            return Err(vm::VmError::Denied(
+                "the workspace is owned by the host".into(),
+            ));
+        };
         self.backend_call(
             self.settings.calls.destroy_timeout_ms,
-            self.backend.destroy(vm),
+            self.backend.destroy(vm_ref),
         )
         .await?;
         decrement_vm_count(&self.vm_counts, plugin_id);
@@ -439,7 +531,11 @@ impl ResolveScopedResource<chap_vm::vm::InstanceScope, String> for CapabilityHos
         subject: &'a PluginSubject<'_>,
         name: &'a String,
     ) -> Result<Self::Resource, Self::Error> {
-        self.vm.resolve_owned(subject, name).await
+        if name == WORKSPACE_HANDLE {
+            self.vm.resolve_workspace()
+        } else {
+            self.vm.resolve_owned(subject, name).await
+        }
     }
 }
 
@@ -454,6 +550,7 @@ impl vm::Host for CapabilityHost {
         name: String,
         config: vm::VmConfig,
     ) -> Result<String, vm::VmError> {
+        reject_reserved_name(&name)?;
         let (requested, mounts, egress) = translate_requested_config(&config, &self.vm.settings)?;
         cx.require(chap_vm::vm::CREATE)?;
         cx.require_scoped_each(chap_vm::vm::MOUNT, &mounts)?;
@@ -471,6 +568,7 @@ impl vm::Host for CapabilityHost {
         cx: HostCtx<'_, ()>,
         name: String,
     ) -> Result<Option<String>, vm::VmError> {
+        self.vm.validate_get_name(&name)?;
         match self.vm.resolve_owned(&cx.subject(), &name).await {
             Ok(vm) => {
                 cx.require_scoped(chap_vm::vm::MANAGE, &vm)?;
@@ -490,6 +588,7 @@ impl vm::Host for CapabilityHost {
         name: String,
         config: vm::VmConfig,
     ) -> Result<String, vm::VmError> {
+        reject_reserved_name(&name)?;
         let (requested, mounts, egress) = translate_requested_config(&config, &self.vm.settings)?;
         cx.require(chap_vm::vm::CREATE)?;
         cx.require_scoped_each(chap_vm::vm::MOUNT, &mounts)?;
@@ -509,8 +608,9 @@ impl vm::Host for CapabilityHost {
         stdin: Option<Vec<u8>>,
         timeout_ms: Option<u64>,
     ) -> Result<vm::ExecResult, vm::VmError> {
+        let vm_ref = self.vm.live_ref(&vm).await?;
         self.vm
-            .exec(&vm.vm_ref, command, cwd, stdin, timeout_ms)
+            .exec(&vm_ref, command, cwd, stdin, timeout_ms)
             .await
             .map(Into::into)
     }
@@ -523,7 +623,8 @@ impl vm::Host for CapabilityHost {
         path: String,
         contents: Vec<u8>,
     ) -> Result<(), vm::VmError> {
-        self.vm.write_file(&vm.vm_ref, &path, &contents).await
+        let vm_ref = self.vm.live_ref(&vm).await?;
+        self.vm.write_file(&vm_ref, &path, &contents).await
     }
 
     #[lockgate::requires(permission = chap_vm::vm::MANAGE, target = vm, wire_type = String)]
@@ -533,12 +634,13 @@ impl vm::Host for CapabilityHost {
         vm: ManagedVm,
         path: String,
     ) -> Result<Vec<u8>, vm::VmError> {
-        self.vm.read_file(&vm.vm_ref, &path).await
+        let vm_ref = self.vm.live_ref(&vm).await?;
+        self.vm.read_file(&vm_ref, &path).await
     }
 
     #[lockgate::requires(permission = chap_vm::vm::MANAGE, target = vm, wire_type = String)]
     async fn destroy(&mut self, cx: HostCtx<'_, ()>, vm: ManagedVm) -> Result<(), vm::VmError> {
-        self.vm.destroy(cx.subject().plugin_id(), &vm.vm_ref).await
+        self.vm.destroy(cx.subject().plugin_id(), &vm).await
     }
 }
 
@@ -572,7 +674,8 @@ mod tests {
     use std::{
         collections::HashSet,
         io::{self, Write},
-        sync::atomic::{AtomicBool, Ordering},
+        path::Path,
+        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     };
     use tokio::sync::Notify;
 
@@ -599,6 +702,12 @@ mod tests {
         destroy_never_completes: AtomicBool,
         vanish_on_owner: AtomicBool,
         reap_fails: AtomicBool,
+        block_workspace_create: AtomicBool,
+        fail_workspace_create_once: AtomicBool,
+        workspace_create_started: Notify,
+        release_workspace_create: Notify,
+        workspace_get_or_create_calls: AtomicUsize,
+        workspace_configs: Mutex<Vec<VmConfig>>,
     }
 
     impl ControlledBackend {
@@ -618,6 +727,12 @@ mod tests {
                 destroy_never_completes: AtomicBool::new(false),
                 vanish_on_owner: AtomicBool::new(false),
                 reap_fails: AtomicBool::new(false),
+                block_workspace_create: AtomicBool::new(false),
+                fail_workspace_create_once: AtomicBool::new(false),
+                workspace_create_started: Notify::new(),
+                release_workspace_create: Notify::new(),
+                workspace_get_or_create_calls: AtomicUsize::new(0),
+                workspace_configs: Mutex::new(Vec::new()),
             }
         }
 
@@ -631,6 +746,15 @@ mod tests {
 
         fn fail_reap(&self) {
             self.reap_fails.store(true, Ordering::SeqCst);
+        }
+
+        fn block_workspace_create(&self) {
+            self.block_workspace_create.store(true, Ordering::SeqCst);
+        }
+
+        fn fail_next_workspace_create(&self) {
+            self.fail_workspace_create_once
+                .store(true, Ordering::SeqCst);
         }
     }
 
@@ -668,6 +792,23 @@ mod tests {
             id: &VmIdentity,
             cfg: &VmConfig,
         ) -> Result<VmRef, chap_vm::host::VmError> {
+            if id.principal == VmPrincipal::Host {
+                self.workspace_get_or_create_calls
+                    .fetch_add(1, Ordering::SeqCst);
+                self.workspace_configs.lock().unwrap().push(cfg.clone());
+                if self
+                    .fail_workspace_create_once
+                    .swap(false, Ordering::SeqCst)
+                {
+                    return Err(chap_vm::host::VmError::Failed(
+                        "injected workspace create failure".into(),
+                    ));
+                }
+                if self.block_workspace_create.load(Ordering::SeqCst) {
+                    self.workspace_create_started.notify_one();
+                    self.release_workspace_create.notified().await;
+                }
+            }
             self.inner.get_or_create(id, cfg).await
         }
 
@@ -740,6 +881,14 @@ mod tests {
         backend: Arc<ControlledBackend>,
         max_vms_per_plugin: u32,
     ) -> VmHost<ControlledBackend> {
+        test_host_with_workspace(backend, max_vms_per_plugin, None).await
+    }
+
+    async fn test_host_with_workspace(
+        backend: Arc<ControlledBackend>,
+        max_vms_per_plugin: u32,
+        workspace: Option<ResolvedWorkspace>,
+    ) -> VmHost<ControlledBackend> {
         VmHost::with_backend(
             backend,
             VmSettings {
@@ -753,6 +902,7 @@ mod tests {
             },
             "test-installation".into(),
             1,
+            workspace,
         )
         .await
         .unwrap()
@@ -777,6 +927,32 @@ mod tests {
         .unwrap()
     }
 
+    fn resolved_workspace() -> ResolvedWorkspace {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .canonicalize()
+            .unwrap();
+        let requested = RequestedVmConfig::normalized(
+            OciReference::parse("ghcr.io/acme/build:1.2").unwrap(),
+            vec![MountSpec {
+                host: directory.to_string_lossy().into_owned(),
+                guest: "/mnt/workspace".into(),
+                readonly: true,
+            }],
+            vec!["127.0.0.1:1".parse().unwrap()],
+            Vec::new(),
+        )
+        .unwrap();
+        ResolvedWorkspace {
+            info: crate::agent::WorkspaceInfo {
+                directory,
+                readonly: true,
+                image: "ghcr.io/acme/build:1.2".into(),
+                egress: vec!["127.0.0.1:1".into()],
+            },
+            requested,
+        }
+    }
+
     fn resolved_config() -> VmConfig {
         VmConfig {
             image: ResolvedImage {
@@ -794,6 +970,151 @@ mod tests {
             idle_timeout_ms: 300_000,
             config_hash: "test-config".into(),
         }
+    }
+
+    #[test]
+    fn at_prefix_is_reserved_for_host_handles() {
+        for name in ["@workspace", "@host", "@"] {
+            assert!(matches!(
+                reject_reserved_name(name),
+                Err(vm::VmError::Denied(message)) if message.contains("reserved prefix")
+            ));
+        }
+        assert!(reject_reserved_name("workspace").is_ok());
+    }
+
+    #[tokio::test]
+    async fn workspace_use_fails_when_no_workspace_is_configured() {
+        let backend = Arc::new(ControlledBackend::new(&[], &[]));
+        let host = test_host(backend, 1).await;
+
+        assert!(matches!(
+            host.resolve_workspace(),
+            Err(vm::VmError::Failed(message)) if message.contains("no workspace is configured")
+        ));
+        assert!(matches!(
+            host.validate_get_name(WORKSPACE_HANDLE),
+            Err(vm::VmError::Failed(message)) if message.contains("no workspace is configured")
+        ));
+    }
+
+    #[tokio::test]
+    async fn destroying_the_workspace_does_not_boot_it() {
+        let backend = Arc::new(ControlledBackend::new(&[], &[]));
+        let host =
+            test_host_with_workspace(Arc::clone(&backend), 1, Some(resolved_workspace())).await;
+        let workspace = host.resolve_workspace().unwrap();
+        let plugin_id = "caller".parse().unwrap();
+
+        assert!(matches!(
+            host.destroy(&plugin_id, &workspace).await,
+            Err(vm::VmError::Denied(message)) if message == "the workspace is owned by the host"
+        ));
+        assert_eq!(
+            backend.workspace_get_or_create_calls.load(Ordering::SeqCst),
+            0
+        );
+        assert!(host.workspace_vm.get().is_none());
+    }
+
+    #[tokio::test]
+    async fn failed_workspace_boot_leaves_the_lazy_cell_empty_for_a_retry() {
+        let backend = Arc::new(ControlledBackend::new(&[], &[]));
+        backend.fail_next_workspace_create();
+        let host =
+            test_host_with_workspace(Arc::clone(&backend), 1, Some(resolved_workspace())).await;
+        let workspace = host.resolve_workspace().unwrap();
+
+        assert!(matches!(
+            host.live_ref(&workspace).await,
+            Err(vm::VmError::Failed(message)) if message.contains("injected workspace create failure")
+        ));
+        assert!(host.workspace_vm.get().is_none());
+
+        let vm_ref = host.live_ref(&workspace).await.unwrap();
+        assert_eq!(
+            backend.workspace_get_or_create_calls.load(Ordering::SeqCst),
+            2
+        );
+        assert_eq!(host.workspace_vm.get(), Some(&vm_ref));
+    }
+
+    #[tokio::test]
+    async fn concurrent_workspace_use_creates_one_host_owned_vm_outside_plugin_limits() {
+        let backend = Arc::new(ControlledBackend::new(&[], &[]));
+        backend.block_workspace_create();
+        let host =
+            test_host_with_workspace(Arc::clone(&backend), 0, Some(resolved_workspace())).await;
+        let first_host = host.clone();
+        let first = tokio::spawn(async move {
+            let workspace = first_host.resolve_workspace()?;
+            first_host.live_ref(&workspace).await
+        });
+        backend.workspace_create_started.notified().await;
+
+        let second_host = host.clone();
+        let second = tokio::spawn(async move {
+            let workspace = second_host.resolve_workspace()?;
+            second_host.live_ref(&workspace).await
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(
+            backend.workspace_get_or_create_calls.load(Ordering::SeqCst),
+            1
+        );
+
+        backend.release_workspace_create.notify_one();
+        let first = first.await.unwrap().unwrap();
+        let second = second.await.unwrap().unwrap();
+        assert_eq!(first, second);
+        assert!(host.vm_counts.lock().unwrap().is_empty());
+        assert_eq!(
+            backend.owner_of(&first).await.unwrap(),
+            Some(VmPrincipal::Host)
+        );
+        assert!(matches!(
+            host.validate_get_name(WORKSPACE_HANDLE),
+            Err(vm::VmError::Denied(message)) if message == "the workspace is owned by the host"
+        ));
+
+        {
+            let configs = backend.workspace_configs.lock().unwrap();
+            assert_eq!(configs.len(), 1);
+            assert_eq!(configs[0].mounts.len(), 1);
+            assert_eq!(configs[0].mounts[0].guest, "/mnt/workspace");
+            assert!(configs[0].mounts[0].readonly);
+            assert_eq!(configs[0].image.registry, "ghcr.io");
+            assert_eq!(configs[0].image.repository, "acme/build");
+            assert_eq!(configs[0].egress, vec!["127.0.0.1:1".parse().unwrap()]);
+            assert!(configs[0].env.is_empty());
+            assert_eq!(configs[0].cpus, 1);
+            assert_eq!(configs[0].memory_mb, 512);
+            assert_eq!(configs[0].max_lifetime_ms, 3_600_000);
+            assert_eq!(configs[0].idle_timeout_ms, 300_000);
+        }
+
+        assert!(
+            backend
+                .get(&host.workspace_identity())
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn caller_owned_resolution_never_returns_the_host_workspace() {
+        let backend = Arc::new(ControlledBackend::new(&[], &[]));
+        let host =
+            test_host_with_workspace(Arc::clone(&backend), 1, Some(resolved_workspace())).await;
+        host.workspace_ref().await.unwrap();
+        let plugin_id = "caller".parse().unwrap();
+
+        assert!(matches!(
+            host.resolve_owned_identity(&host.workspace_identity(), &plugin_id)
+                .await,
+            Err(vm::VmError::NoSuchVm)
+        ));
     }
 
     #[tokio::test]
@@ -872,6 +1193,7 @@ mod tests {
             unreachable!()
         };
 
+        let vm = ManagedVm::CreatedByCaller { vm_ref: vm };
         assert!(matches!(
             host.destroy(plugin_id, &vm).await,
             Err(vm::VmError::TimedOut)
@@ -910,6 +1232,7 @@ mod tests {
             },
             "test-installation".into(),
             2,
+            None,
         )
         .await;
 
@@ -956,6 +1279,7 @@ mod tests {
             },
             "test-installation".into(),
             current.session_epoch,
+            None,
         )
         .await
         .unwrap();
@@ -1007,7 +1331,10 @@ mod tests {
 
         let managed = host.resolve_owned_identity(&id, &plugin_id).await.unwrap();
 
-        assert_eq!(managed.vm_ref, expected);
+        assert!(matches!(
+            managed,
+            ManagedVm::CreatedByCaller { vm_ref } if vm_ref == expected
+        ));
     }
 
     #[tokio::test]
