@@ -54,7 +54,7 @@ The selected directory is canonicalized before the agent starts.
 The repository includes an OpenAI-compatible Chat Completions provider, Kagi
 web tools, a persona context contributor, and exec, state, and workspace tools.
 The exec plugin exposes an argv-style host process tool mediated by
-command-prefix grants; the workspace plugin runs argv commands in a microVM.
+command-prefix grants; the workspace plugin runs shell commands in a microVM.
 
 Build the configured release components with the system Cargo:
 
@@ -342,11 +342,12 @@ Alpine's `apk add` need the whole-family scope as well as the relevant HTTP or
 HTTPS egress.
 
 The bundled workspace plugin has no settings and requests exactly `vm.manage`
-with the `workspace` scope. Its one `run` tool accepts an argv array and
-executes it directly, without a shell, in the reused workspace VM. The tool
-description reports the configured image, guest mount mode, egress scopes, and
-reuse behavior. Results contain the exit code, stdout, stderr, and a note when
-the host's combined output cap truncated the streams.
+with the `workspace` scope. Its one `run` tool accepts a command string and
+executes it with `sh -c` from the workspace mount in the reused VM. The tool
+description reports the working directory, image, guest mount mode, egress
+scopes, reuse behavior, and effective time limit. Results contain the exit code,
+stdout, stderr, and a note when the host's combined output cap truncated the
+streams.
 
 The real backend uses microsandbox microVMs on Apple Silicon or Linux with KVM.
 A system Cargo build installs the microsandbox runtime under `~/.microsandbox`

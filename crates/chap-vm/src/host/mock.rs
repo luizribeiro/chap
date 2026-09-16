@@ -47,6 +47,13 @@ impl MockVmBackend {
             .clone()
     }
 
+    pub fn recorded_commands() -> Vec<VmCommand> {
+        recorded_commands()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     fn record_host_secrets(id: &VmIdentity, cfg: &VmConfig) {
         if id.principal == VmPrincipal::Host {
             recorded_secrets()
@@ -60,6 +67,11 @@ impl MockVmBackend {
 fn recorded_secrets() -> &'static Mutex<Vec<SecretSpec>> {
     static SECRETS: OnceLock<Mutex<Vec<SecretSpec>>> = OnceLock::new();
     SECRETS.get_or_init(Mutex::default)
+}
+
+fn recorded_commands() -> &'static Mutex<Vec<VmCommand>> {
+    static COMMANDS: OnceLock<Mutex<Vec<VmCommand>>> = OnceLock::new();
+    COMMANDS.get_or_init(Mutex::default)
 }
 
 impl MockVm {
@@ -110,8 +122,15 @@ impl VmBackend for MockVmBackend {
     }
 
     async fn exec(&self, vm: &VmRef, command: VmCommand) -> Result<ExecOutcome, VmError> {
-        if !self.lock().contains_key(vm.physical_label()) {
-            return Err(VmError::NoSuchVm);
+        {
+            let vms = self.lock();
+            let vm = vms.get(vm.physical_label()).ok_or(VmError::NoSuchVm)?;
+            if vm.owner == VmPrincipal::Host {
+                recorded_commands()
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(command.clone());
+            }
         }
         if command.timeout_ms == Some(0) {
             return Err(VmError::TimedOut);

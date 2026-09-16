@@ -25,7 +25,7 @@ async fn runs_a_command_in_the_host_owned_workspace() {
     let mock = MockServer::start(&[ToolRequest {
         id: "workspace-call",
         name: "run",
-        arguments: json!({"command": ["echo", "workspace-e2e-ok"]}),
+        arguments: json!({"command": "echo workspace-e2e-ok"}),
     }]);
     let directory = tempfile::tempdir().unwrap();
     let config_path = directory.path().join("chap.json");
@@ -75,6 +75,14 @@ async fn runs_a_command_in_the_host_owned_workspace() {
     let events: Vec<SessionEvent> = receive_until_complete(&mut events).await;
     let output = tool_result(&events, "workspace-call").as_ref().unwrap();
     assert!(output.contains("echo workspace-e2e-ok"), "{output}");
+    assert!(
+        chap_vm::host::MockVmBackend::recorded_commands()
+            .iter()
+            .any(|command| {
+                command.args == ["sh", "-c", "echo workspace-e2e-ok"]
+                    && command.cwd.as_deref() == Some("/mnt/workspace")
+            })
+    );
     let requests = mock.finish();
     assert_eq!(provider_tool_output(&requests, "workspace-call"), *output);
 
@@ -92,7 +100,7 @@ async fn exposes_sealed_secret_metadata_and_passes_the_spec_to_the_workspace_vm(
     let mock = MockServer::start(&[ToolRequest {
         id: "workspace-secret-call",
         name: "run",
-        arguments: json!({"command": ["true"]}),
+        arguments: json!({"command": "true"}),
     }]);
     let directory = tempfile::tempdir().unwrap();
     let config_path = directory.path().join("chap.json");

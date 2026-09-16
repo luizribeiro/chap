@@ -29,7 +29,9 @@ impl Tools for WorkspacePlugin {
         let (_, workspace) = futures::executor::block_on(Vm::workspace())
             .map_err(ToolError::from)
             .map_err(tool_error_message)?;
-        Ok(vec![run_definition(&workspace)])
+        Ok(vec![
+            run_definition(&workspace).map_err(tool_error_message)?,
+        ])
     }
 
     async fn execute(&self, name: String, arguments: String) -> Result<String, ToolError> {
@@ -39,14 +41,10 @@ impl Tools for WorkspacePlugin {
             )));
         }
         let arguments = parse_arguments(&arguments)?;
-        let (vm, _) = Vm::workspace().await.map_err(ToolError::from)?;
-        let command_refs = arguments
-            .command
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
+        let (vm, workspace) = Vm::workspace().await.map_err(ToolError::from)?;
+        let cwd = working_directory(&workspace)?;
         let output = vm
-            .exec(&command_refs, None, None, None)
+            .exec(&["sh", "-c", &arguments.command], Some(cwd), None, None)
             .await
             .map_err(ToolError::from)?;
         Ok(format_output(output))
@@ -62,7 +60,8 @@ fn tool_error_message(error: ToolError) -> String {
     }
 }
 
-fn run_definition(workspace: &Workspace) -> ToolDefinition {
+fn run_definition(workspace: &Workspace) -> Result<ToolDefinition, ToolError> {
+    let cwd = working_directory(workspace)?;
     let mounts = workspace
         .mounts
         .iter()
@@ -83,21 +82,40 @@ fn run_definition(workspace: &Workspace) -> ToolDefinition {
                 .join("; ")
         )
     };
-    ToolDefinition {
+    Ok(ToolDefinition {
         name: RUN.to_owned(),
         description: format!(
-            "Run a command in the agent's workspace VM using image {}. Guest mount points: [{mounts}]. Configured egress scopes: [{egress}]. The VM is reused across calls.{secrets}",
+            "Run a shell command with sh -c in the agent's workspace VM. The working directory is {cwd}. The image is {}. Guest mount points: [{mounts}]. Configured egress scopes: [{egress}]. The VM is reused across calls. Commands are killed after {}.{secrets}",
             workspace.image,
+            describe_seconds(workspace.exec_timeout_ms),
         ),
         parameters: r#"{
             "type":"object",
             "properties":{
-                "command":{"type":"array","items":{"type":"string"},"description":"Command and arguments to run without a shell."}
+                "command":{"type":"string","description":"Shell command to run with sh -c."}
             },
             "required":["command"],
             "additionalProperties":false
         }"#
         .to_owned(),
+    })
+}
+
+fn working_directory(workspace: &Workspace) -> Result<&str, ToolError> {
+    workspace
+        .mounts
+        .first()
+        .map(|mount| mount.guest.as_str())
+        .ok_or_else(|| ToolError::Failed("the workspace has no guest mount".to_owned()))
+}
+
+fn describe_seconds(milliseconds: u64) -> String {
+    let seconds = milliseconds / 1_000;
+    let remainder = milliseconds % 1_000;
+    if remainder == 0 {
+        format!("{seconds} seconds")
+    } else {
+        format!("{seconds}.{remainder:03} seconds")
     }
 }
 
@@ -139,7 +157,7 @@ fn parse_arguments(arguments: &str) -> Result<RunArguments, ToolError> {
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct RunArguments {
-    command: Vec<String>,
+    command: String,
 }
 
 #[cfg(test)]
@@ -176,14 +194,17 @@ mod tests {
 
     #[test]
     fn describes_the_workspace_configuration_and_reuse() {
-        let description = run_definition(&workspace(false)).description;
+        let description = run_definition(&workspace(false)).unwrap().description;
 
         assert!(description.contains("docker.io/library/rust:1-alpine"));
+        assert!(description.contains("working directory is /mnt/workspace"));
         assert!(description.contains("/mnt/workspace (read-write)"));
         assert!(description.contains("0.0.0.0/0:443, 0.0.0.0/0:53"));
         assert!(description.contains("reused across calls"));
+        assert!(description.contains("killed after 30 seconds"));
         assert!(
             run_definition(&workspace(true))
+                .unwrap()
                 .description
                 .contains("/mnt/workspace (read-only)")
         );
@@ -191,14 +212,14 @@ mod tests {
 
     #[test]
     fn describes_secret_names_and_hosts_only_when_configured() {
-        let empty_description = run_definition(&workspace(false)).description;
+        let empty_description = run_definition(&workspace(false)).unwrap().description;
         let mut configured = workspace(false);
         configured.secrets = vec![WorkspaceSecret {
             env: "GITHUB_TOKEN".into(),
             hosts: vec!["api.github.com".into(), "github.com".into()],
         }];
 
-        let description = run_definition(&configured).description;
+        let description = run_definition(&configured).unwrap().description;
 
         assert!(description.contains("GITHUB_TOKEN (api.github.com, github.com)"));
         assert!(description.contains("placeholders"));
@@ -206,29 +227,30 @@ mod tests {
     }
 
     #[test]
-    fn parses_argv_only_run_arguments() {
+    fn parses_shell_command_run_arguments() {
         assert_eq!(
-            parse_arguments(r#"{"command":["echo","hello"]}"#).unwrap(),
+            parse_arguments(r#"{"command":"echo hello\npwd"}"#).unwrap(),
             RunArguments {
-                command: vec!["echo".to_owned(), "hello".to_owned()],
+                command: "echo hello\npwd".to_owned(),
             }
         );
         assert!(matches!(
-            parse_arguments(r#"{"command":["pwd"],"shell":true}"#),
+            parse_arguments(r#"{"command":"pwd","shell":true}"#),
             Err(ToolError::InvalidInput(message)) if message.starts_with("invalid `run` arguments:")
         ));
+        assert!(parse_arguments(r#"{"command":["pwd"]}"#).is_err());
     }
 
     #[test]
     fn publishes_the_run_tool_with_a_valid_parameter_schema() {
-        let definition = run_definition(&workspace(false));
+        let definition = run_definition(&workspace(false)).unwrap();
 
         assert_eq!(definition.name, RUN);
         let parameters: serde_json::Value = serde_json::from_str(&definition.parameters).unwrap();
         assert_eq!(parameters["type"], "object");
         assert_eq!(parameters["additionalProperties"], false);
         assert_eq!(parameters["required"], serde_json::json!(["command"]));
-        assert_eq!(parameters["properties"]["command"]["type"], "array");
+        assert_eq!(parameters["properties"]["command"]["type"], "string");
     }
 
     #[test]
