@@ -1,7 +1,10 @@
 use std::{
+    env,
+    ffi::OsString,
     format,
     future::Future,
     net::IpAddr,
+    path::PathBuf,
     string::{String, ToString},
     time::Duration,
     vec::Vec,
@@ -38,6 +41,11 @@ impl MicrosandboxBackend {
         }
     }
 
+    pub fn for_session(settings: &VmSettings) -> Result<Self, VmError> {
+        prepare_runtime()?;
+        Ok(Self::new(settings))
+    }
+
     async fn handle(vm: &VmRef) -> Result<SandboxHandle, VmError> {
         Sandbox::get(&sandbox_name(vm.physical_label()))
             .await
@@ -51,6 +59,24 @@ impl MicrosandboxBackend {
             .await
             .map_err(|error| map_sdk_error("VM connection", error))
     }
+}
+
+fn prepare_runtime() -> Result<(), VmError> {
+    let (msb_home, runtime) =
+        runtime_paths(env::var_os("MSB_HOME"), env::var_os("CHAP_MSB_RUNTIME"))?;
+    crate::runtime::prepare_runtime(&msb_home, runtime.as_deref())
+        .map_err(|error| VmError::Unavailable(error.to_string()))
+}
+
+fn runtime_paths(
+    msb_home: Option<OsString>,
+    runtime: Option<OsString>,
+) -> Result<(PathBuf, Option<PathBuf>), VmError> {
+    let msb_home = msb_home.filter(|path| !path.is_empty()).ok_or_else(|| {
+        VmError::Unavailable("MSB_HOME is not set; chap exports it at startup".into())
+    })?;
+    let runtime = runtime.filter(|path| !path.is_empty());
+    Ok((msb_home.into(), runtime.map(Into::into)))
 }
 
 impl VmBackend for MicrosandboxBackend {
@@ -480,7 +506,37 @@ fn map_sdk_error(operation: &'static str, error: MicrosandboxError) -> VmError {
 mod tests {
     use super::*;
     use serde_json::{Value, json};
+    use std::ffi::OsString;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn unset_msb_home_is_unavailable() {
+        let error = runtime_paths(None, None).unwrap_err();
+
+        assert_eq!(
+            error,
+            VmError::Unavailable("MSB_HOME is not set; chap exports it at startup".into())
+        );
+    }
+
+    #[test]
+    fn empty_msb_home_is_unavailable() {
+        let error = runtime_paths(Some(OsString::new()), None).unwrap_err();
+
+        assert_eq!(error, runtime_paths(None, None).unwrap_err());
+    }
+
+    #[test]
+    fn set_msb_home_is_used() {
+        let path = OsString::from("configured-msb-home");
+        let configured_runtime = OsString::from("configured-runtime");
+
+        let (msb_home, runtime) =
+            runtime_paths(Some(path.clone()), Some(configured_runtime.clone())).unwrap();
+
+        assert_eq!(msb_home, PathBuf::from(path));
+        assert_eq!(runtime, Some(PathBuf::from(configured_runtime)));
+    }
 
     fn image(tag: Option<&str>, digest: Option<&str>) -> ResolvedImage {
         ResolvedImage {

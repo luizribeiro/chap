@@ -676,7 +676,7 @@ impl AgentBuilder {
         self.configured_plugin(plugin_id)?;
         let mut resources = StartResources::new(
             ToolRegistry::new(),
-            host_builder(
+            preflight_host_builder(
                 &self.config,
                 self.resolve_workspace()?,
                 self.budgets,
@@ -741,7 +741,7 @@ impl AgentBuilder {
         }
         let mut resources = StartResources::new(
             ToolRegistry::new(),
-            host_builder(
+            preflight_host_builder(
                 &self.config,
                 self.resolve_workspace()?,
                 self.budgets,

@@ -10,6 +10,9 @@ extern crate std;
 #[cfg(feature = "host")]
 pub mod host;
 
+#[cfg(feature = "microsandbox")]
+pub mod runtime;
+
 #[lockgate_policy::capability("vm")]
 pub mod vm {
     use alloc::{

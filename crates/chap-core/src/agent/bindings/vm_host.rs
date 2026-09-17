@@ -78,8 +78,12 @@ pub(in crate::agent) async fn new(
         .vm_settings()
         .map_err(ConsentError::HostConfiguration)?;
     let exec_timeout_ms = workspace_exec_timeout_ms(config, &settings);
+    let backend = Backend::for_session(&settings).map_err(|source| ConsentError::VmLifecycle {
+        operation: "initialize VM backend",
+        source,
+    })?;
     VmHost::with_backend(
-        Arc::new(Backend::new(&settings)),
+        Arc::new(backend),
         settings,
         exec_timeout_ms,
         project_root.to_string_lossy().into_owned(),

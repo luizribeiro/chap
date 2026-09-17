@@ -61,7 +61,7 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
         },
         ..VmSettings::default()
     };
-    let backend = MicrosandboxBackend::new(&settings);
+    let backend = MicrosandboxBackend::for_session(&settings).unwrap();
 
     println!(
         "microsandbox boot: creating {} as {:?}",
@@ -138,13 +138,14 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
     assert_eq!(backend.get(&identity).await.unwrap(), None);
     println!("microsandbox boot: reap removed the sandbox");
 
-    let network_backend = MicrosandboxBackend::new(&VmSettings {
+    let network_backend = MicrosandboxBackend::for_session(&VmSettings {
         calls: VmCallSettings {
             exec_timeout_ceiling_ms: 60_000,
             ..VmCallSettings::default()
         },
         ..VmSettings::default()
-    });
+    })
+    .unwrap();
     let dns_identity = VmIdentity {
         logical_name: "network-with-dns".into(),
         ..identity.clone()

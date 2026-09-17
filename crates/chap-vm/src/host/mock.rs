@@ -30,6 +30,10 @@ impl MockVmBackend {
         Self::default()
     }
 
+    pub fn for_session(settings: &super::VmSettings) -> Result<Self, VmError> {
+        Ok(Self::new(settings))
+    }
+
     fn lock(&self) -> MutexGuard<'_, HashMap<String, MockVm>> {
         self.vms.lock().unwrap_or_else(PoisonError::into_inner)
     }
