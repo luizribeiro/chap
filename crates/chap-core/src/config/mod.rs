@@ -169,13 +169,7 @@ fn consent_path(
     xdg_state_home: Option<&OsStr>,
     home: Option<&OsStr>,
 ) -> Result<PathBuf, LoadError> {
-    let state_root = if let Some(path) = xdg_state_home.filter(|path| !path.is_empty()) {
-        PathBuf::from(path)
-    } else if let Some(path) = home.filter(|path| !path.is_empty()) {
-        PathBuf::from(path).join(".local/state")
-    } else {
-        return Err(LoadError::StateDirectoryUnavailable);
-    };
+    let state_root = state_root(xdg_state_home, home)?;
     let instance_directory = match name {
         Some(name) => state_root.join("chap/named").join(name),
         None => {
@@ -184,6 +178,20 @@ fn consent_path(
         }
     };
     Ok(instance_directory.join("consent.json"))
+}
+
+pub fn state_root(
+    xdg_state_home: Option<&OsStr>,
+    home: Option<&OsStr>,
+) -> Result<PathBuf, LoadError> {
+    let state_root = if let Some(path) = xdg_state_home.filter(|path| !path.is_empty()) {
+        PathBuf::from(path)
+    } else if let Some(path) = home.filter(|path| !path.is_empty()) {
+        PathBuf::from(path).join(".local/state")
+    } else {
+        return Err(LoadError::StateDirectoryUnavailable);
+    };
+    Ok(state_root)
 }
 
 impl ConfiguredPlugin {
@@ -293,6 +301,24 @@ mod tests {
             path,
             Path::new("/home/example/.local/state/chap/named/work/consent.json")
         );
+    }
+
+    #[test]
+    fn state_root_prefers_xdg_state_home() {
+        let path = state_root(
+            Some(OsStr::new("/state")),
+            Some(OsStr::new("/home/example")),
+        )
+        .unwrap();
+
+        assert_eq!(path, Path::new("/state"));
+    }
+
+    #[test]
+    fn state_root_falls_back_to_home() {
+        let path = state_root(Some(OsStr::new("")), Some(OsStr::new("/home/example"))).unwrap();
+
+        assert_eq!(path, Path::new("/home/example/.local/state"));
     }
 
     #[test]

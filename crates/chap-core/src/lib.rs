@@ -9,7 +9,7 @@ pub use agent::{
     Agent, AgentBuilder, PluginCheck, PluginRefusal, PluginRefusalReason, StartError,
     WorkspaceInfo, WorkspaceSecret,
 };
-pub use config::LoadError;
+pub use config::{LoadError, state_root};
 pub use consent::{ConsentError, ConsentStore, PluginConsentReview};
 pub use lockgate::{
     CallBudget, ConsentManifest, ConsentRecord, DriftChange, DriftKind, DriftReport, ExportDrift,
