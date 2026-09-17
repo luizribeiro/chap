@@ -81,28 +81,45 @@
           };
         };
         microsandboxRuntime = microsandboxRuntimes.${system} or null;
-        microsandboxBuildArgs = pkgs.lib.optionalAttrs (microsandboxRuntime != null) (
-          let
-            microsandboxBundle = pkgs.fetchurl {
+        microsandboxBundle =
+          if microsandboxRuntime == null then
+            null
+          else
+            pkgs.fetchurl {
               url = "https://github.com/superradcompany/microsandbox/releases/download/v0.6.16/${microsandboxRuntime.bundle}";
               hash = microsandboxRuntime.bundleHash;
             };
-            microsandboxAgentd = pkgs.fetchurl {
+        microsandboxAgentd =
+          if microsandboxRuntime == null then
+            null
+          else
+            pkgs.fetchurl {
               url = "https://github.com/superradcompany/microsandbox/releases/download/v0.6.16/${microsandboxRuntime.agentd}";
               hash = microsandboxRuntime.agentdHash;
             };
-            microsandboxHome = pkgs.runCommand "microsandbox-runtime-0.6.16" { } ''
+        microsandboxHome =
+          if microsandboxRuntime == null then
+            null
+          else
+            pkgs.runCommand "microsandbox-runtime-0.6.16" { } ''
               mkdir -p "$out/bin" "$out/lib"
               tar -xzf ${microsandboxBundle} -C "$out"
               mv "$out/msb" "$out/bin/msb"
               mv "$out/${microsandboxRuntime.libFile}" "$out/lib/${microsandboxRuntime.libFile}"
+              ${
+                if pkgs.stdenv.isDarwin then
+                  ''ln -s ${microsandboxRuntime.libFile} "$out/lib/libkrunfw.dylib"''
+                else
+                  ''
+                    ln -s ${microsandboxRuntime.libFile} "$out/lib/libkrunfw.so.5"
+                    ln -s libkrunfw.so.5 "$out/lib/libkrunfw.so"
+                  ''
+              }
             '';
-          in
-          {
+        microsandboxBuildArgs = pkgs.lib.optionalAttrs (microsandboxRuntime != null) {
             MSB_HOME = microsandboxHome;
             MSB_AGENTD_PATH = microsandboxAgentd;
-          }
-        );
+        };
         packageArgs = {
           pname = "chap";
           version = "0.1.0";
@@ -124,6 +141,13 @@
                 + pkgs.lib.optionalString withExec " --features chap-cli/exec"
                 + pkgs.lib.optionalString withState " --features chap-cli/state"
                 + pkgs.lib.optionalString withVm " --features chap-cli/vm";
+              nativeBuildInputs = pkgs.lib.optionals (withVm && microsandboxHome != null) [
+                pkgs.makeWrapper
+              ];
+              postInstall = pkgs.lib.optionalString (withVm && microsandboxHome != null) ''
+                wrapProgram "$out/bin/chap" \
+                  --set-default CHAP_MSB_RUNTIME ${pkgs.lib.escapeShellArg microsandboxHome}
+              '';
             }
           )
         ) { };
