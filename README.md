@@ -81,23 +81,7 @@ rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/chap"
 
 ## Workspace
 
-- `crates/chap-core` owns configuration, plugin loading, and the embeddable agent
-  runtime.
-- `crates/chap-cli` builds the `chap` executable and owns command-line and
-  terminal interaction.
-- `crates/chap-plugin` is the thin plugin-author facade over Lockgate and owns
-  the shared `chap:agent` WIT package.
-- `plugins` contains independently compiled WebAssembly components.
-
-The CLI is the default workspace member, so root-level `cargo run` commands keep
-working while other frontends can depend directly on `chap-core`.
-
-Running CHAP without a subcommand opens its terminal interface using the
-configured `openai` provider:
-
-```console
-cargo run
-```
+See [the workspace overview](docs/development.md#workspace) for the repository layout and source-run command.
 
 ## Plugins
 
@@ -109,17 +93,4 @@ See [the Nix guide](docs/nix.md) for declarative instances and project templates
 
 ## Development
 
-Run the project with the system Cargo:
-
-```console
-cargo run -- --help
-```
-
-With direnv installed, `direnv allow` enters the same environment automatically.
-Entering the development shell also installs the configured Git hooks. Formatting
-and Clippy run before commits, while the test suite runs before pushes. Run the
-commit hooks manually with:
-
-```console
-pre-commit run --all-files
-```
+See [the development guide](docs/development.md#running-locally) for the local workflow and checks.
