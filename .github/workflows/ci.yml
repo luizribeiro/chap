@@ -13,6 +13,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Shellcheck
+        run: shellcheck install.sh scripts/package-release.sh scripts/tests/install.sh scripts/tests/package-release.sh
+
+      - name: Test installer
+        run: sh scripts/tests/install.sh
+
+      - name: Test release packaging
+        run: sh scripts/tests/package-release.sh
+
   flake:
     runs-on: ubuntu-latest
     timeout-minutes: 90
