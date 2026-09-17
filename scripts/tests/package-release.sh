@@ -30,7 +30,7 @@ make_artifacts() {
     "$artifacts/microsandbox/lib"
   cat > "$artifacts/chap" <<'EOF'
 #!/bin/sh
-printf 'MSB_HOME=%s\n' "$MSB_HOME"
+printf 'CHAP_MSB_RUNTIME=%s\n' "$CHAP_MSB_RUNTIME"
 config=
 previous=
 for argument in "$@"; do
@@ -63,8 +63,7 @@ script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd)
 repo=$(CDPATH='' cd "$script_dir/../.." && pwd)
 packager=$repo/scripts/package-release.sh
 work=$(mktemp -d "${TMPDIR:-/tmp}/chap-package-test.XXXXXX")
-state=$(mktemp -d /tmp/chap-package-state.XXXXXX)
-trap 'rm -rf "$work" "$state"' EXIT HUP INT TERM
+trap 'rm -rf "$work"' EXIT HUP INT TERM
 
 artifacts=$work/artifacts
 out=$work/out
@@ -110,29 +109,9 @@ done
 links=$work/links
 mkdir -p "$links"
 ln -s "$root/bin/chap" "$links/chap"
-msb_home=$state/chap/msb
-actual=$(XDG_STATE_HOME=$state "$links/chap" 'alpha beta' --flag)
-expected=$(printf 'MSB_HOME=%s\nalpha beta\n--flag' "$msb_home")
+actual=$("$links/chap" 'alpha beta' --flag)
+expected=$(printf 'CHAP_MSB_RUNTIME=%s\nalpha beta\n--flag' "$root/lib/microsandbox")
 [ "$actual" = "$expected" ] || fail "wrapper output did not match"
-[ "$(readlink "$msb_home/bin/msb")" = "$root/lib/microsandbox/bin/msb" ] ||
-  fail "state directory does not link to the packaged msb"
-for library in libkrunfw.5.dylib libkrunfw.dylib; do
-  [ "$(readlink "$msb_home/lib/$library")" = "$root/lib/microsandbox/lib/$library" ] ||
-    fail "state directory does not link to the packaged $library"
-done
-
-explicit_msb_home=$state/explicit
-actual=$(MSB_HOME=$explicit_msb_home "$links/chap" --flag)
-[ "$actual" = "$(printf 'MSB_HOME=%s\n--flag' "$explicit_msb_home")" ] ||
-  fail "wrapper did not honour an explicit MSB_HOME"
-[ "$(readlink "$explicit_msb_home/bin/msb")" = "$root/lib/microsandbox/bin/msb" ] ||
-  fail "explicit MSB_HOME does not link to the packaged msb"
-
-long_state=$work/$(printf 'state%.0s' 1 2 3 4 5 6 7 8 9 10)
-if XDG_STATE_HOME=$long_state "$links/chap" --flag > "$work/long.out" 2>&1; then
-  fail "wrapper accepted an MSB_HOME too long for socket paths"
-fi
-grep -q 'MSB_HOME' "$work/long.out" || fail "long MSB_HOME failure does not name MSB_HOME"
 
 assert_file "$capture"
 if grep -q '@CHAP_HOME@' "$capture"; then

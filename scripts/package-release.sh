@@ -73,21 +73,7 @@ done
 script_dir=$(CDPATH='' cd "$(dirname "$script")" && pwd)
 root=$(CDPATH='' cd "$script_dir/.." && pwd)
 
-# microsandbox keeps its sockets, images and sandboxes under MSB_HOME, and a
-# sandbox socket path adds 52 characters that must fit in the 104-byte limit
-# of a unix socket path on macOS, so the default is a short per-user state
-# directory that links back to the runtime files shipped next to this wrapper.
-MSB_HOME=${MSB_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/chap/msb}
-if [ ${#MSB_HOME} -gt 51 ]; then
-  echo "chap: MSB_HOME '$MSB_HOME' is longer than 51 characters, which leaves no room for sandbox socket paths; export MSB_HOME pointing at a shorter directory" >&2
-  exit 1
-fi
-mkdir -p "$MSB_HOME/bin" "$MSB_HOME/lib"
-ln -sf "$root/lib/microsandbox/bin/msb" "$MSB_HOME/bin/msb"
-for library in "$root"/lib/microsandbox/lib/*; do
-  ln -sf "$library" "$MSB_HOME/lib/$(basename "$library")"
-done
-export MSB_HOME
+export CHAP_MSB_RUNTIME="$root/lib/microsandbox"
 exec "$root/libexec/chap" "$@"
 EOF
   chmod 755 "$destination"
@@ -192,7 +178,7 @@ assemble() {
     "$tree/lib/microsandbox/lib" \
     "$tree/lib/plugins" \
     "$tree/share/chap" \
-    "$smoke/home"
+    "$smoke"
 
   cp "$artifacts/chap" "$tree/libexec/chap"
   chmod 755 "$tree/libexec/chap"
@@ -210,7 +196,7 @@ assemble() {
     "$tree/share/chap/chap.json.in" \
     "$tree" \
     "$smoke/chap.json"
-  HOME="$smoke/home" MSB_HOME="$smoke_msb_home" "$tree/bin/chap" \
+  "$tree/bin/chap" \
     --config "$smoke/chap.json" plugins check
 
   tar -C "$staging" -czf "$archive" "$package_name"
@@ -264,9 +250,6 @@ mkdir -p "$out"
 out=$(CDPATH='' cd "$out" && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/chap-package.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
-# The wrapper rejects long MSB_HOME paths and TMPDIR is long on macOS.
-smoke_msb_home=$(mktemp -d /tmp/chap-msb.XXXXXX)
-trap 'rm -rf "$work" "$smoke_msb_home"' EXIT HUP INT TERM
 
 if [ -n "$artifacts" ]; then
   artifacts=$(CDPATH='' cd "$artifacts" && pwd)
