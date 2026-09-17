@@ -24,6 +24,35 @@ default_target() {
   rustc -vV | sed -n 's/^host: //p'
 }
 
+build() {
+  local artifacts=$1
+  local target=$2
+  local plugin
+
+  mkdir -p "$artifacts/plugins" "$artifacts/microsandbox"
+  (
+    cd "$repo"
+    cargo build --release --locked --target wasm32-wasip2 \
+      -p chap-openai-compatible \
+      -p chap-kagi \
+      -p chap-exec-plugin \
+      -p chap-state-plugin \
+      -p chap-workspace-plugin \
+      -p chap-persona
+  )
+
+  for plugin in $(plugin_files); do
+    cp "$repo/target/wasm32-wasip2/release/$plugin" "$artifacts/plugins/$plugin"
+  done
+
+  (
+    cd "$repo"
+    export MSB_HOME="$artifacts/microsandbox"
+    cargo build --release --locked -p chap-cli --features vm --target "$target"
+  )
+  cp "$repo/target/$target/release/chap" "$artifacts/chap"
+}
+
 write_wrapper() {
   local destination=$1
 
@@ -188,6 +217,8 @@ version=
 target=
 out=dist
 artifacts=
+script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd)
+repo=$(CDPATH='' cd "$script_dir/.." && pwd)
 
 while [ "$#" -gt 0 ]; do
   case $1 in
@@ -224,15 +255,16 @@ esac
 case $target in
   ''|*/*) echo "error: invalid target: $target" >&2; exit 2 ;;
 esac
-if [ -z "$artifacts" ]; then
-  echo "error: --artifacts is required" >&2
-  exit 2
-fi
-
 mkdir -p "$out"
 out=$(CDPATH='' cd "$out" && pwd)
-artifacts=$(CDPATH='' cd "$artifacts" && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/chap-package.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
+
+if [ -n "$artifacts" ]; then
+  artifacts=$(CDPATH='' cd "$artifacts" && pwd)
+else
+  artifacts=$work/artifacts
+  build "$artifacts" "$target"
+fi
 
 assemble "$artifacts" "$work" "chap-$version-$target" "$out"
