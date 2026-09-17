@@ -30,20 +30,6 @@ jobs:
           sudo docker image prune --all --force >/dev/null
           df -h /
 
-      # The lockgate git dependency is a private repository, so every fetch
-      # of it needs the read-only deploy key held in this secret.
-      - name: Grant access to the lockgate repository
-        env:
-          DEPLOY_KEY: ${{ secrets.LOCKGATE_DEPLOY_KEY }}
-        run: |
-          [ -n "$DEPLOY_KEY" ] || { echo "the LOCKGATE_DEPLOY_KEY secret is not set" >&2; exit 1; }
-          mkdir -p ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/lockgate_deploy_key
-          chmod 600 ~/.ssh/lockgate_deploy_key
-          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
-          git config --global core.sshCommand "ssh -i ~/.ssh/lockgate_deploy_key -o IdentitiesOnly=yes"
-          git config --global url."ssh://git@github.com/luizribeiro/lockgate".insteadOf "https://github.com/luizribeiro/lockgate"
-
       - uses: nixbuild/nix-quick-install-action@v35
         with:
           nix_conf: |
@@ -87,22 +73,6 @@ jobs:
           sudo apt-get clean
           sudo docker image prune --all --force >/dev/null
           df -h /
-
-      - name: Grant access to the lockgate repository
-        env:
-          DEPLOY_KEY: ${{ secrets.LOCKGATE_DEPLOY_KEY }}
-        run: |
-          [ -n "$DEPLOY_KEY" ] || { echo "the LOCKGATE_DEPLOY_KEY secret is not set" >&2; exit 1; }
-          mkdir -p ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/lockgate_deploy_key
-          chmod 600 ~/.ssh/lockgate_deploy_key
-          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
-          git config --global core.sshCommand "ssh -i ~/.ssh/lockgate_deploy_key -o IdentitiesOnly=yes"
-          git config --global url."ssh://git@github.com/luizribeiro/lockgate".insteadOf "https://github.com/luizribeiro/lockgate"
-          # Cargo must fetch through the git CLI for the rewrite and the
-          # deploy key to apply to its lockgate checkout.
-          mkdir -p ~/.cargo
-          printf '[net]\ngit-fetch-with-cli = true\n' >> ~/.cargo/config.toml
 
       - uses: nixbuild/nix-quick-install-action@v35
         with:
