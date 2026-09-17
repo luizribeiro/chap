@@ -130,4 +130,29 @@ env \
 [ -f "$arm_install/bin/chap" ] || fail 'aarch64-unknown-linux-gnu install is missing bin/chap'
 grep -F 'for aarch64-unknown-linux-gnu in' "$test_dir/arm.out" >/dev/null || fail 'installer did not report the aarch64 target'
 
+short_home=$(mktemp -d /tmp/h.XXXXXX)
+trap 'rm -rf "$test_dir" "$short_home"' EXIT
+env \
+    HOME="$short_home" \
+    XDG_CONFIG_HOME="$config_home" \
+    CHAP_TARBALL="$tarball" \
+    CHAP_TARGET=x86_64-unknown-linux-gnu \
+    CHAP_INSTALL_DIR="$test_dir/short-install" \
+    CHAP_BIN_DIR="$test_dir/short-bin" \
+    sh "$installer" > "$test_dir/short.out" 2>&1 || fail 'installer failed with a short home'
+if grep -F 'export MSB_HOME' "$test_dir/short.out" >/dev/null; then
+    fail 'installer warned about a short home directory'
+fi
+long_home=$test_dir/$(printf 'home%.0s' 1 2 3 4 5 6 7 8 9 10)
+mkdir -p "$long_home"
+env \
+    HOME="$long_home" \
+    XDG_CONFIG_HOME="$config_home" \
+    CHAP_TARBALL="$tarball" \
+    CHAP_TARGET=x86_64-unknown-linux-gnu \
+    CHAP_INSTALL_DIR="$test_dir/long-install" \
+    CHAP_BIN_DIR="$test_dir/long-bin" \
+    sh "$installer" > "$test_dir/long.out" 2>&1 || fail 'installer failed with a long home'
+grep -F 'export MSB_HOME' "$test_dir/long.out" >/dev/null || fail 'installer did not warn about a long home directory'
+
 printf 'installer tests passed\n'
