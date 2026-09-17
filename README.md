@@ -1,59 +1,64 @@
 # CHAP
 
-CHAP (Consent-Honoring Agent Platform) is a coding agent with an embeddable core, user-facing frontends, and capability-scoped WebAssembly plugins provided by Lockgate.
+CHAP (Consent-Honoring Agent Platform) is a coding agent that only does what you have consented to. Its tools run inside a sandboxed virtual machine, and its capabilities come from WebAssembly plugins managed by Lockgate.
 
 ## Install
+
+### macOS (Apple Silicon)
+
+Install with Homebrew:
+
+```sh
+brew install luizribeiro/chap/chap
+```
+
+### Linux (x86_64 and ARM64)
+
+Requires `/dev/kvm` and the `libcap-ng` library:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/luizribeiro/chap/main/install.sh | sh
 ```
 
-## Supported platforms
+### Nix
 
-See [the installation guide](docs/install.md#supported-platforms) for platform requirements.
+Run CHAP once, or initialize a declarative instance; see the [Nix guide](docs/nix.md):
 
-## Installer options
+```sh
+nix run github:luizribeiro/chap#chap-vm -- --config chap.json
+nix flake init -t github:luizribeiro/chap#instance
+```
 
-See [the installer options](docs/install.md#installer-options) for version and path overrides.
+See the [installation guide](docs/install.md) for options, checksums, uninstalling, and the state directory.
 
 ## First run
 
-Edit `~/.config/chap/chap.json` (or `$XDG_CONFIG_HOME/chap/chap.json`) and set `base_url`, `model`, and `api_key_env` for your OpenAI-compatible provider, then export the API key in the variable named by `api_key_env` (`OPENAI_API_KEY` by default).
-
-CHAP only loads plugins you have approved. The first launch lists the plugins that still need approval and the exact commands to run; for the default configuration they are:
+Create `~/.config/chap/chap.json`. The macOS and Linux installers render one from `share/chap/chap.json.in`; Nix users declare it as part of their instance. Set `base_url`, `model`, and `api_key_env` for your OpenAI-compatible provider, then export the named API key:
 
 ```sh
-chap grants review openai && chap grants approve openai
-chap grants review workspace && chap grants approve workspace
-chap grants review persona && chap grants approve persona
+export OPENAI_API_KEY="..."
 ```
 
-Then start it from the directory you want the agent to work in; that directory is mounted read-write at `/mnt/workspace` inside the sandbox VM:
+CHAP refuses to load a plugin until you approve its grants:
+
+```sh
+chap grants review <plugin>
+chap grants approve <plugin>
+```
+
+Run CHAP from the project directory. That directory is mounted read-write at `/mnt/workspace` inside the sandbox:
 
 ```sh
 chap
 ```
 
-## Verify a download
+## Learn more
 
-See [download verification](docs/install.md#verify-a-download) for checksum commands.
+- [Plugin reference](docs/plugins.md) — configuration, capabilities, budgets, and grants.
+- [Nix guide](docs/nix.md) — declarative instances and templates.
+- [Installation guide](docs/install.md) — platform details and lifecycle tasks.
+- [Development guide](docs/development.md) — repository layout and local workflow.
 
-## Uninstall
+## Status
 
-See [uninstall instructions](docs/install.md#uninstall) for removing CHAP and its state.
-
-## Workspace
-
-See [the workspace overview](docs/development.md#workspace) for the repository layout and source-run command.
-
-## Plugins
-
-See [the plugin reference](docs/plugins.md) for configuration, capabilities, budgets, grants, and settings.
-
-## Nix
-
-See [the Nix guide](docs/nix.md) for declarative instances and project templates.
-
-## Development
-
-See [the development guide](docs/development.md#running-locally) for the local workflow and checks.
+CHAP is early software, so expect rough edges. No license has been chosen yet; all rights are reserved for now.

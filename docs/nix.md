@@ -76,4 +76,3 @@ contain secrets; use environment indirection such as `api_key_env` instead.
 declarative instance flake. Plugin authors can use
 `nix flake init -t github:luizribeiro/chap#plugin` for a working tools-plugin
 skeleton; generate its `Cargo.lock` before the first Nix build.
-

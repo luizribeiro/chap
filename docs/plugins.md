@@ -687,4 +687,3 @@ injects typed settings through the framework contract and links HTTP only from
 the plugin's declared `net::EGRESS` grants. See [the WIT
 contracts](../crates/chap-wit/wit/) for the CHAP-owned role interfaces;
 Lockgate adds its configuration interfaces automatically.
-

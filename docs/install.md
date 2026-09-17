@@ -54,4 +54,3 @@ Optionally remove the state directory too; it holds plugin approvals, cached VM 
 ```sh
 rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/chap"
 ```
-
