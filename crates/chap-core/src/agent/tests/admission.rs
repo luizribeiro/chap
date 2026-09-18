@@ -802,7 +802,7 @@ async fn configured_provider_budget_reaches_the_host_builder() {
     ));
     assert_eq!(
         error.to_string(),
-        "provider plugin `example` timed out after 1s"
+        "provider plugin `example` timed out after 1s; raise `agent.budgets.provider.deadline_ms` to allow longer calls"
     );
     fs::remove_dir_all(directory).unwrap();
 }
@@ -1533,7 +1533,8 @@ async fn times_out_a_hanging_tool_plugin() {
         panic!("tool call deadline must be an execution failure")
     };
     assert!(
-        message.starts_with("tool plugin `example-tools` timed out after "),
+        message.starts_with("tool plugin `example-tools` timed out after ")
+            && message.ends_with("; raise `agent.budgets.tools.deadline_ms` to allow longer calls"),
         "{message}"
     );
     assert!(!message.contains(" failed: "), "{message}");

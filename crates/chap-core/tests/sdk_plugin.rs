@@ -258,7 +258,7 @@ async fn times_out_a_tool_plugin_with_hanging_definitions() {
 
     assert_eq!(
         error.to_string(),
-        "tool plugin `sdk-multi-role` failed: plugin exceeded its bounded call deadline of 1s"
+        "tool plugin `sdk-multi-role` failed: plugin exceeded its bounded call deadline of 1s; raise `agent.budgets.tools.deadline_ms` to allow longer calls"
     );
     let StartError::RoleCallFailed {
         role: "tools",

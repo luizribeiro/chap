@@ -187,6 +187,18 @@ struct PluginBudgetOverrides {
     context: Option<CallBudgetOverride>,
 }
 
+pub(crate) fn plugin_call_budget_hint(role: &str, error: &lockgate::CallError) -> String {
+    match error {
+        lockgate::CallError::OutOfBudget { .. } => {
+            format!("; raise `agent.budgets.{role}.fuel` to allow more work per call")
+        }
+        lockgate::CallError::DeadlineExceeded { .. } => {
+            format!("; raise `agent.budgets.{role}.deadline_ms` to allow longer calls")
+        }
+        _ => String::new(),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct CallBudgetOverride {
@@ -431,6 +443,49 @@ mod tests {
     use crate::config::load_config;
     #[cfg(feature = "vm")]
     use serde_json::json;
+
+    #[test]
+    fn plugin_call_budget_hints_name_the_role_settings() {
+        let provider_fuel = lockgate::CallError::OutOfBudget { fuel: 25_000_000 };
+        assert_eq!(
+            plugin_call_budget_hint("provider", &provider_fuel),
+            "; raise `agent.budgets.provider.fuel` to allow more work per call"
+        );
+
+        let tools_fuel = lockgate::CallError::OutOfBudget { fuel: 25_000_000 };
+        assert_eq!(
+            plugin_call_budget_hint("tools", &tools_fuel),
+            "; raise `agent.budgets.tools.fuel` to allow more work per call"
+        );
+
+        let provider_deadline = lockgate::CallError::DeadlineExceeded {
+            deadline: Duration::from_secs(600),
+        };
+        assert_eq!(
+            plugin_call_budget_hint("provider", &provider_deadline),
+            "; raise `agent.budgets.provider.deadline_ms` to allow longer calls"
+        );
+
+        let context_deadline = lockgate::CallError::DeadlineExceeded {
+            deadline: Duration::from_secs(10),
+        };
+        assert_eq!(
+            plugin_call_budget_hint("context", &context_deadline),
+            "; raise `agent.budgets.context.deadline_ms` to allow longer calls"
+        );
+    }
+
+    #[test]
+    fn plugin_call_budget_hint_leaves_other_errors_unchanged() {
+        let error = lockgate::CallError::Trap {
+            detail: "guest panicked".to_owned(),
+        };
+
+        assert_eq!(
+            format!("{error}{}", plugin_call_budget_hint("provider", &error)),
+            "plugin trapped: guest panicked"
+        );
+    }
 
     #[test]
     fn defaults_http_ceiling_when_sections_or_field_are_absent() {

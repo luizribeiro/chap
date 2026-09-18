@@ -1,5 +1,8 @@
 use super::{InnerHost, StartError, bindings, telemetry::trace_plugin_call};
-use crate::{ExecutionMode, Tool, ToolDefinition, ToolError, config::roles::ToolsSettings};
+use crate::{
+    ExecutionMode, Tool, ToolDefinition, ToolError,
+    config::{agent::plugin_call_budget_hint, roles::ToolsSettings},
+};
 use lockgate::{CallError, PluginHandle, PluginId};
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -103,15 +106,17 @@ fn map_tool_error(plugin_id: &PluginId, error: tool_bindings::ToolError) -> Tool
 }
 
 fn tool_call_error(plugin_id: &PluginId, error: CallError) -> ToolError {
-    ToolError::Failed(match error {
+    let hint = plugin_call_budget_hint("tools", &error);
+    let detail = match &error {
         CallError::DeadlineExceeded { deadline } => {
             format!("tool plugin `{plugin_id}` timed out after {deadline:?}")
         }
         CallError::HostPanic { import, message } => {
             format!("tool plugin `{plugin_id}` failed: host import `{import}` panicked: {message}")
         }
-        error => format!("tool plugin `{plugin_id}` failed: {error}"),
-    })
+        _ => format!("tool plugin `{plugin_id}` failed: {error}"),
+    };
+    ToolError::Failed(format!("{detail}{hint}"))
 }
 
 fn resolve_tool_mode(
@@ -206,6 +211,20 @@ mod tests {
             ),
             ToolError::Failed(
                 "tool plugin `example` failed: host import `chap:exec/exec.run` panicked: host invariant failed"
+                    .to_owned(),
+            )
+        );
+    }
+
+    #[test]
+    fn tool_fuel_failures_name_the_budget_setting() {
+        assert_eq!(
+            tool_call_error(
+                &"workspace".parse().unwrap(),
+                CallError::OutOfBudget { fuel: 25_000_000 },
+            ),
+            ToolError::Failed(
+                "tool plugin `workspace` failed: plugin exhausted its bounded call budget of 25000000 fuel units; raise `agent.budgets.tools.fuel` to allow more work per call"
                     .to_owned(),
             )
         );

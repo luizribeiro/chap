@@ -355,12 +355,25 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "provider plugin `example` timed out after 12s"
+            "provider plugin `example` timed out after 12s; raise `agent.budgets.provider.deadline_ms` to allow longer calls"
         );
         assert!(
             std::error::Error::source(&error)
                 .and_then(|source| source.downcast_ref::<Arc<CallError>>())
                 .is_some_and(|source| matches!(source.as_ref(), CallError::DeadlineExceeded { deadline } if *deadline == Duration::from_secs(12)))
+        );
+    }
+
+    #[test]
+    fn provider_fuel_failures_name_the_budget_setting() {
+        let error = map_plugin_call_error(
+            &"openai".parse().unwrap(),
+            CallError::OutOfBudget { fuel: 25_000_000 },
+        );
+
+        assert_eq!(
+            error.to_string(),
+            "provider plugin `openai` failed: plugin exhausted its bounded call budget of 25000000 fuel units; raise `agent.budgets.provider.fuel` to allow more work per call"
         );
     }
 }

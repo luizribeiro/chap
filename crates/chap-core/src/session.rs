@@ -1,3 +1,4 @@
+use crate::config::agent::plugin_call_budget_hint;
 use crate::{FinishReason, ProviderError, ToolError};
 use lockgate::PluginId;
 use std::{
@@ -183,13 +184,16 @@ pub enum ContextError {
         #[source]
         source: lockgate::RoleError,
     },
-    #[error("timed out after {deadline:?}")]
+    #[error(
+        "timed out after {deadline:?}{}",
+        plugin_call_budget_hint("context", source)
+    )]
     TimedOut {
         deadline: Duration,
         #[source]
         source: lockgate::CallError,
     },
-    #[error("{source}")]
+    #[error("{source}{}", plugin_call_budget_hint("context", source))]
     SegmentsCallFailed {
         #[source]
         source: lockgate::CallError,
@@ -665,6 +669,24 @@ mod tests {
         fn assert_error(_: &dyn std::error::Error) {}
 
         assert_error(&SteerError::EmptyInput);
+    }
+
+    #[test]
+    fn context_segment_call_failures_render_budget_hints_selectively() {
+        let out_of_budget = ContextError::SegmentsCallFailed {
+            source: lockgate::CallError::OutOfBudget { fuel: 25_000_000 },
+        };
+        assert_eq!(
+            out_of_budget.to_string(),
+            "plugin exhausted its bounded call budget of 25000000 fuel units; raise `agent.budgets.context.fuel` to allow more work per call"
+        );
+
+        let trap = ContextError::SegmentsCallFailed {
+            source: lockgate::CallError::Trap {
+                detail: "guest panicked".to_owned(),
+            },
+        };
+        assert_eq!(trap.to_string(), "plugin trapped: guest panicked");
     }
 
     #[derive(Default)]

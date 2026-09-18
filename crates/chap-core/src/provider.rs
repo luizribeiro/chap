@@ -1,3 +1,4 @@
+use crate::config::agent::plugin_call_budget_hint;
 use lockgate::PluginId;
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
@@ -36,14 +37,20 @@ pub enum ProviderError {
         source: lockgate::RoleError,
     },
     /// Chap's wall-clock deadline expired before the provider plugin completed.
-    #[error("provider plugin `{provider}` timed out after {deadline:?}")]
+    #[error(
+        "provider plugin `{provider}` timed out after {deadline:?}{}",
+        plugin_call_budget_hint("provider", source)
+    )]
     TimedOut {
         provider: PluginId,
         deadline: Duration,
         #[source]
         source: Arc<lockgate::CallError>,
     },
-    #[error("provider plugin `{provider}` failed: {source}")]
+    #[error(
+        "provider plugin `{provider}` failed: {source}{}",
+        plugin_call_budget_hint("provider", source)
+    )]
     CallFailed {
         provider: PluginId,
         #[source]

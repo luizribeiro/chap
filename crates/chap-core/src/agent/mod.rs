@@ -1,6 +1,6 @@
 use crate::config::{
     Config, ConfiguredPlugin, LoadError,
-    agent::{PluginBudgetSettings, ToolExecutionSettings},
+    agent::{PluginBudgetSettings, ToolExecutionSettings, plugin_call_budget_hint},
     roles::PluginRoleSettings,
 };
 use crate::consent::{ConsentError, ConsentStore, PluginConsentReview};
@@ -100,7 +100,11 @@ pub enum StartError {
         #[source]
         source: lockgate::RoleError,
     },
-    #[error("{} plugin `{plugin_id}` failed: {source}", role_label(role))]
+    #[error(
+        "{} plugin `{plugin_id}` failed: {source}{}",
+        role_label(role),
+        plugin_call_budget_hint(role, source)
+    )]
     RoleCallFailed {
         role: &'static str,
         plugin_id: PluginId,
