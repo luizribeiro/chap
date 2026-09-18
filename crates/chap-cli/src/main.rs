@@ -1,3 +1,6 @@
+// The microsandbox 0.7 SDK types exceed the default recursion depth in release builds.
+#![recursion_limit = "256"]
+
 mod args;
 mod commands;
 mod render;

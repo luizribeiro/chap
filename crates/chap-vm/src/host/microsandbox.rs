@@ -336,7 +336,7 @@ fn sandbox_builder(id: &VmIdentity, cfg: &VmConfig) -> Result<SandboxBuilder, Vm
                     var: variable.clone(),
                 });
             for host in &secret.hosts {
-                builder = builder.allow_host(host);
+                builder = builder.allow(host);
             }
             builder
         });
@@ -481,6 +481,8 @@ fn map_sdk_error(operation: &'static str, error: MicrosandboxError) -> VmError {
         MicrosandboxError::SandboxNotFound(_) => VmError::NoSuchVm,
         MicrosandboxError::ExecTimeout(_) => VmError::TimedOut,
         MicrosandboxError::LibkrunfwNotFound(_)
+        | MicrosandboxError::RuntimeNotInstalled(_)
+        | MicrosandboxError::RuntimeIncomplete(_)
         | MicrosandboxError::BootStart { .. }
         | MicrosandboxError::Unsupported { .. } => {
             VmError::Unavailable(format!("{operation} is unavailable"))
@@ -576,6 +578,20 @@ mod tests {
                 MicrosandboxError::LibkrunfwNotFound(
                     "/Users/alice/.microsandbox/lib/libkrunfw.dylib".into()
                 )
+            ),
+            VmError::Unavailable(message) if message == "VM creation is unavailable"
+        ));
+        assert!(matches!(
+            map_sdk_error(
+                "VM creation",
+                MicrosandboxError::RuntimeNotInstalled("runtime pair missing".into())
+            ),
+            VmError::Unavailable(message) if message == "VM creation is unavailable"
+        ));
+        assert!(matches!(
+            map_sdk_error(
+                "VM creation",
+                MicrosandboxError::RuntimeIncomplete("libkrunfw missing next to msb".into())
             ),
             VmError::Unavailable(message) if message == "VM creation is unavailable"
         ));
