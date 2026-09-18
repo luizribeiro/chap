@@ -322,13 +322,13 @@ HTTPS egress.
 
 The bundled workspace plugin has no settings and requests exactly `vm.manage`
 with the `workspace` scope. Its one `run` tool accepts a command string and
-executes it with `sh -c` from the workspace mount in the reused VM. The tool
-description reports the working directory, image, guest mount mode, egress
-scopes, reuse behavior, effective time limit, and how capped output is rendered.
-Results contain the exit code, wall time, stdout, and stderr. When either stream exceeds
-the host's per-stream cap, its beginning and end are separated by an omission
-marker. A command killed at its deadline returns what it printed with a timeout
-line in place of the exit code.
+executes it with `sh -c`, with stderr merged into stdout in order, from the
+workspace mount in the reused VM. The tool description reports the working
+directory, image, guest mount mode, egress scopes, reuse behavior, effective
+time limit, and how capped output is rendered. Results contain the exit code,
+wall time, and command output. When the output exceeds the host's cap, its
+beginning and end are separated by an omission marker. A command killed at its deadline returns what it printed with a
+timeout line in place of the exit code.
 The optional integer `timeout_secs` defaults to 120 seconds or the effective
 limit when lower, and requests above that limit are clamped.
 

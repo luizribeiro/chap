@@ -83,7 +83,7 @@ async fn runs_a_command_in_the_host_owned_workspace() {
         chap_vm::host::MockVmBackend::recorded_commands()
             .iter()
             .any(|command| {
-                command.args == ["sh", "-c", "echo workspace-e2e-ok"]
+                command.args == ["sh", "-c", "exec 2>&1; echo workspace-e2e-ok"]
                     && command.cwd.as_deref() == Some("/mnt/workspace")
                     && command.timeout_ms == Some(7_000)
             })
@@ -153,12 +153,13 @@ async fn returns_partial_output_when_a_workspace_command_times_out() {
         output.starts_with("Killed after 7 seconds (timeout)"),
         "{output}"
     );
-    assert!(output.contains("sh -c mock-timeout"), "{output}");
+    assert!(output.contains("sh -c exec 2>&1; mock-timeout"), "{output}");
     assert!(
         chap_vm::host::MockVmBackend::recorded_commands()
             .iter()
             .any(|command| {
-                command.args == ["sh", "-c", "mock-timeout"] && command.timeout_ms == Some(7_000)
+                command.args == ["sh", "-c", "exec 2>&1; mock-timeout"]
+                    && command.timeout_ms == Some(7_000)
             })
     );
     let requests = mock.finish();

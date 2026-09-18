@@ -46,13 +46,9 @@ impl Tools for WorkspacePlugin {
         let (vm, workspace) = Vm::workspace().await.map_err(ToolError::from)?;
         let cwd = working_directory(&workspace)?;
         let timeout_ms = command_timeout_ms(arguments.timeout_secs, workspace.exec_timeout_ms);
+        let script = shell_script(&arguments.command);
         let output = vm
-            .exec(
-                &["sh", "-c", &arguments.command],
-                Some(cwd),
-                None,
-                Some(timeout_ms),
-            )
+            .exec(&["sh", "-c", &script], Some(cwd), None, Some(timeout_ms))
             .await
             .map_err(ToolError::from)?;
         Ok(format_output(output, timeout_ms))
@@ -94,7 +90,7 @@ fn run_definition(workspace: &Workspace) -> Result<ToolDefinition, ToolError> {
     Ok(ToolDefinition {
         name: RUN.to_owned(),
         description: format!(
-            "Run a shell command with sh -c in the agent's workspace VM. The working directory is {cwd}. The image is {}. Guest mount points: [{mounts}]. Configured egress scopes: [{egress}]. The VM is reused across calls. Commands are killed when their timeout expires, and output produced up to that point is still returned. Output beyond the host's cap keeps the beginning and end with an omission marker between them; pipe through head, tail, or grep when you need a specific part. The default timeout is {} and the maximum is {}.{secrets}",
+            "Run a shell command with sh -c in the agent's workspace VM. The working directory is {cwd}. The image is {}. Guest mount points: [{mounts}]. Configured egress scopes: [{egress}]. The VM is reused across calls. The command's stdout and stderr are combined in order. Commands are killed when their timeout expires, and output produced up to that point is still returned. Output beyond the host's cap keeps the beginning and end with an omission marker between them; pipe through head, tail, or grep when you need a specific part. The default timeout is {} and the maximum is {}.{secrets}",
             workspace.image,
             describe_seconds(default_timeout_ms),
             describe_seconds(workspace.exec_timeout_ms),
@@ -110,6 +106,10 @@ fn run_definition(workspace: &Workspace) -> Result<ToolDefinition, ToolError> {
         }"#
         .to_owned(),
     })
+}
+
+fn shell_script(command: &str) -> String {
+    format!("exec 2>&1; {command}")
 }
 
 fn working_directory(workspace: &Workspace) -> Result<&str, ToolError> {
@@ -225,6 +225,8 @@ mod tests {
         assert!(description.contains("/mnt/workspace (read-write)"));
         assert!(description.contains("0.0.0.0/0:443, 0.0.0.0/0:53"));
         assert!(description.contains("reused across calls"));
+        assert!(description.contains("stdout and stderr are combined in order"));
+        assert!(description.contains("output produced up to that point is still returned"));
         assert!(description.contains("beginning and end with an omission marker"));
         assert!(description.contains("head, tail, or grep"));
         assert!(description.contains("default timeout is 30 seconds"));
@@ -251,6 +253,15 @@ mod tests {
         assert!(description.contains("GITHUB_TOKEN (api.github.com, github.com)"));
         assert!(description.contains("placeholders"));
         assert!(!empty_description.contains("Secrets"));
+    }
+
+    #[test]
+    fn prefixes_shell_commands_on_the_first_line() {
+        assert_eq!(shell_script("echo hello"), "exec 2>&1; echo hello");
+        assert_eq!(
+            shell_script("echo hello\npwd"),
+            "exec 2>&1; echo hello\npwd"
+        );
     }
 
     #[test]
@@ -336,12 +347,12 @@ mod tests {
                     exit_code: None,
                     wall_time_ms: 7_125,
                     stdout: b"partial stdout".to_vec(),
-                    stderr: b"still working\n".to_vec(),
+                    stderr: vec![],
                     truncated: false,
                 },
                 7_000
             ),
-            "Killed after 7 seconds (timeout)\nWall time: 7.125 seconds\n\npartial stdout\n\nstderr:\nstill working\n"
+            "Killed after 7 seconds (timeout)\nWall time: 7.125 seconds\n\npartial stdout"
         );
     }
 
