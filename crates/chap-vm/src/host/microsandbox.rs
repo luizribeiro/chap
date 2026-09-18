@@ -362,6 +362,9 @@ fn sandbox_builder(id: &VmIdentity, cfg: &VmConfig) -> Result<SandboxBuilder, Vm
     Ok(builder)
 }
 
+// FIXME(#43): address rules admit every service behind a shared address, and the
+// whole-family port-53 grant reaches every DNS server, so egress grants are broader than
+// they read. Name-based scopes on microsandbox's `domain` rules replace both.
 fn network_policy(egress: &[Egress]) -> Result<NetworkPolicy, VmError> {
     let mut policy = NetworkPolicy::builder().default_deny();
     if egress.iter().any(enables_gateway_dns) {

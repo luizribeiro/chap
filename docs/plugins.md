@@ -320,6 +320,17 @@ the gateway resolver. A narrower port-53 scope does not, so operations such as
 Alpine's `apk add` need the whole-family scope as well as the relevant HTTP or
 HTTPS egress.
 
+Address grants admit more than they read. A scope allows every service reachable
+at that address and port, so a grant meant for one API on a shared host or CDN
+also reaches every other site behind the same address, and `grants review` can
+only show the address, not what it serves. The whole-family port-53 scope that
+enables DNS also lets the guest reach any DNS server on the internet and resolve
+any name, and both of those can carry data out of the VM. Name-based egress
+scopes that close both gaps are tracked in
+[chap#43](https://github.com/luizribeiro/chap/issues/43). Until then, prefer
+specific addresses over wide CIDRs and treat the DNS grant as network access,
+not just name resolution.
+
 The bundled workspace plugin has no settings and requests exactly `vm.manage`
 with the `workspace` scope. Its one `run` tool accepts a command string and
 executes it with `sh -c`, with stderr merged into stdout in order, from the
