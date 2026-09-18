@@ -146,7 +146,8 @@
               ];
               postInstall = pkgs.lib.optionalString (withVm && microsandboxHome != null) ''
                 wrapProgram "$out/bin/chap" \
-                  --set-default CHAP_MSB_RUNTIME ${pkgs.lib.escapeShellArg microsandboxHome}
+                  --set-default MSB_PATH ${pkgs.lib.escapeShellArg "${microsandboxHome}/bin/msb"} \
+                  --set-default MSB_LIBKRUNFW_PATH ${pkgs.lib.escapeShellArg "${microsandboxHome}/lib/${microsandboxRuntime.libFile}"}
               '';
             }
           )
