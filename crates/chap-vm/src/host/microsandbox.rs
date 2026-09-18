@@ -17,7 +17,7 @@ use microsandbox::{
 
 use super::{
     Egress, ExecOutcome, ResolvedImage, VmBackend, VmCommand, VmConfig, VmError, VmIdentity,
-    VmPrincipal, VmRef, VmSettings,
+    VmPrincipal, VmRef, VmSettings, capture::StreamCapture,
 };
 
 const NAME_PREFIX: &str = "chap-";
@@ -148,30 +148,15 @@ impl VmBackend for MicrosandboxBackend {
             })
             .await
             .map_err(|error| map_sdk_error("VM command execution", error))?;
-        let mut capture = ExecCapture::default();
+        let mut capture = ExecCapture::new(self.settings.calls.exec_max_output_bytes);
 
-        match tokio::time::timeout(
-            timeout,
-            collect_exec(
-                &mut handle,
-                &mut capture,
-                self.settings.calls.exec_max_output_bytes,
-            ),
-        )
-        .await
-        {
+        match tokio::time::timeout(timeout, collect_exec(&mut handle, &mut capture)).await {
             Ok(result) => result.map(|exit_code| capture.into_outcome(Some(exit_code))),
             Err(_) => {
                 let _ = handle.kill().await;
-                let _ = tokio::time::timeout(
-                    EXEC_KILL_WAIT,
-                    collect_exec(
-                        &mut handle,
-                        &mut capture,
-                        self.settings.calls.exec_max_output_bytes,
-                    ),
-                )
-                .await;
+                let _ =
+                    tokio::time::timeout(EXEC_KILL_WAIT, collect_exec(&mut handle, &mut capture))
+                        .await;
                 Ok(capture.into_outcome(None))
             }
         }
@@ -425,26 +410,15 @@ async fn destroy_handle(handle: SandboxHandle) -> Result<(), VmError> {
 async fn collect_exec(
     handle: &mut microsandbox::ExecHandle,
     capture: &mut ExecCapture,
-    output_limit: u64,
 ) -> Result<i32, VmError> {
     while let Some(event) = handle.recv().await {
         match event {
             ExecEvent::Started { .. } => {}
             ExecEvent::Stdout(bytes) => {
-                capture.truncated |= append_capped(
-                    &mut capture.stdout,
-                    &bytes,
-                    &mut capture.captured,
-                    output_limit,
-                );
+                capture.stdout.append(&bytes);
             }
             ExecEvent::Stderr(bytes) => {
-                capture.truncated |= append_capped(
-                    &mut capture.stderr,
-                    &bytes,
-                    &mut capture.captured,
-                    output_limit,
-                );
+                capture.stderr.append(&bytes);
             }
             ExecEvent::Exited { code } => return Ok(code),
             ExecEvent::Failed(error) => {
@@ -462,33 +436,28 @@ async fn collect_exec(
     ))
 }
 
-#[derive(Default)]
 struct ExecCapture {
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-    captured: u64,
-    truncated: bool,
+    stdout: StreamCapture,
+    stderr: StreamCapture,
 }
 
 impl ExecCapture {
-    fn into_outcome(self, exit_code: Option<i32>) -> ExecOutcome {
-        ExecOutcome {
-            exit_code,
-            stdout: self.stdout,
-            stderr: self.stderr,
-            truncated: self.truncated,
+    fn new(limit: u64) -> Self {
+        Self {
+            stdout: StreamCapture::new(limit),
+            stderr: StreamCapture::new(limit),
         }
     }
-}
 
-fn append_capped(target: &mut Vec<u8>, bytes: &[u8], captured: &mut u64, limit: u64) -> bool {
-    let available = limit.saturating_sub(*captured);
-    let bytes_len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-    let take = available.min(bytes_len);
-    let take = usize::try_from(take).unwrap_or(bytes.len());
-    target.extend_from_slice(&bytes[..take]);
-    *captured = captured.saturating_add(u64::try_from(take).unwrap_or(u64::MAX));
-    take < bytes.len()
+    fn into_outcome(self, exit_code: Option<i32>) -> ExecOutcome {
+        let truncated = self.stdout.truncated() || self.stderr.truncated();
+        ExecOutcome {
+            exit_code,
+            stdout: self.stdout.into_bytes(),
+            stderr: self.stderr.into_bytes(),
+            truncated,
+        }
+    }
 }
 
 fn image_reference(image: &ResolvedImage) -> String {
@@ -658,17 +627,16 @@ mod tests {
     }
 
     #[test]
-    fn output_is_capped_across_stdout_and_stderr() {
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let mut captured = 0;
+    fn output_is_capped_independently_per_stream() {
+        let mut capture = ExecCapture::new(6);
+        capture.stdout.append(b"01\n02\n03\n04\n");
+        capture.stderr.append(b"E1\nE2\n");
 
-        assert!(!append_capped(&mut stdout, b"abc", &mut captured, 5));
-        assert!(append_capped(&mut stderr, b"def", &mut captured, 5));
-        assert!(append_capped(&mut stdout, b"g", &mut captured, 5));
-        assert_eq!(stdout, b"abc");
-        assert_eq!(stderr, b"de");
-        assert_eq!(captured, 5);
+        let outcome = capture.into_outcome(Some(7));
+
+        assert_eq!(outcome.stdout, b"01\n\n[... 6 bytes omitted ...]\n04\n");
+        assert_eq!(outcome.stderr, b"E1\nE2\n");
+        assert!(outcome.truncated);
     }
 
     #[test]

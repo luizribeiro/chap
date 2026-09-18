@@ -94,7 +94,7 @@ fn run_definition(workspace: &Workspace) -> Result<ToolDefinition, ToolError> {
     Ok(ToolDefinition {
         name: RUN.to_owned(),
         description: format!(
-            "Run a shell command with sh -c in the agent's workspace VM. The working directory is {cwd}. The image is {}. Guest mount points: [{mounts}]. Configured egress scopes: [{egress}]. The VM is reused across calls. Commands are killed when their timeout expires, and output produced up to that point is still returned. The default timeout is {} and the maximum is {}.{secrets}",
+            "Run a shell command with sh -c in the agent's workspace VM. The working directory is {cwd}. The image is {}. Guest mount points: [{mounts}]. Configured egress scopes: [{egress}]. The VM is reused across calls. Commands are killed when their timeout expires, and output produced up to that point is still returned. Output beyond the host's cap keeps the beginning and end with an omission marker between them; pipe through head, tail, or grep when you need a specific part. The default timeout is {} and the maximum is {}.{secrets}",
             workspace.image,
             describe_seconds(default_timeout_ms),
             describe_seconds(workspace.exec_timeout_ms),
@@ -166,9 +166,6 @@ fn format_output(output: ExecResult, timeout_ms: u64) -> String {
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    if output.truncated {
-        sections.push("[Command output was truncated.]".to_owned());
-    }
     sections.join("\n\n")
 }
 
@@ -225,6 +222,8 @@ mod tests {
         assert!(description.contains("/mnt/workspace (read-write)"));
         assert!(description.contains("0.0.0.0/0:443, 0.0.0.0/0:53"));
         assert!(description.contains("reused across calls"));
+        assert!(description.contains("beginning and end with an omission marker"));
+        assert!(description.contains("head, tail, or grep"));
         assert!(description.contains("default timeout is 30 seconds"));
         assert!(description.contains("maximum is 30 seconds"));
         assert!(
@@ -315,13 +314,13 @@ mod tests {
             format_output(
                 ExecResult {
                     exit_code: Some(7),
-                    stdout: b"partial stdout".to_vec(),
+                    stdout: b"first stdout\n[... 42 bytes omitted ...]\nlast stdout".to_vec(),
                     stderr: b"not found\n".to_vec(),
                     truncated: true,
                 },
                 120_000
             ),
-            "Exit code: 7\n\npartial stdout\n\nstderr:\nnot found\n\n\n[Command output was truncated.]"
+            "Exit code: 7\n\nfirst stdout\n[... 42 bytes omitted ...]\nlast stdout\n\nstderr:\nnot found\n"
         );
     }
 
