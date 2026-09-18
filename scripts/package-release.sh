@@ -55,11 +55,23 @@ build() {
 
 write_wrapper() {
   local destination=$1
+  local target=$2
+  local libkrunfw_file
 
-  cat > "$destination" <<'EOF'
+  case $target in
+    *-darwin) libkrunfw_file=libkrunfw.dylib ;;
+    *-linux-*) libkrunfw_file=libkrunfw.so ;;
+    *) echo "error: unsupported package target: $target" >&2; return 1 ;;
+  esac
+
+  cat > "$destination" <<EOF
 #!/bin/sh
 
 set -eu
+
+libkrunfw_file=$libkrunfw_file
+EOF
+  cat >> "$destination" <<'EOF'
 
 script=$0
 while [ -L "$script" ]; do
@@ -73,7 +85,9 @@ done
 script_dir=$(CDPATH='' cd "$(dirname "$script")" && pwd)
 root=$(CDPATH='' cd "$script_dir/.." && pwd)
 
-export CHAP_MSB_RUNTIME="$root/lib/microsandbox"
+MSB_PATH=${MSB_PATH-"$root/lib/microsandbox/bin/msb"}
+MSB_LIBKRUNFW_PATH=${MSB_LIBKRUNFW_PATH-"$root/lib/microsandbox/lib/$libkrunfw_file"}
+export MSB_PATH MSB_LIBKRUNFW_PATH
 exec "$root/libexec/chap" "$@"
 EOF
   chmod 755 "$destination"
@@ -166,6 +180,7 @@ assemble() {
   local staging=$2
   local package_name=$3
   local output_dir=$4
+  local target=$5
   local tree=$staging/$package_name
   local smoke=$staging/smoke
   local archive=$output_dir/$package_name.tar.gz
@@ -190,7 +205,7 @@ assemble() {
     cp "$artifacts/plugins/$plugin" "$tree/lib/plugins/$plugin"
   done
 
-  write_wrapper "$tree/bin/chap"
+  write_wrapper "$tree/bin/chap" "$target"
   write_config_template "$tree/share/chap/chap.json.in"
   render_smoke_config \
     "$tree/share/chap/chap.json.in" \
@@ -258,4 +273,4 @@ else
   build "$artifacts" "$target"
 fi
 
-assemble "$artifacts" "$work" "chap-$version-$target" "$out"
+assemble "$artifacts" "$work" "chap-$version-$target" "$out" "$target"
