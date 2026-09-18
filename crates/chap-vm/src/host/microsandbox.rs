@@ -1,10 +1,7 @@
 use std::{
-    env,
-    ffi::OsString,
     format,
     future::Future,
     net::IpAddr,
-    path::PathBuf,
     string::{String, ToString},
     time::{Duration, Instant},
     vec::Vec,
@@ -42,7 +39,11 @@ impl MicrosandboxBackend {
     }
 
     pub fn for_session(settings: &VmSettings) -> Result<Self, VmError> {
-        prepare_runtime()?;
+        let state_dir = microsandbox::config::config()
+            .map_err(|error| map_sdk_error("VM state directory lookup", error))?
+            .home();
+        crate::runtime::prepare_runtime(&state_dir)
+            .map_err(|error| VmError::Unavailable(error.to_string()))?;
         Ok(Self::new(settings))
     }
 
@@ -59,19 +60,6 @@ impl MicrosandboxBackend {
             .await
             .map_err(|error| map_sdk_error("VM connection", error))
     }
-}
-
-fn prepare_runtime() -> Result<(), VmError> {
-    let msb_home = runtime_path(env::var_os("MSB_HOME"))?;
-    crate::runtime::prepare_runtime(&msb_home)
-        .map_err(|error| VmError::Unavailable(error.to_string()))
-}
-
-fn runtime_path(msb_home: Option<OsString>) -> Result<PathBuf, VmError> {
-    let msb_home = msb_home.filter(|path| !path.is_empty()).ok_or_else(|| {
-        VmError::Unavailable("MSB_HOME is not set; chap exports it at startup".into())
-    })?;
-    Ok(msb_home.into())
 }
 
 impl VmBackend for MicrosandboxBackend {
@@ -505,34 +493,7 @@ fn map_sdk_error(operation: &'static str, error: MicrosandboxError) -> VmError {
 mod tests {
     use super::*;
     use serde_json::{Value, json};
-    use std::ffi::OsString;
     use std::sync::atomic::{AtomicBool, Ordering};
-
-    #[test]
-    fn unset_msb_home_is_unavailable() {
-        let error = runtime_path(None).unwrap_err();
-
-        assert_eq!(
-            error,
-            VmError::Unavailable("MSB_HOME is not set; chap exports it at startup".into())
-        );
-    }
-
-    #[test]
-    fn empty_msb_home_is_unavailable() {
-        let error = runtime_path(Some(OsString::new())).unwrap_err();
-
-        assert_eq!(error, runtime_path(None).unwrap_err());
-    }
-
-    #[test]
-    fn set_msb_home_is_used() {
-        let path = OsString::from("configured-msb-home");
-
-        let msb_home = runtime_path(Some(path.clone())).unwrap();
-
-        assert_eq!(msb_home, PathBuf::from(path));
-    }
 
     fn image(tag: Option<&str>, digest: Option<&str>) -> ResolvedImage {
         ResolvedImage {
@@ -541,6 +502,24 @@ mod tests {
             tag: tag.map(String::from),
             digest: digest.map(String::from),
         }
+    }
+
+    #[test]
+    fn a_session_checks_the_state_directory_the_sdk_resolved() {
+        let too_long = std::env::temp_dir().join("x".repeat(64));
+        // SAFETY: no other test in this crate reads or writes MSB_HOME.
+        unsafe { std::env::set_var("MSB_HOME", &too_long) };
+        let error = MicrosandboxBackend::for_session(&VmSettings::default())
+            .err()
+            .expect("a state directory too long for socket paths is rejected");
+        assert!(matches!(
+            &error,
+            VmError::Unavailable(message)
+                if message.contains(too_long.to_str().unwrap()) && message.contains("51-byte limit")
+        ));
+
+        unsafe { std::env::set_var("MSB_HOME", "/tmp/chap-vm-state") };
+        assert!(MicrosandboxBackend::for_session(&VmSettings::default()).is_ok());
     }
 
     #[test]
