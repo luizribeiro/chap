@@ -474,16 +474,17 @@ Fuel and wall-clock deadlines are configured agent-wide by plugin role:
   "agent": {
     "budgets": {
       "admission": { "fuel": 25000000, "deadline_ms": 30000 },
-      "provider": { "fuel": 25000000, "deadline_ms": 600000 },
-      "tools": { "fuel": 25000000, "deadline_ms": 30000 },
+      "provider": { "fuel": 1000000000, "deadline_ms": 600000 },
+      "tools": { "fuel": 1000000000, "deadline_ms": 30000 },
       "context": { "fuel": 25000000, "deadline_ms": 10000 }
     }
   }
 }
 ```
 
-The values shown are the defaults; they are initial guesses pending measurement
-of realistic plugin workloads. Omitted roles or fields retain their defaults.
+The provider and tools roles use the full fuel ceiling because their work scales
+with conversation history and tool input. Admission and context calls do fixed
+work and use smaller fuel budgets. Omitted roles or fields retain their defaults.
 The `tools` budget covers both tool-definition loading and tool execution.
 Every fuel value must be between 1 and 1,000,000,000 instructions, and every
 `deadline_ms` must be between 1 and 600,000 milliseconds (10 minutes).

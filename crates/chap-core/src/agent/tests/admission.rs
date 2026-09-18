@@ -421,27 +421,27 @@ async fn workspace_validation_names_invalid_image_and_egress_fields() {
 }
 
 #[test]
-fn default_call_budgets_use_ten_minutes_for_provider_and_preserve_other_bounds() {
+fn default_call_budgets_use_full_fuel_for_input_scaled_roles() {
     let budgets = PluginBudgets::default();
 
     assert_eq!(
         budgets.provider.complete,
         CallBudget {
-            fuel: 25_000_000,
+            fuel: 1_000_000_000,
             deadline: Duration::from_secs(600),
         }
     );
     assert_eq!(
         budgets.tools.definitions,
         CallBudget {
-            fuel: 25_000_000,
+            fuel: 1_000_000_000,
             deadline: Duration::from_secs(30),
         }
     );
     assert_eq!(
         budgets.tools.execute,
         CallBudget {
-            fuel: 25_000_000,
+            fuel: 1_000_000_000,
             deadline: Duration::from_secs(30),
         }
     );

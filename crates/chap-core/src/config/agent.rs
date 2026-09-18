@@ -8,12 +8,15 @@ use std::{num::NonZeroUsize, time::Duration};
 #[cfg(feature = "vm")]
 use std::collections::BTreeMap;
 
-const DEFAULT_PLUGIN_FUEL: u64 = 25_000_000;
+const DEFAULT_ADMISSION_FUEL: u64 = 25_000_000;
 const DEFAULT_ADMISSION_DEADLINE_MS: u64 = 30_000;
+const DEFAULT_PROVIDER_FUEL: u64 = MAX_PLUGIN_FUEL;
 const DEFAULT_PROVIDER_DEADLINE_MS: u64 = 600_000;
 const DEFAULT_HTTP_REQUEST_TIMEOUT_CEILING_MS: u64 = 300_000;
 const MAX_HTTP_REQUEST_TIMEOUT_CEILING_MS: u64 = 600_000;
+const DEFAULT_TOOLS_FUEL: u64 = MAX_PLUGIN_FUEL;
 const DEFAULT_TOOLS_DEADLINE_MS: u64 = 30_000;
+const DEFAULT_CONTEXT_FUEL: u64 = 25_000_000;
 const DEFAULT_CONTEXT_DEADLINE_MS: u64 = 10_000;
 const MAX_PLUGIN_FUEL: u64 = 1_000_000_000;
 const MAX_PLUGIN_DEADLINE_MS: u64 = 10 * 60 * 1_000;
@@ -311,10 +314,10 @@ impl Config {
 impl Default for PluginBudgetSettings {
     fn default() -> Self {
         Self {
-            admission: default_plugin_budget(DEFAULT_ADMISSION_DEADLINE_MS),
-            provider: default_plugin_budget(DEFAULT_PROVIDER_DEADLINE_MS),
-            tools: default_plugin_budget(DEFAULT_TOOLS_DEADLINE_MS),
-            context: default_plugin_budget(DEFAULT_CONTEXT_DEADLINE_MS),
+            admission: default_plugin_budget(DEFAULT_ADMISSION_FUEL, DEFAULT_ADMISSION_DEADLINE_MS),
+            provider: default_plugin_budget(DEFAULT_PROVIDER_FUEL, DEFAULT_PROVIDER_DEADLINE_MS),
+            tools: default_plugin_budget(DEFAULT_TOOLS_FUEL, DEFAULT_TOOLS_DEADLINE_MS),
+            context: default_plugin_budget(DEFAULT_CONTEXT_FUEL, DEFAULT_CONTEXT_DEADLINE_MS),
         }
     }
 }
@@ -402,9 +405,9 @@ where
     Ok(value)
 }
 
-fn default_plugin_budget(deadline_ms: u64) -> CallBudget {
+fn default_plugin_budget(fuel: u64, deadline_ms: u64) -> CallBudget {
     CallBudget {
-        fuel: DEFAULT_PLUGIN_FUEL,
+        fuel,
         deadline: Duration::from_millis(deadline_ms),
     }
 }
@@ -592,7 +595,7 @@ mod tests {
         assert_eq!(
             budgets.tools,
             CallBudget {
-                fuel: DEFAULT_PLUGIN_FUEL,
+                fuel: DEFAULT_TOOLS_FUEL,
                 deadline: Duration::from_millis(300),
             }
         );
