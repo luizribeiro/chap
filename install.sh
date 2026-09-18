@@ -167,9 +167,9 @@ case ":${PATH:-}:" in
 esac
 printf 'Edit %s and set base_url, model, and api_key_env, then export that API key.\n' "$config_file"
 printf 'The first chap run lists plugins to approve with: chap grants review <plugin> && chap grants approve <plugin>\n'
-# A sandbox socket path adds 52 characters to MSB_HOME and must fit in the
-# 104-byte unix socket path limit on macOS.
-state_dir=${MSB_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/chap/msb}
+# A sandbox socket path adds 52 characters to chap's state directory and must
+# fit in the 104-byte unix socket path limit on macOS.
+state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/chap/msb
 if [ ${#state_dir} -gt 51 ]; then
-    printf 'The sandbox state directory %s is longer than 51 characters: export MSB_HOME pointing at a shorter directory before running chap, or its sandbox sockets cannot be created.\n' "$state_dir"
+    printf "chap's sandbox state directory %s is longer than 51 characters; set XDG_STATE_HOME to a shorter directory before running chap, or its sandbox sockets cannot be created.\n" "$state_dir"
 fi

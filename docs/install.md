@@ -7,7 +7,7 @@ This guide covers supported systems, installer options, download verification, a
 - Apple Silicon macOS (`aarch64-apple-darwin`)
 - Linux on x86-64 (`x86_64-unknown-linux-gnu`) or ARM64 (`aarch64-unknown-linux-gnu`), with `/dev/kvm` available on bare metal or through nested virtualization and the `libcap-ng` shared library installed (`libcap-ng0` on Debian/Ubuntu or `libcap-ng` on Fedora)
 
-The sandbox runtime keeps its sockets under `${XDG_STATE_HOME:-$HOME/.local/state}/chap/msb`, and unix socket paths are capped at 104 bytes on macOS, so that directory must be at most 51 characters long. If your home directory is long, export `MSB_HOME` pointing at a shorter directory before running `chap`; the wrapper refuses to start otherwise and says so.
+chap keeps its sandbox state under `${XDG_STATE_HOME:-$HOME/.local/state}/chap/msb`. Because unix socket paths are capped at 104 bytes on macOS, that directory must be at most 51 characters long. Set `XDG_STATE_HOME` to a shorter directory if necessary; chap refuses to start a VM session when the sandbox state directory is too long and reports how to correct it.
 
 ## Installer options
 

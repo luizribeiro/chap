@@ -140,7 +140,7 @@ env \
     CHAP_INSTALL_DIR="$test_dir/short-install" \
     CHAP_BIN_DIR="$test_dir/short-bin" \
     sh "$installer" > "$test_dir/short.out" 2>&1 || fail 'installer failed with a short home'
-if grep -F 'export MSB_HOME' "$test_dir/short.out" >/dev/null; then
+if grep -F 'set XDG_STATE_HOME to a shorter directory' "$test_dir/short.out" >/dev/null; then
     fail 'installer warned about a short home directory'
 fi
 long_home=$test_dir/$(printf 'home%.0s' 1 2 3 4 5 6 7 8 9 10)
@@ -153,6 +153,6 @@ env \
     CHAP_INSTALL_DIR="$test_dir/long-install" \
     CHAP_BIN_DIR="$test_dir/long-bin" \
     sh "$installer" > "$test_dir/long.out" 2>&1 || fail 'installer failed with a long home'
-grep -F 'export MSB_HOME' "$test_dir/long.out" >/dev/null || fail 'installer did not warn about a long home directory'
+grep -F 'set XDG_STATE_HOME to a shorter directory' "$test_dir/long.out" >/dev/null || fail 'installer did not warn about a long home directory'
 
 printf 'installer tests passed\n'
