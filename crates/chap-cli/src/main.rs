@@ -28,7 +28,7 @@ fn configure_microsandbox() {
     let xdg_state_home = env::var_os("XDG_STATE_HOME");
     let home = env::var_os("HOME");
     let msb_home = match chap_core::state_root(xdg_state_home.as_deref(), home.as_deref()) {
-        Ok(state_root) => Some(chap_vm::runtime::msb_home(explicit, &state_root)),
+        Ok(state_root) => Some(chap_vm::runtime::sandbox_state_dir(explicit, &state_root)),
         Err(_) => explicit,
     };
 

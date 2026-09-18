@@ -42,7 +42,7 @@ impl MicrosandboxBackend {
         let state_dir = microsandbox::config::config()
             .map_err(|error| map_sdk_error("VM state directory lookup", error))?
             .home();
-        crate::runtime::prepare_runtime(&state_dir)
+        crate::runtime::validate_state_dir(&state_dir)
             .map_err(|error| VmError::Unavailable(error.to_string()))?;
         Ok(Self::new(settings))
     }
