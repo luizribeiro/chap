@@ -19,6 +19,8 @@ interface vm {
   record exec-result {
     /// `none` when the host killed the command at its deadline.
     exit-code: option<s32>,
+    /// Milliseconds from spawning the command until it exited or was killed.
+    wall-time-ms: u64,
     stdout: list<u8>,
     stderr: list<u8>,
     truncated: bool,

@@ -325,7 +325,7 @@ with the `workspace` scope. Its one `run` tool accepts a command string and
 executes it with `sh -c` from the workspace mount in the reused VM. The tool
 description reports the working directory, image, guest mount mode, egress
 scopes, reuse behavior, effective time limit, and how capped output is rendered.
-Results contain the exit code, stdout, and stderr. When either stream exceeds
+Results contain the exit code, wall time, stdout, and stderr. When either stream exceeds
 the host's per-stream cap, its beginning and end are separated by an omission
 marker. A command killed at its deadline returns what it printed with a timeout
 line in place of the exit code.

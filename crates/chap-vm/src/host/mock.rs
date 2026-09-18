@@ -139,6 +139,7 @@ impl VmBackend for MockVmBackend {
         let timed_out = command.args.iter().any(|arg| arg.contains("mock-timeout"));
         Ok(ExecOutcome {
             exit_code: (!timed_out).then_some(0),
+            wall_time_ms: 1_500,
             stdout: command.args.join(" ").into_bytes(),
             stderr: Vec::new(),
             truncated: false,
@@ -386,6 +387,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(outcome.exit_code, Some(0));
+            assert_eq!(outcome.wall_time_ms, 1_500);
             assert_eq!(outcome.stdout, b"nix build .#plugin");
             assert!(outcome.stderr.is_empty());
             assert!(!outcome.truncated);
@@ -394,6 +396,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(timed_out.exit_code, None);
+            assert_eq!(timed_out.wall_time_ms, 1_500);
             assert_eq!(timed_out.stdout, b"nix build mock-timeout");
             assert!(timed_out.stderr.is_empty());
             assert!(!timed_out.truncated);

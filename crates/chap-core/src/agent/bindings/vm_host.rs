@@ -713,6 +713,7 @@ impl From<VmExecOutcome> for vm::ExecResult {
     fn from(outcome: VmExecOutcome) -> Self {
         Self {
             exit_code: outcome.exit_code,
+            wall_time_ms: outcome.wall_time_ms,
             stdout: outcome.stdout,
             stderr: outcome.stderr,
             truncated: outcome.truncated,

@@ -156,7 +156,10 @@ fn format_output(output: ExecResult, timeout_ms: u64) -> String {
         || format!("Killed after {} (timeout)", describe_seconds(timeout_ms)),
         |exit_code| format!("Exit code: {exit_code}"),
     );
-    let mut sections = vec![status];
+    let mut sections = vec![format!(
+        "{status}\nWall time: {}",
+        describe_seconds(output.wall_time_ms)
+    )];
     if !output.stdout.is_empty() {
         sections.push(String::from_utf8_lossy(&output.stdout).into_owned());
     }
@@ -314,13 +317,14 @@ mod tests {
             format_output(
                 ExecResult {
                     exit_code: Some(7),
+                    wall_time_ms: 1_500,
                     stdout: b"first stdout\n[... 42 bytes omitted ...]\nlast stdout".to_vec(),
                     stderr: b"not found\n".to_vec(),
                     truncated: true,
                 },
                 120_000
             ),
-            "Exit code: 7\n\nfirst stdout\n[... 42 bytes omitted ...]\nlast stdout\n\nstderr:\nnot found\n"
+            "Exit code: 7\nWall time: 1.500 seconds\n\nfirst stdout\n[... 42 bytes omitted ...]\nlast stdout\n\nstderr:\nnot found\n"
         );
     }
 
@@ -330,13 +334,14 @@ mod tests {
             format_output(
                 ExecResult {
                     exit_code: None,
+                    wall_time_ms: 7_125,
                     stdout: b"partial stdout".to_vec(),
                     stderr: b"still working\n".to_vec(),
                     truncated: false,
                 },
                 7_000
             ),
-            "Killed after 7 seconds (timeout)\n\npartial stdout\n\nstderr:\nstill working\n"
+            "Killed after 7 seconds (timeout)\nWall time: 7.125 seconds\n\npartial stdout\n\nstderr:\nstill working\n"
         );
     }
 

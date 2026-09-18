@@ -6,7 +6,7 @@ use std::{
     net::IpAddr,
     path::PathBuf,
     string::{String, ToString},
-    time::Duration,
+    time::{Duration, Instant},
     vec::Vec,
 };
 
@@ -135,6 +135,7 @@ impl VmBackend for MicrosandboxBackend {
         let stdin = command.stdin;
         let sdk_timeout = timeout.saturating_add(EXEC_KILL_WAIT);
         let sandbox = Self::sandbox(vm).await?;
+        let started_at = Instant::now();
         let mut handle = sandbox
             .exec_stream_with(program, move |mut options| {
                 options = options.args(args).timeout(sdk_timeout);
@@ -148,7 +149,7 @@ impl VmBackend for MicrosandboxBackend {
             })
             .await
             .map_err(|error| map_sdk_error("VM command execution", error))?;
-        let mut capture = ExecCapture::new(self.settings.calls.exec_max_output_bytes);
+        let mut capture = ExecCapture::new(self.settings.calls.exec_max_output_bytes, started_at);
 
         match tokio::time::timeout(timeout, collect_exec(&mut handle, &mut capture)).await {
             Ok(result) => result.map(|exit_code| capture.into_outcome(Some(exit_code))),
@@ -437,13 +438,15 @@ async fn collect_exec(
 }
 
 struct ExecCapture {
+    started_at: Instant,
     stdout: StreamCapture,
     stderr: StreamCapture,
 }
 
 impl ExecCapture {
-    fn new(limit: u64) -> Self {
+    fn new(limit: u64, started_at: Instant) -> Self {
         Self {
+            started_at,
             stdout: StreamCapture::new(limit),
             stderr: StreamCapture::new(limit),
         }
@@ -453,6 +456,7 @@ impl ExecCapture {
         let truncated = self.stdout.truncated() || self.stderr.truncated();
         ExecOutcome {
             exit_code,
+            wall_time_ms: u64::try_from(self.started_at.elapsed().as_millis()).unwrap_or(u64::MAX),
             stdout: self.stdout.into_bytes(),
             stderr: self.stderr.into_bytes(),
             truncated,
@@ -628,7 +632,7 @@ mod tests {
 
     #[test]
     fn output_is_capped_independently_per_stream() {
-        let mut capture = ExecCapture::new(6);
+        let mut capture = ExecCapture::new(6, Instant::now());
         capture.stdout.append(b"01\n02\n03\n04\n");
         capture.stderr.append(b"E1\nE2\n");
 

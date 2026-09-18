@@ -78,6 +78,7 @@ async fn runs_a_command_in_the_host_owned_workspace() {
     let events: Vec<SessionEvent> = receive_until_complete(&mut events).await;
     let output = tool_result(&events, "workspace-call").as_ref().unwrap();
     assert!(output.contains("echo workspace-e2e-ok"), "{output}");
+    assert!(output.contains("Wall time: 1.500 seconds"), "{output}");
     assert!(
         chap_vm::host::MockVmBackend::recorded_commands()
             .iter()
