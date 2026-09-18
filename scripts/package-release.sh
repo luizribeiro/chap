@@ -24,12 +24,109 @@ default_target() {
   rustc -vV | sed -n 's/^host: //p'
 }
 
+microsandbox_version() {
+  local lockfile=$1
+
+  awk '
+    $0 == "[[package]]" { package_name = "" }
+    $1 == "name" && $3 == "\"microsandbox\"" { package_name = "microsandbox"; next }
+    package_name == "microsandbox" && $1 == "version" {
+      gsub(/"/, "", $3)
+      print $3
+      exit
+    }
+  ' "$lockfile"
+}
+
+select_microsandbox_bundle() {
+  case $1 in
+    aarch64-apple-darwin)
+      microsandbox_bundle_file=microsandbox-darwin-aarch64.tar.gz
+      microsandbox_lib_file=libkrunfw.5.dylib
+      microsandbox_lib_alias=libkrunfw.dylib
+      ;;
+    x86_64-unknown-linux-gnu)
+      microsandbox_bundle_file=microsandbox-linux-x86_64.tar.gz
+      microsandbox_lib_file=libkrunfw.so.5.6.1
+      microsandbox_lib_alias=libkrunfw.so
+      ;;
+    aarch64-unknown-linux-gnu)
+      microsandbox_bundle_file=microsandbox-linux-aarch64.tar.gz
+      microsandbox_lib_file=libkrunfw.so.5.6.1
+      microsandbox_lib_alias=libkrunfw.so
+      ;;
+    *)
+      echo "error: unsupported microsandbox target: $1" >&2
+      return 1
+      ;;
+  esac
+}
+
+sha256_digest() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{ print $1 }'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{ print $1 }'
+  else
+    echo "error: sha256sum or shasum is required" >&2
+    return 1
+  fi
+}
+
+verify_microsandbox_checksum() {
+  local archive=$1
+  local checksums=$2
+  local archive_name
+  local expected
+  local actual
+
+  archive_name=$(basename "$archive")
+  if ! expected=$(awk -v archive="$archive_name" '$2 == archive { print $1; found = 1; exit } END { if (!found) exit 1 }' "$checksums"); then
+    echo "error: checksum not found for $archive_name" >&2
+    return 1
+  fi
+  actual=$(sha256_digest "$archive")
+  if [ "$actual" != "$expected" ]; then
+    echo "error: checksum mismatch for $archive_name" >&2
+    return 1
+  fi
+}
+
+fetch_microsandbox_runtime() {
+  local destination=$1
+  local target=$2
+  local version
+  local release_url
+  local download_dir=$destination/download
+  local archive
+  local checksums=$download_dir/checksums.sha256
+
+  select_microsandbox_bundle "$target"
+  version=$(microsandbox_version "$repo/Cargo.lock")
+  if [ -z "$version" ]; then
+    echo "error: microsandbox version not found in Cargo.lock" >&2
+    return 1
+  fi
+  release_url=${MICROSANDBOX_RELEASE_URL:-https://github.com/superradcompany/microsandbox/releases/download}/v$version
+  archive=$download_dir/$microsandbox_bundle_file
+
+  mkdir -p "$destination/bin" "$destination/lib" "$download_dir"
+  curl -fsSL --output "$checksums" "$release_url/checksums.sha256"
+  curl -fsSL --output "$archive" "$release_url/$microsandbox_bundle_file"
+  verify_microsandbox_checksum "$archive" "$checksums"
+  tar -C "$download_dir" -xzf "$archive" msb "$microsandbox_lib_file"
+  mv "$download_dir/msb" "$destination/bin/msb"
+  mv "$download_dir/$microsandbox_lib_file" "$destination/lib/$microsandbox_lib_file"
+  ln -s "$microsandbox_lib_file" "$destination/lib/$microsandbox_lib_alias"
+  rm -rf "$download_dir"
+}
+
 build() {
   local artifacts=$1
   local target=$2
   local plugin
 
-  mkdir -p "$artifacts/plugins" "$artifacts/microsandbox"
+  mkdir -p "$artifacts/plugins"
   (
     cd "$repo"
     cargo build --release --locked --target wasm32-wasip2 \
@@ -47,10 +144,10 @@ build() {
 
   (
     cd "$repo"
-    export MSB_HOME="$artifacts/microsandbox"
     cargo build --release --locked -p chap-cli --features vm --target "$target"
   )
   cp "$repo/target/$target/release/chap" "$artifacts/chap"
+  fetch_microsandbox_runtime "$artifacts/microsandbox" "$target"
 }
 
 write_wrapper() {
@@ -219,58 +316,65 @@ assemble() {
   printf '%s\n%s\n' "$archive" "$archive.sha256"
 }
 
-version=
-target=
-out=dist
-artifacts=
-script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd)
+script_dir=$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(CDPATH='' cd "$script_dir/.." && pwd)
 
-while [ "$#" -gt 0 ]; do
-  case $1 in
-    --version|--target|--out|--artifacts)
-      if [ "$#" -lt 2 ]; then
+main() {
+  local version=
+  local target=
+  local out=dist
+  local artifacts=
+
+  while [ "$#" -gt 0 ]; do
+    case $1 in
+      --version|--target|--out|--artifacts)
+        if [ "$#" -lt 2 ]; then
+          usage
+          exit 2
+        fi
+        case $1 in
+          --version) version=$2 ;;
+          --target) target=$2 ;;
+          --out) out=$2 ;;
+          --artifacts) artifacts=$2 ;;
+        esac
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
         usage
         exit 2
-      fi
-      case $1 in
-        --version) version=$2 ;;
-        --target) target=$2 ;;
-        --out) out=$2 ;;
-        --artifacts) artifacts=$2 ;;
-      esac
-      shift 2
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      usage
-      exit 2
-      ;;
+        ;;
+    esac
+  done
+
+  version=${version:-$(default_version)}
+  target=${target:-$(default_target)}
+
+  case $version in
+    ''|*/*) echo "error: invalid version: $version" >&2; exit 2 ;;
   esac
-done
+  case $target in
+    ''|*/*) echo "error: invalid target: $target" >&2; exit 2 ;;
+  esac
+  mkdir -p "$out"
+  out=$(CDPATH='' cd "$out" && pwd)
+  package_work=$(mktemp -d "${TMPDIR:-/tmp}/chap-package.XXXXXX")
+  trap 'rm -rf "$package_work"' EXIT HUP INT TERM
 
-version=${version:-$(default_version)}
-target=${target:-$(default_target)}
+  if [ -n "$artifacts" ]; then
+    artifacts=$(CDPATH='' cd "$artifacts" && pwd)
+  else
+    artifacts=$package_work/artifacts
+    build "$artifacts" "$target"
+  fi
 
-case $version in
-  ''|*/*) echo "error: invalid version: $version" >&2; exit 2 ;;
-esac
-case $target in
-  ''|*/*) echo "error: invalid target: $target" >&2; exit 2 ;;
-esac
-mkdir -p "$out"
-out=$(CDPATH='' cd "$out" && pwd)
-work=$(mktemp -d "${TMPDIR:-/tmp}/chap-package.XXXXXX")
-trap 'rm -rf "$work"' EXIT HUP INT TERM
+  assemble "$artifacts" "$package_work" "chap-$version-$target" "$out" "$target"
+}
 
-if [ -n "$artifacts" ]; then
-  artifacts=$(CDPATH='' cd "$artifacts" && pwd)
-else
-  artifacts=$work/artifacts
-  build "$artifacts" "$target"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
 fi
-
-assemble "$artifacts" "$work" "chap-$version-$target" "$out" "$target"
