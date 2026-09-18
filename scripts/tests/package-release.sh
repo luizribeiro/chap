@@ -30,7 +30,8 @@ make_artifacts() {
     "$artifacts/microsandbox/lib"
   cat > "$artifacts/chap" <<'EOF'
 #!/bin/sh
-printf 'CHAP_MSB_RUNTIME=%s\n' "$CHAP_MSB_RUNTIME"
+printf 'MSB_PATH=%s\n' "$MSB_PATH"
+printf 'MSB_LIBKRUNFW_PATH=%s\n' "$MSB_LIBKRUNFW_PATH"
 config=
 previous=
 for argument in "$@"; do
@@ -57,6 +58,28 @@ EOF
   : > "$artifacts/microsandbox/bin/msb"
   : > "$artifacts/microsandbox/lib/libkrunfw.5.dylib"
   ln -s libkrunfw.5.dylib "$artifacts/microsandbox/lib/libkrunfw.dylib"
+  : > "$artifacts/microsandbox/lib/libkrunfw.so.5.6.1"
+  ln -s libkrunfw.so.5.6.1 "$artifacts/microsandbox/lib/libkrunfw.so.5"
+  ln -s libkrunfw.so.5 "$artifacts/microsandbox/lib/libkrunfw.so"
+}
+
+assert_wrapper() {
+  root=$1
+  libkrunfw_file=$2
+
+  links=$work/links-$(basename "$root")
+  mkdir -p "$links"
+  ln -s "$root/bin/chap" "$links/chap"
+  actual=$(env -u MSB_PATH -u MSB_LIBKRUNFW_PATH "$links/chap" 'alpha beta' --flag)
+  expected=$(printf 'MSB_PATH=%s\nMSB_LIBKRUNFW_PATH=%s\nalpha beta\n--flag' \
+    "$root/lib/microsandbox/bin/msb" \
+    "$root/lib/microsandbox/lib/$libkrunfw_file")
+  [ "$actual" = "$expected" ] || fail "wrapper output did not match"
+
+  actual=$(MSB_PATH=custom-msb MSB_LIBKRUNFW_PATH=custom-libkrunfw \
+    "$links/chap")
+  expected=$(printf 'MSB_PATH=custom-msb\nMSB_LIBKRUNFW_PATH=custom-libkrunfw')
+  [ "$actual" = "$expected" ] || fail "wrapper did not preserve overrides"
 }
 
 script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd)
@@ -65,53 +88,59 @@ packager=$repo/scripts/package-release.sh
 work=$(mktemp -d "${TMPDIR:-/tmp}/chap-package-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 
+package_and_check() {
+  target=$1
+  libkrunfw_file=$2
+  versioned_libkrunfw_file=$3
+
+  out=$work/out-$target
+  extracted=$work/extracted-$target
+  package_name=chap-test-version-$target
+  archive=$out/$package_name.tar.gz
+  checksum=$archive.sha256
+
+  TEST_SMOKE_CONFIG_CAPTURE=$capture "$packager" \
+    --version test-version \
+    --target "$target" \
+    --out "$out" \
+    --artifacts "$artifacts" >/dev/null
+
+  assert_file "$archive"
+  assert_file "$checksum"
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$out" && sha256sum -c "$(basename "$checksum")") >/dev/null
+  else
+    (cd "$out" && shasum -a 256 -c "$(basename "$checksum")") >/dev/null
+  fi
+
+  mkdir -p "$extracted"
+  tar -C "$extracted" -xzf "$archive"
+  root=$extracted/$package_name
+  for path in \
+    bin/chap \
+    libexec/chap \
+    lib/microsandbox/bin/msb \
+    "lib/microsandbox/lib/$versioned_libkrunfw_file" \
+    share/chap/chap.json.in
+  do
+    assert_file "$root/$path"
+  done
+  for plugin in $(plugin_files); do
+    assert_file "$root/lib/plugins/$plugin"
+  done
+  [ -L "$root/lib/microsandbox/lib/$libkrunfw_file" ] ||
+    fail "$libkrunfw_file was not preserved as a symlink"
+
+  shellcheck "$root/bin/chap"
+  assert_wrapper "$root" "$libkrunfw_file"
+}
+
 artifacts=$work/artifacts
-out=$work/out
-extracted=$work/extracted
 capture=$work/smoke.json
-package_name=chap-test-version-test-target
-archive=$out/$package_name.tar.gz
-checksum=$archive.sha256
 make_artifacts "$artifacts"
 
-TEST_SMOKE_CONFIG_CAPTURE=$capture "$packager" \
-  --version test-version \
-  --target test-target \
-  --out "$out" \
-  --artifacts "$artifacts" >/dev/null
-
-assert_file "$archive"
-assert_file "$checksum"
-if command -v sha256sum >/dev/null 2>&1; then
-  (cd "$out" && sha256sum -c "$(basename "$checksum")") >/dev/null
-else
-  (cd "$out" && shasum -a 256 -c "$(basename "$checksum")") >/dev/null
-fi
-
-mkdir -p "$extracted"
-tar -C "$extracted" -xzf "$archive"
-root=$extracted/$package_name
-for path in \
-  bin/chap \
-  libexec/chap \
-  lib/microsandbox/bin/msb \
-  lib/microsandbox/lib/libkrunfw.5.dylib \
-  share/chap/chap.json.in
-do
-  assert_file "$root/$path"
-done
-for plugin in $(plugin_files); do
-  assert_file "$root/lib/plugins/$plugin"
-done
-[ -L "$root/lib/microsandbox/lib/libkrunfw.dylib" ] ||
-  fail "libkrunfw.dylib was not preserved as a symlink"
-
-links=$work/links
-mkdir -p "$links"
-ln -s "$root/bin/chap" "$links/chap"
-actual=$("$links/chap" 'alpha beta' --flag)
-expected=$(printf 'CHAP_MSB_RUNTIME=%s\nalpha beta\n--flag' "$root/lib/microsandbox")
-[ "$actual" = "$expected" ] || fail "wrapper output did not match"
+package_and_check aarch64-apple-darwin libkrunfw.dylib libkrunfw.5.dylib
+package_and_check x86_64-unknown-linux-gnu libkrunfw.so libkrunfw.so.5.6.1
 
 assert_file "$capture"
 if grep -q '@CHAP_HOME@' "$capture"; then
@@ -120,11 +149,20 @@ fi
 
 if TEST_FAIL_PLUGIN_CHECK=1 "$packager" \
   --version negative \
-  --target test-target \
+  --target aarch64-apple-darwin \
   --out "$work/negative-out" \
   --artifacts "$artifacts" >/dev/null 2>&1
 then
   fail "packager succeeded when plugins check failed"
+fi
+
+if "$packager" \
+  --version negative \
+  --target x86_64-pc-windows-msvc \
+  --out "$work/unsupported-out" \
+  --artifacts "$artifacts" >/dev/null 2>&1
+then
+  fail "packager succeeded for a target without a wrapper library name"
 fi
 
 echo "package-release tests passed"
