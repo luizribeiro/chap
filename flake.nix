@@ -57,27 +57,22 @@
         cargoVendorDir = craneLib.vendorCargoDeps {
           src = packageSrc;
         };
+        microsandboxVersion = "0.7.2";
         microsandboxRuntimes = {
           aarch64-darwin = {
             bundle = "microsandbox-darwin-aarch64.tar.gz";
-            bundleHash = "sha256-Z6EDvYCfaQyEfkuCMFKPV1Rll7ID9Xj8QomWZZQX/IE=";
+            bundleHash = "sha256-FKWRDGs5Xp1Q4AHYE4jL5TZvGBZcV+3kpe2j4zFbfb0=";
             libFile = "libkrunfw.5.dylib";
-            agentd = "agentd-aarch64";
-            agentdHash = "sha256-qHZPws20rZIe9sfxaIH9CkJyahCVq1nJA4yw55ZqwDA=";
           };
           x86_64-linux = {
             bundle = "microsandbox-linux-x86_64.tar.gz";
-            bundleHash = "sha256-qaIt2s2zbr0hStBCrCwYyj2vXn8ayPL7pSIIWqtui1c=";
+            bundleHash = "sha256-R8Ij4+9SmKvwX0ftn4eYEQbkANmbs/HQQtTWiBNGsYs=";
             libFile = "libkrunfw.so.5.6.1";
-            agentd = "agentd-x86_64";
-            agentdHash = "sha256-YCX+9ioAuWWeVclUSlQ8+piboG1sd74iKzrHDVf3Rm4=";
           };
           aarch64-linux = {
             bundle = "microsandbox-linux-aarch64.tar.gz";
-            bundleHash = "sha256-/e4V5q8VJ5yekUBnIo392hlkZEWXJQIKLB4AZ3vyWIM=";
+            bundleHash = "sha256-1N54FBR7g1pLmeUeI2yLMzNACR5XJ6C0XX64R9VrAio=";
             libFile = "libkrunfw.so.5.6.1";
-            agentd = "agentd-aarch64";
-            agentdHash = "sha256-qHZPws20rZIe9sfxaIH9CkJyahCVq1nJA4yw55ZqwDA=";
           };
         };
         microsandboxRuntime = microsandboxRuntimes.${system} or null;
@@ -86,40 +81,19 @@
             null
           else
             pkgs.fetchurl {
-              url = "https://github.com/superradcompany/microsandbox/releases/download/v0.6.16/${microsandboxRuntime.bundle}";
+              url = "https://github.com/superradcompany/microsandbox/releases/download/v${microsandboxVersion}/${microsandboxRuntime.bundle}";
               hash = microsandboxRuntime.bundleHash;
-            };
-        microsandboxAgentd =
-          if microsandboxRuntime == null then
-            null
-          else
-            pkgs.fetchurl {
-              url = "https://github.com/superradcompany/microsandbox/releases/download/v0.6.16/${microsandboxRuntime.agentd}";
-              hash = microsandboxRuntime.agentdHash;
             };
         microsandboxHome =
           if microsandboxRuntime == null then
             null
           else
-            pkgs.runCommand "microsandbox-runtime-0.6.16" { } ''
+            pkgs.runCommand "microsandbox-runtime-${microsandboxVersion}" { } ''
               mkdir -p "$out/bin" "$out/lib"
               tar -xzf ${microsandboxBundle} -C "$out"
               mv "$out/msb" "$out/bin/msb"
               mv "$out/${microsandboxRuntime.libFile}" "$out/lib/${microsandboxRuntime.libFile}"
-              ${
-                if pkgs.stdenv.isDarwin then
-                  ''ln -s ${microsandboxRuntime.libFile} "$out/lib/libkrunfw.dylib"''
-                else
-                  ''
-                    ln -s ${microsandboxRuntime.libFile} "$out/lib/libkrunfw.so.5"
-                    ln -s libkrunfw.so.5 "$out/lib/libkrunfw.so"
-                  ''
-              }
             '';
-        microsandboxBuildArgs = pkgs.lib.optionalAttrs (microsandboxRuntime != null) {
-            MSB_HOME = microsandboxHome;
-            MSB_AGENTD_PATH = microsandboxAgentd;
-        };
         packageArgs = {
           pname = "chap";
           version = "0.1.0";
@@ -128,7 +102,7 @@
           cargoExtraArgs = "--locked -p chap-cli";
           doCheck = false;
           buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.libcap_ng ];
-        } // microsandboxBuildArgs;
+        };
         cargoArtifacts = craneLib.buildDepsOnly packageArgs;
         chap = pkgs.lib.makeOverridable (
           { withExec ? false, withState ? false, withVm ? false }:
