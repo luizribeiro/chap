@@ -22,19 +22,21 @@ fn main() -> ExitCode {
 
 #[cfg(feature = "vm")]
 fn configure_microsandbox() {
-    let explicit = env::var_os("MSB_HOME")
-        .filter(|path| !path.is_empty())
-        .map(Into::into);
     let xdg_state_home = env::var_os("XDG_STATE_HOME");
     let home = env::var_os("HOME");
-    let msb_home = match chap_core::state_root(xdg_state_home.as_deref(), home.as_deref()) {
-        Ok(state_root) => Some(chap_vm::runtime::sandbox_state_dir(explicit, &state_root)),
-        Err(_) => explicit,
-    };
+    let state_dir = chap_core::state_root(xdg_state_home.as_deref(), home.as_deref())
+        .ok()
+        .map(|state_root| chap_vm::runtime::sandbox_state_dir(&state_root));
 
-    if let Some(msb_home) = msb_home {
-        // SAFETY: the process is single-threaded here because the Tokio runtime has not started.
-        unsafe { env::set_var("MSB_HOME", msb_home) };
+    // The microsandbox SDK reads MSB_HOME when it first resolves its configuration
+    // and keeps that resolution for the life of the process, so this must run
+    // before any other microsandbox call.
+    // SAFETY: the process is single-threaded here because the Tokio runtime has not started.
+    unsafe {
+        match state_dir {
+            Some(state_dir) => env::set_var("MSB_HOME", state_dir),
+            None => env::remove_var("MSB_HOME"),
+        }
     }
 }
 
