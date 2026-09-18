@@ -27,8 +27,8 @@ impl fmt::Display for RuntimeError {
 
 impl Error for RuntimeError {}
 
-pub fn sandbox_state_dir(explicit: Option<PathBuf>, state_root: &Path) -> PathBuf {
-    explicit.unwrap_or_else(|| state_root.join("chap/msb"))
+pub fn sandbox_state_dir(state_root: &Path) -> PathBuf {
+    state_root.join("chap/msb")
 }
 
 pub(crate) fn validate_state_dir(path: &Path) -> Result<(), RuntimeError> {
@@ -48,15 +48,8 @@ mod tests {
     use std::string::ToString;
 
     #[test]
-    fn an_explicit_sandbox_state_directory_wins() {
-        let path = sandbox_state_dir(Some(PathBuf::from("explicit")), Path::new("state"));
-
-        assert_eq!(path, Path::new("explicit"));
-    }
-
-    #[test]
     fn the_sandbox_state_directory_defaults_to_chap_state() {
-        let path = sandbox_state_dir(None, Path::new("state"));
+        let path = sandbox_state_dir(Path::new("state"));
 
         assert_eq!(path, Path::new("state/chap/msb"));
     }
