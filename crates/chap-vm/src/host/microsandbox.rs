@@ -62,21 +62,16 @@ impl MicrosandboxBackend {
 }
 
 fn prepare_runtime() -> Result<(), VmError> {
-    let (msb_home, runtime) =
-        runtime_paths(env::var_os("MSB_HOME"), env::var_os("CHAP_MSB_RUNTIME"))?;
-    crate::runtime::prepare_runtime(&msb_home, runtime.as_deref())
+    let msb_home = runtime_path(env::var_os("MSB_HOME"))?;
+    crate::runtime::prepare_runtime(&msb_home)
         .map_err(|error| VmError::Unavailable(error.to_string()))
 }
 
-fn runtime_paths(
-    msb_home: Option<OsString>,
-    runtime: Option<OsString>,
-) -> Result<(PathBuf, Option<PathBuf>), VmError> {
+fn runtime_path(msb_home: Option<OsString>) -> Result<PathBuf, VmError> {
     let msb_home = msb_home.filter(|path| !path.is_empty()).ok_or_else(|| {
         VmError::Unavailable("MSB_HOME is not set; chap exports it at startup".into())
     })?;
-    let runtime = runtime.filter(|path| !path.is_empty());
-    Ok((msb_home.into(), runtime.map(Into::into)))
+    Ok(msb_home.into())
 }
 
 impl VmBackend for MicrosandboxBackend {
@@ -515,7 +510,7 @@ mod tests {
 
     #[test]
     fn unset_msb_home_is_unavailable() {
-        let error = runtime_paths(None, None).unwrap_err();
+        let error = runtime_path(None).unwrap_err();
 
         assert_eq!(
             error,
@@ -525,21 +520,18 @@ mod tests {
 
     #[test]
     fn empty_msb_home_is_unavailable() {
-        let error = runtime_paths(Some(OsString::new()), None).unwrap_err();
+        let error = runtime_path(Some(OsString::new())).unwrap_err();
 
-        assert_eq!(error, runtime_paths(None, None).unwrap_err());
+        assert_eq!(error, runtime_path(None).unwrap_err());
     }
 
     #[test]
     fn set_msb_home_is_used() {
         let path = OsString::from("configured-msb-home");
-        let configured_runtime = OsString::from("configured-runtime");
 
-        let (msb_home, runtime) =
-            runtime_paths(Some(path.clone()), Some(configured_runtime.clone())).unwrap();
+        let msb_home = runtime_path(Some(path.clone())).unwrap();
 
         assert_eq!(msb_home, PathBuf::from(path));
-        assert_eq!(runtime, Some(PathBuf::from(configured_runtime)));
     }
 
     fn image(tag: Option<&str>, digest: Option<&str>) -> ResolvedImage {
