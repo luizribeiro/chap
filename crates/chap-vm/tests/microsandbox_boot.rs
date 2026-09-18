@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chap_vm::host::{
     Backend as MicrosandboxBackend, MountSpec, ResolvedImage, SecretSource, SecretSpec, VmBackend,
-    VmCallSettings, VmCommand, VmConfig, VmError, VmIdentity, VmPrincipal, VmSettings,
+    VmCallSettings, VmCommand, VmConfig, VmIdentity, VmPrincipal, VmSettings,
 };
 use chap_vm::vm::Egress;
 
@@ -75,11 +75,11 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
         .await
         .unwrap();
     println!(
-        "microsandbox boot: uname exit={} stdout={:?}",
+        "microsandbox boot: uname exit={:?} stdout={:?}",
         uname.exit_code,
         String::from_utf8_lossy(&uname.stdout)
     );
-    assert_eq!(uname.exit_code, 0);
+    assert_eq!(uname.exit_code, Some(0));
     assert!(String::from_utf8_lossy(&uname.stdout).contains("Linux"));
 
     assert_eq!(
@@ -100,11 +100,11 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
         .await
         .unwrap();
     println!(
-        "microsandbox boot: readonly write exit={} stderr={:?}",
+        "microsandbox boot: readonly write exit={:?} stderr={:?}",
         readonly_write.exit_code,
         String::from_utf8_lossy(&readonly_write.stderr)
     );
-    assert_ne!(readonly_write.exit_code, 0);
+    assert!(matches!(readonly_write.exit_code, Some(code) if code != 0));
     assert!(!host_dir.path().join("should-not-exist").exists());
 
     backend
@@ -118,13 +118,24 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
             .unwrap(),
         GUEST_CONTENTS
     );
-    assert!(matches!(
-        backend
-            .exec(&vm, command(&["sleep", "30"], Some(250)))
-            .await,
-        Err(VmError::TimedOut)
-    ));
-    println!("microsandbox boot: timeout mapped to VmError::TimedOut");
+    let timed_out = backend
+        .exec(
+            &vm,
+            command(
+                &[
+                    "sh",
+                    "-c",
+                    "printf partial-stdout; printf partial-stderr >&2; sleep 30",
+                ],
+                Some(250),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(timed_out.exit_code, None);
+    assert_eq!(timed_out.stdout, b"partial-stdout");
+    assert_eq!(timed_out.stderr, b"partial-stderr");
+    println!("microsandbox boot: timeout returned partial output");
 
     assert_eq!(backend.get(&identity).await.unwrap(), Some(vm.clone()));
     assert_eq!(
@@ -227,30 +238,30 @@ async fn boots_alpine_and_exercises_the_backend_contract() {
 
     let apk_with_dns = apk_with_dns.unwrap();
     println!(
-        "microsandbox network: apk with dns exit={} stdout={:?} stderr={:?}",
+        "microsandbox network: apk with dns exit={:?} stdout={:?} stderr={:?}",
         apk_with_dns.exit_code,
         String::from_utf8_lossy(&apk_with_dns.stdout),
         String::from_utf8_lossy(&apk_with_dns.stderr)
     );
-    assert_eq!(apk_with_dns.exit_code, 0);
+    assert_eq!(apk_with_dns.exit_code, Some(0));
 
     let curl = curl.unwrap();
     println!(
-        "microsandbox network: curl exit={} stdout={:?} stderr={:?}",
+        "microsandbox network: curl exit={:?} stdout={:?} stderr={:?}",
         curl.exit_code,
         String::from_utf8_lossy(&curl.stdout),
         String::from_utf8_lossy(&curl.stderr)
     );
-    assert_eq!(curl.exit_code, 0);
+    assert_eq!(curl.exit_code, Some(0));
 
     let apk_without_dns = apk_without_dns.unwrap();
     println!(
-        "microsandbox network: apk without dns exit={} stdout={:?} stderr={:?}",
+        "microsandbox network: apk without dns exit={:?} stdout={:?} stderr={:?}",
         apk_without_dns.exit_code,
         String::from_utf8_lossy(&apk_without_dns.stdout),
         String::from_utf8_lossy(&apk_without_dns.stderr)
     );
-    assert_ne!(apk_without_dns.exit_code, 0);
+    assert!(matches!(apk_without_dns.exit_code, Some(code) if code != 0));
     assert!(
         String::from_utf8_lossy(&apk_without_dns.stderr)
             .to_ascii_lowercase()

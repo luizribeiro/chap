@@ -133,10 +133,11 @@ impl VmBackend for MicrosandboxBackend {
         );
         let cwd = command.cwd;
         let stdin = command.stdin;
+        let sdk_timeout = timeout.saturating_add(EXEC_KILL_WAIT);
         let sandbox = Self::sandbox(vm).await?;
         let mut handle = sandbox
             .exec_stream_with(program, move |mut options| {
-                options = options.args(args).timeout(timeout);
+                options = options.args(args).timeout(sdk_timeout);
                 if let Some(cwd) = cwd {
                     options = options.cwd(cwd);
                 }
@@ -147,22 +148,31 @@ impl VmBackend for MicrosandboxBackend {
             })
             .await
             .map_err(|error| map_sdk_error("VM command execution", error))?;
+        let mut capture = ExecCapture::default();
 
         match tokio::time::timeout(
             timeout,
-            collect_exec(&mut handle, self.settings.calls.exec_max_output_bytes),
+            collect_exec(
+                &mut handle,
+                &mut capture,
+                self.settings.calls.exec_max_output_bytes,
+            ),
         )
         .await
         {
-            Ok(result) => result,
+            Ok(result) => result.map(|exit_code| capture.into_outcome(Some(exit_code))),
             Err(_) => {
                 let _ = handle.kill().await;
                 let _ = tokio::time::timeout(
                     EXEC_KILL_WAIT,
-                    collect_exec(&mut handle, self.settings.calls.exec_max_output_bytes),
+                    collect_exec(
+                        &mut handle,
+                        &mut capture,
+                        self.settings.calls.exec_max_output_bytes,
+                    ),
                 )
                 .await;
-                Err(VmError::TimedOut)
+                Ok(capture.into_outcome(None))
             }
         }
     }
@@ -414,30 +424,29 @@ async fn destroy_handle(handle: SandboxHandle) -> Result<(), VmError> {
 
 async fn collect_exec(
     handle: &mut microsandbox::ExecHandle,
+    capture: &mut ExecCapture,
     output_limit: u64,
-) -> Result<ExecOutcome, VmError> {
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    let mut captured = 0;
-    let mut truncated = false;
-
+) -> Result<i32, VmError> {
     while let Some(event) = handle.recv().await {
         match event {
             ExecEvent::Started { .. } => {}
             ExecEvent::Stdout(bytes) => {
-                truncated |= append_capped(&mut stdout, &bytes, &mut captured, output_limit);
+                capture.truncated |= append_capped(
+                    &mut capture.stdout,
+                    &bytes,
+                    &mut capture.captured,
+                    output_limit,
+                );
             }
             ExecEvent::Stderr(bytes) => {
-                truncated |= append_capped(&mut stderr, &bytes, &mut captured, output_limit);
+                capture.truncated |= append_capped(
+                    &mut capture.stderr,
+                    &bytes,
+                    &mut capture.captured,
+                    output_limit,
+                );
             }
-            ExecEvent::Exited { code } => {
-                return Ok(ExecOutcome {
-                    exit_code: code,
-                    stdout,
-                    stderr,
-                    truncated,
-                });
-            }
+            ExecEvent::Exited { code } => return Ok(code),
             ExecEvent::Failed(error) => {
                 return Err(map_sdk_error(
                     "VM command execution",
@@ -451,6 +460,25 @@ async fn collect_exec(
     Err(VmError::Failed(
         "microsandbox exec session ended without an exit event".into(),
     ))
+}
+
+#[derive(Default)]
+struct ExecCapture {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    captured: u64,
+    truncated: bool,
+}
+
+impl ExecCapture {
+    fn into_outcome(self, exit_code: Option<i32>) -> ExecOutcome {
+        ExecOutcome {
+            exit_code,
+            stdout: self.stdout,
+            stderr: self.stderr,
+            truncated: self.truncated,
+        }
+    }
 }
 
 fn append_capped(target: &mut Vec<u8>, bytes: &[u8], captured: &mut u64, limit: u64) -> bool {

@@ -247,7 +247,7 @@ pub struct VmCommand {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecOutcome {
-    pub exit_code: i32,
+    pub exit_code: Option<i32>,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
     pub truncated: bool,

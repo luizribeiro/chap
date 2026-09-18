@@ -98,11 +98,11 @@ impl Tools for VmGuest {
 }
 
 fn format_output(output: ExecResult) -> String {
-    format!(
-        "Exit code: {}\n\n{}",
-        output.exit_code,
-        String::from_utf8_lossy(&output.stdout)
-    )
+    let status = output.exit_code.map_or_else(
+        || "Timed out".to_owned(),
+        |code| format!("Exit code: {code}"),
+    );
+    format!("{status}\n\n{}", String::from_utf8_lossy(&output.stdout))
 }
 
 #[derive(Deserialize, JsonSchema)]

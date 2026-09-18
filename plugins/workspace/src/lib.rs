@@ -1,5 +1,5 @@
 use chap_plugin::tools::{ToolDefinition, ToolError, Tools};
-use chap_plugin::vm::{ExecResult, Vm, VmError, Workspace, WorkspaceMount, WorkspaceSecret};
+use chap_plugin::vm::{ExecResult, Vm, Workspace, WorkspaceMount, WorkspaceSecret};
 use chap_plugin::{MetadataSource, Needs, NoSettings, Plugin, ScopeRef, capabilities};
 use serde::Deserialize;
 use std::num::NonZeroU64;
@@ -54,8 +54,8 @@ impl Tools for WorkspacePlugin {
                 Some(timeout_ms),
             )
             .await
-            .map_err(|error| run_error(error, timeout_ms))?;
-        Ok(format_output(output))
+            .map_err(ToolError::from)?;
+        Ok(format_output(output, timeout_ms))
     }
 }
 
@@ -94,7 +94,7 @@ fn run_definition(workspace: &Workspace) -> Result<ToolDefinition, ToolError> {
     Ok(ToolDefinition {
         name: RUN.to_owned(),
         description: format!(
-            "Run a shell command with sh -c in the agent's workspace VM. The working directory is {cwd}. The image is {}. Guest mount points: [{mounts}]. Configured egress scopes: [{egress}]. The VM is reused across calls. Commands are killed when their timeout expires. The default timeout is {} and the maximum is {}.{secrets}",
+            "Run a shell command with sh -c in the agent's workspace VM. The working directory is {cwd}. The image is {}. Guest mount points: [{mounts}]. Configured egress scopes: [{egress}]. The VM is reused across calls. Commands are killed when their timeout expires, and output produced up to that point is still returned. The default timeout is {} and the maximum is {}.{secrets}",
             workspace.image,
             describe_seconds(default_timeout_ms),
             describe_seconds(workspace.exec_timeout_ms),
@@ -138,16 +138,6 @@ fn command_timeout_ms(requested: Option<NonZeroU64>, maximum_ms: u64) -> u64 {
         .min(maximum_ms)
 }
 
-fn run_error(error: VmError, timeout_ms: u64) -> ToolError {
-    match error {
-        VmError::TimedOut => ToolError::Failed(format!(
-            "workspace command timed out and was killed after {}",
-            describe_seconds(timeout_ms)
-        )),
-        error => error.into(),
-    }
-}
-
 fn describe_secret(secret: &WorkspaceSecret) -> String {
     format!("{} ({})", secret.env, secret.hosts.join(", "))
 }
@@ -161,8 +151,12 @@ fn describe_mount(mount: &WorkspaceMount) -> String {
     format!("{} ({access})", mount.guest)
 }
 
-fn format_output(output: ExecResult) -> String {
-    let mut sections = vec![format!("Exit code: {}", output.exit_code)];
+fn format_output(output: ExecResult, timeout_ms: u64) -> String {
+    let status = output.exit_code.map_or_else(
+        || format!("Killed after {} (timeout)", describe_seconds(timeout_ms)),
+        |exit_code| format!("Exit code: {exit_code}"),
+    );
+    let mut sections = vec![status];
     if !output.stdout.is_empty() {
         sections.push(String::from_utf8_lossy(&output.stdout).into_owned());
     }
@@ -316,25 +310,34 @@ mod tests {
     }
 
     #[test]
-    fn timeout_errors_name_the_applied_limit_in_seconds() {
+    fn preserves_command_output_formatting() {
         assert_eq!(
-            run_error(VmError::TimedOut, 1_500),
-            ToolError::Failed(
-                "workspace command timed out and was killed after 1.500 seconds".to_owned()
-            )
+            format_output(
+                ExecResult {
+                    exit_code: Some(7),
+                    stdout: b"partial stdout".to_vec(),
+                    stderr: b"not found\n".to_vec(),
+                    truncated: true,
+                },
+                120_000
+            ),
+            "Exit code: 7\n\npartial stdout\n\nstderr:\nnot found\n\n\n[Command output was truncated.]"
         );
     }
 
     #[test]
-    fn preserves_command_output_formatting() {
+    fn formats_timed_out_command_with_partial_output() {
         assert_eq!(
-            format_output(ExecResult {
-                exit_code: 7,
-                stdout: b"partial stdout".to_vec(),
-                stderr: b"not found\n".to_vec(),
-                truncated: true,
-            }),
-            "Exit code: 7\n\npartial stdout\n\nstderr:\nnot found\n\n\n[Command output was truncated.]"
+            format_output(
+                ExecResult {
+                    exit_code: None,
+                    stdout: b"partial stdout".to_vec(),
+                    stderr: b"still working\n".to_vec(),
+                    truncated: false,
+                },
+                7_000
+            ),
+            "Killed after 7 seconds (timeout)\n\npartial stdout\n\nstderr:\nstill working\n"
         );
     }
 

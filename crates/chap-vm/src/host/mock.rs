@@ -136,11 +136,9 @@ impl VmBackend for MockVmBackend {
                     .push(command.clone());
             }
         }
-        if command.timeout_ms == Some(0) {
-            return Err(VmError::TimedOut);
-        }
+        let timed_out = command.args.iter().any(|arg| arg.contains("mock-timeout"));
         Ok(ExecOutcome {
-            exit_code: 0,
+            exit_code: (!timed_out).then_some(0),
             stdout: command.args.join(" ").into_bytes(),
             stderr: Vec::new(),
             truncated: false,
@@ -377,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn exec_returns_deterministic_output_and_honors_zero_timeout() {
+    fn exec_returns_deterministic_output_and_partial_output_on_timeout() {
         block_on(async {
             let backend = MockVmBackend::new(&VmSettings::default());
             let id = identity("installation-a", 7, "builder-grant-a", "build-env");
@@ -387,14 +385,18 @@ mod tests {
                 .exec(&vm, command(&["nix", "build", ".#plugin"], Some(30_000)))
                 .await
                 .unwrap();
-            assert_eq!(outcome.exit_code, 0);
+            assert_eq!(outcome.exit_code, Some(0));
             assert_eq!(outcome.stdout, b"nix build .#plugin");
             assert!(outcome.stderr.is_empty());
             assert!(!outcome.truncated);
-            assert_eq!(
-                backend.exec(&vm, command(&["nix", "build"], Some(0))).await,
-                Err(VmError::TimedOut)
-            );
+            let timed_out = backend
+                .exec(&vm, command(&["nix", "build", "mock-timeout"], Some(7_000)))
+                .await
+                .unwrap();
+            assert_eq!(timed_out.exit_code, None);
+            assert_eq!(timed_out.stdout, b"nix build mock-timeout");
+            assert!(timed_out.stderr.is_empty());
+            assert!(!timed_out.truncated);
         });
     }
 

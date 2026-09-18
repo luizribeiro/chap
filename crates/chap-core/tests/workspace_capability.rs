@@ -96,6 +96,82 @@ async fn runs_a_command_in_the_host_owned_workspace() {
 }
 
 #[tokio::test]
+async fn returns_partial_output_when_a_workspace_command_times_out() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let components = components(&repository);
+    let mock = MockServer::start(&[ToolRequest {
+        id: "workspace-timeout-call",
+        name: "run",
+        arguments: json!({
+            "command": "mock-timeout",
+            "timeout_secs": 7,
+        }),
+    }]);
+    let directory = tempfile::tempdir().unwrap();
+    let config_path = directory.path().join("chap.json");
+    write_config(
+        &config_path,
+        components,
+        &mock.origin,
+        Some(json!({
+            "image": "docker.io/library/alpine:3.20",
+            "mount": "ro",
+            "egress": ["127.0.0.1:1"],
+        })),
+    );
+
+    let builder = AgentBuilder::load(&config_path)
+        .unwrap()
+        .state_dir(directory.path())
+        .workspace_directory(directory.path());
+    builder
+        .approve_plugin(&"workspace".parse().unwrap())
+        .await
+        .unwrap();
+    builder
+        .approve_plugin(&"openai".parse().unwrap())
+        .await
+        .unwrap();
+
+    let agent = builder.start().await.unwrap();
+    let session = agent
+        .session(SessionOptions::new("openai".parse().unwrap()))
+        .await
+        .unwrap();
+    let mut events = session.subscribe();
+    let completion = tokio::time::timeout(INVOCATION_TIMEOUT, session.send("run the command"))
+        .await
+        .expect("agent invocation timed out")
+        .expect("agent invocation failed");
+    assert_eq!(completion, "done");
+    let events: Vec<SessionEvent> = receive_until_complete(&mut events).await;
+    let output = tool_result(&events, "workspace-timeout-call")
+        .as_ref()
+        .unwrap();
+    assert!(
+        output.starts_with("Killed after 7 seconds (timeout)"),
+        "{output}"
+    );
+    assert!(output.contains("sh -c mock-timeout"), "{output}");
+    assert!(
+        chap_vm::host::MockVmBackend::recorded_commands()
+            .iter()
+            .any(|command| {
+                command.args == ["sh", "-c", "mock-timeout"] && command.timeout_ms == Some(7_000)
+            })
+    );
+    let requests = mock.finish();
+    assert_eq!(
+        provider_tool_output(&requests, "workspace-timeout-call"),
+        *output
+    );
+
+    tokio::task::spawn_blocking(move || drop((session, agent)))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn exposes_sealed_secret_metadata_and_passes_the_spec_to_the_workspace_vm() {
     const HOST_ENV: &str = "CHAP_WORKSPACE_CAPABILITY_SECRET";
     const DUMMY_VALUE: &str = "workspace-capability-dummy-value";

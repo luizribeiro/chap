@@ -307,6 +307,8 @@ guest mount, and egress metadata without booting the VM. Calling it requires
 The workspace record also carries the effective command time limit: the smaller
 of `agent.budgets.tools.deadline_ms` and
 `agent.vm.calls.exec_timeout_ceiling_ms`.
+An exec result's `exit-code` is absent when the host killed the command at its
+deadline.
 
 Before checking a mount grant or starting a VM, the host resolves every bind
 root to its canonical path and passes that same path to the backend. An empty
@@ -323,7 +325,8 @@ executes it with `sh -c` from the workspace mount in the reused VM. The tool
 description reports the working directory, image, guest mount mode, egress
 scopes, reuse behavior, and effective time limit. Results contain the exit code,
 stdout, stderr, and a note when the host's combined output cap truncated the
-streams.
+streams. A command killed at its deadline returns what it printed with a timeout
+line in place of the exit code.
 The optional integer `timeout_secs` defaults to 120 seconds or the effective
 limit when lower, and requests above that limit are clamped.
 
