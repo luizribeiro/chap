@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -49,7 +51,7 @@ jobs:
             nix-flake-
             nix-dev-
           gc-max-store-size-linux: 5G
-          purge: true
+          purge: ${{ github.event_name != 'pull_request' }}
           purge-prefixes: nix-flake-
           purge-created: 0
           purge-last-accessed: P1DT12H
@@ -84,7 +86,7 @@ jobs:
             nix-dev-
             nix-flake-
           gc-max-store-size-linux: 5G
-          purge: true
+          purge: ${{ github.event_name != 'pull_request' }}
           purge-prefixes: nix-dev-
           purge-created: 0
           purge-last-accessed: P1DT12H
